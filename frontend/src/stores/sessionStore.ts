@@ -25,7 +25,13 @@ export const useSessionStore = create<SessionState>((set) => ({
   setSessions: (sessions) => set({ sessions }),
 
   addSession: (session) =>
-    set((state) => ({ sessions: [session, ...state.sessions] })),
+    set((state) => ({
+      sessions: [session, ...state.sessions],
+      // 同时初始化 messages 槽位，避免 useCurrentMessages 读到 undefined
+      messages: state.messages[session.id]
+        ? state.messages
+        : { ...state.messages, [session.id]: [] },
+    })),
 
   removeSession: (id) =>
     set((state) => {
@@ -63,9 +69,14 @@ export const useSessionStore = create<SessionState>((set) => ({
     }),
 }))
 
-// 选择器
+// 选择器 — 必须返回稳定引用，否则 zustand useSyncExternalStore 会无限循环
+const EMPTY_MESSAGES: ReadonlyArray<never> = Object.freeze([]) as ReadonlyArray<never>
+
 export const useCurrentMessages = () => {
-  const id = useSessionStore((s) => s.currentSessionId)
-  const messages = useSessionStore((s) => (id ? s.messages[id] || [] : []))
-  return messages
+  // 把 id 放进 selector，避免闭包 stale；同时不构造新数组
+  // 注意：新建会话时 store.messages[id] 尚未初始化，必须兜底 undefined
+  return useSessionStore((s) => {
+    if (!s.currentSessionId) return EMPTY_MESSAGES
+    return s.messages[s.currentSessionId] ?? EMPTY_MESSAGES
+  })
 }
