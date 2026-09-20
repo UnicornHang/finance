@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Pristine Crisp Fintech — CSS Variables
+ * 与 tailwind.config.ts 保持一致；shadcn 兼容别名保留
+ */
+@layer base {
+  :root {
+    /* shadcn/ui 兼容 (HSL) */
+    --background: 210 40% 98%;          /* canvas */
+    --foreground: 222 47% 11%;          /* ink */
+    --card: 0 0% 100%;                  /* surface */
+    --card-foreground: 222 47% 11%;
+    --primary: 200 98% 40%;             /* #0284c7 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;    /* ink-tertiary */
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 51%;           /* #dc2626 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;              /* line */
+    --input: 214 32% 91%;
+    --ring: 200 98% 40%;                /* primary */
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  html, body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* 数字字体对齐 - 用于财务数字 */
+  .tabular,
+  .num,
+  table td.num,
+  .font-numeric {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #e2e8f0;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #cbd5e1;
+  }
+
+  /* 焦点环 */
+  :focus-visible {
+    outline: 2px solid #0284c7;
+    outline-offset: 2px;
+  }
+
+  /* 移除按钮默认 focus ring，与设计系统统一 */
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid #0284c7;
+    outline-offset: 2px;
+  }
+}
+
+/*
+ * 通用原子类 - 设计系统级别的语义化别名
+ */
+@layer components {
+  .label-overline {
+    @apply text-label-sm uppercase tracking-wider text-ink-tertiary font-semibold;
+  }
+
+  .divider-h {
+    @apply h-px w-full bg-line-subtle;
+  }
+
+  .surface-card {
+    @apply bg-surface border border-line rounded-lg;
+  }
+
+  .surface-inset {
+    @apply bg-surface-inset rounded-md;
+  }
+
+  /* 状态徽章 */
+  .pill-success {
+    @apply inline-flex items-center gap-1 rounded-full border border-success-border bg-success-tint px-2.5 py-0.5 text-label-md font-semibold text-success;
+  }
+  .pill-primary {
+    @apply inline-flex items-center gap-1 rounded-full border border-primary-border bg-primary-tint px-2.5 py-0.5 text-label-md font-semibold text-primary;
+  }
+  .pill-warning {
+    @apply inline-flex items-center gap-1 rounded-full border border-warning-border bg-warning-tint px-2.5 py-0.5 text-label-md font-semibold text-warning;
+  }
+  .pill-danger {
+    @apply inline-flex items-center gap-1 rounded-full border border-danger-border bg-danger-tint px-2.5 py-0.5 text-label-md font-semibold text-danger;
+  }
+  .pill-neutral {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-canvas px-2.5 py-0.5 text-label-md font-semibold text-ink-secondary;
+  }
+}

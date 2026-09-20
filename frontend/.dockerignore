@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+.vite/
+*.log
+.env
+.env.local
+README.md
+src/test/

@@ -1,2 +1,126 @@
 # finance
-以对话为入口的企业财务 AI Agent 平台，完成发票/合同的智能识别、结构化归档、合规审查与制度问答
+
+> 以对话为入口的企业财务 AI Agent 平台，完成发票/合同的智能识别、结构化归档、合规审查与制度问答。
+
+## 核心能力
+
+- 🧾 **发票智能识别**：上传即识别，AI 结构化提取，人工确认后归档
+- 📜 **合同合规审查**：自动解析、RAG 规则匹配、风险等级标注
+- 💬 **制度问答**：RAG 检索 + LLM 生成，附来源引用
+- 🔒 **多租户隔离**：行级权限 + tenant_id 强制过滤，私有化部署 + SaaS 演进
+- 🛡️ **会话隔离**：完整历史 + 摘要 + 结构化记忆 + RAG 四层上下文策略
+
+## 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 前端 | React 18 + TypeScript + shadcn/ui + TailwindCSS + Vite + Zustand |
+| 后端 | Python 3.11 + FastAPI + SQLAlchemy 2.0 + LangChain + Celery |
+| 数据 | PostgreSQL 16 + pgvector + Redis + MinIO |
+| AI | LangChain + LiteLLM（GPT-4o / Claude / 通义 / 本地模型可配置） |
+| 部署 | Docker + Nginx + Prometheus + Grafana |
+
+## 仓库结构
+
+```
+finance/
+├── backend/                # FastAPI 后端
+├── frontend/               # React 前端
+├── nginx/                  # 反向代理配置
+├── db/                     # 数据库初始化脚本
+├── scripts/                # 运维脚本
+├── docs/                   # 产品 + 技术文档
+└── docker-compose.yml      # 一键启动
+```
+
+## 快速开始
+
+### 前置条件
+
+- Docker 24+ / Docker Compose v2
+- 8GB+ 可用内存
+- 100GB+ 磁盘空间
+
+### 启动开发环境
+
+```bash
+# 一键启动（推荐）：自动复制 .env → 启动服务 → 等待 healthy → seed 数据
+./scripts/setup.sh              # Git Bash / WSL
+# 或 Windows PowerShell：
+# .\scripts\setup.ps1
+```
+
+> 重置环境（删除 volumes 重新来）：`./scripts/setup.sh --reset`
+
+启动后访问：
+
+| 地址 | 用途 |
+|---|---|
+| http://localhost | **推荐入口**（nginx 反代，前端 + API 同源） |
+| http://localhost:5173 | 前端直连（仅调试时用，容器内 vite proxy 已自动指向 backend 服务） |
+| http://localhost/docs | Swagger API 文档 |
+| http://localhost:9001 | MinIO 控制台 |
+
+### 端到端烟测
+
+```bash
+./scripts/smoke.sh
+# 9 步覆盖：health → 登录 → /me → /sessions → SSE 流式 → 消息历史 → /llm/providers → /llm/configs
+```
+
+### 手动分步启动（如需自定义）
+
+```bash
+# 1. 复制环境变量模板
+cp .env.example .env
+
+# 2. 修改关键配置（JWT_SECRET / 第三方 API Key）
+vim .env
+
+# 3. 启动所有服务
+docker-compose up -d
+
+# 4. 查看日志
+docker-compose logs -f backend
+```
+
+### 默认账号
+
+| 账号 | 密码 | 角色 |
+|---|---|---|
+| admin | Admin@123 | 管理员 |
+| finance01 | Finance@123 | 财务 |
+| employee01 | Emp@123 | 员工 |
+
+> 首次登录强制修改密码。
+
+### 本地开发（无 Docker）
+
+```bash
+# 后端
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+uvicorn app.main:app --reload --port 8000
+
+# 前端
+cd frontend
+npm install
+npm run dev
+```
+
+## 文档导航
+
+- [PRD 产品需求文档](docs/prd.md)
+- [TD 技术选型与架构设计](docs/TD.md)
+
+## 路线图
+
+- **Phase 1（4-6 周）**：登录 + Chat + 发票 OCR 归档
+- **Phase 2（4 周）**：合同审查 + RAG 知识库
+- **Phase 3（3 周）**：制度问答 + 后台看板 + 权限细化
+
+## License
+
+Proprietary - 私有化部署版本
