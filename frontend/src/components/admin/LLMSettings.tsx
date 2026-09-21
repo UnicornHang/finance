@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, Cpu, PlayCircle, RefreshCw, XCircle } from 'lucide-react'
+import { CheckCircle2, Cpu, Eye, EyeOff, PlayCircle, XCircle } from 'lucide-react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { llmApi } from '@/api/admin'
+import type { LlmConfigPayload } from '@/api/admin'
 import { PROVIDERS, PROVIDER_LIST } from '@/api/providers'
 import { cn } from '@/lib/utils'
 import type { LLMConfig, LLMTestResult } from '@/types'
@@ -51,6 +52,12 @@ const SCENE_ICON: Record<string, string> = {
   contract_review: '📜',
 }
 
+/** 同步覆盖：步长 100 / 100~32000 */
+const MAX_TOKENS_STEP = 100
+const MAX_TOKENS_MIN = 100
+const MAX_TOKENS_MAX = 32000
+
+/** 后端 default: system_prompt 等同置空时按 "" 提交（保留 key 不变） */
 interface EditState {
   provider: string
   model: string
@@ -58,6 +65,8 @@ interface EditState {
   temperature: number
   max_tokens: number
   system_prompt: string
+  /** API Key 明文（用户实际输入的值）。空字符串 = 保持原 key 不动 */
+  api_key_input: string
 }
 
 export function LLMSettings() {
@@ -222,7 +231,7 @@ function ConfigCard({
       <CardContent className="space-y-4">
         <dl className="space-y-2.5">
           <Row label="Provider" value={cfg.provider || 'openai'} mono />
-          <Row label="模型" value={cfg.model} mono />
+          <Row label="模型" value={cfg.model || '—'} mono />
           <Row label="Base URL" value={cfg.base_url || '—'} mono subtle />
           <div className="grid grid-cols-2 gap-4">
             <Row label="Temperature" value={cfg.temperature} mono />
@@ -318,9 +327,10 @@ function EditConfigDialog({
     temperature: 0.7,
     max_tokens: 2000,
     system_prompt: '',
+    api_key_input: '',
   })
 
-  // 每次打开或切换场景，重置表单
+  // 每次打开或切换场景，重置表单（包含 system_prompt 持久化）
   useEffect(() => {
     if (cfg) {
       setState({
@@ -330,7 +340,8 @@ function EditConfigDialog({
         temperature:
           typeof cfg.temperature === 'number' ? cfg.temperature : 0.7,
         max_tokens: cfg.max_tokens || 2000,
-        system_prompt: '',
+        system_prompt: cfg.system_prompt || '',
+        api_key_input: '',
       })
     }
   }, [cfg?.id, cfg?.scene])
@@ -338,18 +349,21 @@ function EditConfigDialog({
   const save = useMutation({
     mutationFn: async () => {
       if (!cfg) throw new Error('No config')
-      return llmApi.upsertConfig(cfg.scene, {
+      const payload: LlmConfigPayload = {
         provider: state.provider,
         model: state.model,
         base_url: state.base_url || null,
         temperature: state.temperature,
         max_tokens: state.max_tokens,
-        // 新增提示词字段；后端目前用 Pydantic 默认 extra='ignore'，未持久化但不会报错
-        // 等后端 schema 扩展后即生效
-        ...(state.system_prompt
-          ? { system_prompt: state.system_prompt }
-          : {}),
-      } as any)
+        system_prompt: state.system_prompt || null,
+      }
+      // API Key：仅当用户实际输入了新值才发送；
+      // 为空字符串 → 不带 api_key 字段，后端视为保持原 key。
+      const trimmedKey = state.api_key_input.trim()
+      if (trimmedKey) {
+        payload.api_key = trimmedKey
+      }
+      return llmApi.upsertConfig(cfg.scene, payload)
     },
     onSuccess: (updated) => {
       toast.success(`场景 ${SCENE_LABEL[cfg?.scene || ''] || cfg?.scene} 已保存`)
@@ -364,26 +378,6 @@ function EditConfigDialog({
   })
 
   const providerDef = PROVIDERS[state.provider]
-  const models = providerDef?.models || []
-
-  // 拉取 provider 清单（含每个 provider 的模型列表）
-  const providersQuery = useQuery({
-    queryKey: ['llm-providers'],
-    queryFn: () => llmApi.listProviders(),
-    staleTime: 5 * 60 * 1000,
-  })
-
-  // 当前 provider 在服务端返回的模型清单
-  const remoteModels =
-    providersQuery.data?.find((p) => p.key === state.provider)?.models || []
-  // 优先用服务端最新数据；尚未返回时回退到本地静态列表
-  const availableModels = remoteModels.length > 0 ? remoteModels : models
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
-  const filteredModels = useMemo(() => {
-    const q = state.model.trim().toLowerCase()
-    if (!q) return availableModels
-    return availableModels.filter((m) => m.toLowerCase().includes(q))
-  }, [availableModels, state.model])
 
   const handleProviderChange = (provider: string) => {
     const def = PROVIDERS[provider]
@@ -423,78 +417,15 @@ function EditConfigDialog({
           </FieldInline>
 
           <FieldInline label="模型">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Input
-                  value={state.model}
-                  onChange={(e) => {
-                    setState((s) => ({ ...s, model: e.target.value }))
-                    setModelDropdownOpen(true)
-                  }}
-                  onFocus={() => setModelDropdownOpen(true)}
-                  onBlur={() => {
-                    // 延迟收起，避免点不到下拉项
-                    setTimeout(() => setModelDropdownOpen(false), 150)
-                  }}
-                  placeholder="选择或输入模型名"
-                  autoComplete="off"
-                  className="font-mono"
-                />
-                {modelDropdownOpen && filteredModels.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-auto rounded-md border border-line-strong bg-surface shadow-raised">
-                    {filteredModels.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        tabIndex={-1}
-                        onMouseDown={(e) => {
-                          // onMouseDown 在 input blur 之前触发，避免提前关闭
-                          e.preventDefault()
-                          setState((s) => ({ ...s, model: m }))
-                          setModelDropdownOpen(false)
-                        }}
-                        className={cn(
-                          'block w-full px-3 py-1.5 text-left font-mono text-body-sm hover:bg-surface-inset',
-                          state.model === m && 'bg-primary-tint text-primary',
-                        )}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                onClick={async () => {
-                  const result = await providersQuery.refetch()
-                  if (result.data) {
-                    const def = result.data.find((p) => p.key === state.provider)
-                    if (def) {
-                      toast.success(
-                        `已刷新 ${def.label} 模型列表（共 ${def.models.length} 个）`,
-                      )
-                    } else {
-                      toast.success('已刷新模型列表')
-                    }
-                  } else {
-                    toast.error('获取模型列表失败')
-                  }
-                }}
-                disabled={providersQuery.isFetching}
-                title="从服务端重新拉取模型清单"
-              >
-                <RefreshCw
-                  className={cn(
-                    'h-4 w-4',
-                    providersQuery.isFetching && 'animate-spin',
-                  )}
-                />
-                {providersQuery.isFetching ? '刷新中...' : '获取模型列表'}
-              </Button>
-            </div>
+            <Input
+              value={state.model}
+              onChange={(e) =>
+                setState((s) => ({ ...s, model: e.target.value }))
+              }
+              placeholder="例如：gpt-4o-mini"
+              autoComplete="off"
+              className="font-mono"
+            />
           </FieldInline>
 
           <FieldInline label="Base URL">
@@ -527,32 +458,31 @@ function EditConfigDialog({
             <FieldInline label="Max Tokens">
               <Input
                 type="number"
-                step="1"
-                min="100"
-                max="32000"
+                step={MAX_TOKENS_STEP}
+                min={MAX_TOKENS_MIN}
+                max={MAX_TOKENS_MAX}
                 value={state.max_tokens}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    max_tokens: Number(e.target.value),
-                  }))
-                }
+                onChange={(e) => {
+                  const raw = Number(e.target.value)
+                  if (!Number.isFinite(raw)) return
+                  const clamped = Math.min(
+                    MAX_TOKENS_MAX,
+                    Math.max(MAX_TOKENS_MIN, Math.round(raw)),
+                  )
+                  setState((s) => ({ ...s, max_tokens: clamped }))
+                }}
+                className="tabular-nums"
               />
             </FieldInline>
           </div>
 
           <FieldInline label="API Key">
-            <Input
-              value={cfg.has_api_key ? '••••••••' : ''}
-              readOnly
-              placeholder="未配置"
-              className="font-mono bg-canvas"
+            <ApiKeyInput
+              hasKey={cfg.has_api_key}
+              masked={cfg.api_key_masked}
+              value={state.api_key_input}
+              onChange={(v) => setState((s) => ({ ...s, api_key_input: v }))}
             />
-            <p className="mt-1 text-label-sm text-ink-tertiary">
-              {cfg.has_api_key
-                ? `已配置（${cfg.api_key_masked || '****'}）。前端不支持修改 API Key，请通过后端环境变量或初始化脚本注入。`
-                : '尚未配置 API Key —— 请通过 .env 中的 LLM_*_API_KEY 设置或后端初始化脚本注入。'}
-            </p>
           </FieldInline>
 
           <FieldInline label="提示词">
@@ -565,9 +495,6 @@ function EditConfigDialog({
               rows={4}
               className="font-mono text-body-sm"
             />
-            <p className="mt-1 text-label-sm text-ink-tertiary">
-              该字段前端会随保存请求一起发送；后端尚不持久化，等接口扩展即可生效。
-            </p>
           </FieldInline>
         </div>
 
@@ -636,6 +563,62 @@ function FieldInline({
         {label}
       </Label>
       {children}
+    </div>
+  )
+}
+
+/* ============================================================
+ * ApiKeyInput：单一输入框 + 尾部显示/隐藏按钮
+ *  - 不区分「保持/替换」状态：用户输入 = 替换；留空 = 保持原 key
+ *  - 已有 key 时，把掩码作为 placeholder，避免泄露也方便核对
+ * ============================================================ */
+export function ApiKeyInput({
+  hasKey,
+  masked,
+  value,
+  onChange,
+}: {
+  hasKey: boolean
+  masked: string | null
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [reveal, setReveal] = useState(false)
+  return (
+    <div className="space-y-1.5">
+      <div className="relative">
+        <Input
+          type={reveal ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={
+            hasKey ? masked || '****' : '粘贴厂商提供的 API Key'
+          }
+          className="pr-10 font-mono"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => setReveal((v) => !v)}
+          aria-label={reveal ? '隐藏 API Key' : '显示 API Key'}
+          title={reveal ? '隐藏' : '显示'}
+          className="absolute right-1 top-1/2 -translate-y-1/2"
+        >
+          {reveal ? (
+            <EyeOff className="h-4 w-4" />
+          ) : (
+            <Eye className="h-4 w-4" />
+          )}
+        </Button>
+      </div>
+      <p className="text-label-sm text-ink-tertiary">
+        {hasKey
+          ? '留空表示保持原 key 不变；输入新值会立即加密入库（旧 key 不可恢复）。'
+          : '填入后将立即加密入库。'}
+      </p>
     </div>
   )
 }

@@ -97,6 +97,7 @@ export interface LLMConfig {
   enabled: boolean
   has_api_key: boolean
   api_key_masked: string | null
+  system_prompt: string | null
   updated_at: string | null
 }
 

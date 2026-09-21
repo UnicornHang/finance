@@ -28,6 +28,7 @@ export interface LlmConfigPayload {
   max_tokens?: number
   timeout_seconds?: number
   enabled?: boolean
+  system_prompt?: string | null
 }
 
 export const llmApi = {
