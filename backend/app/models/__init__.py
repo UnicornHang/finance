@@ -189,6 +189,12 @@ class Invoice(Base):
     __table_args__ = (
         Index("idx_invoices_tenant_user", "tenant_id", "user_id", "created_at"),
         Index("idx_invoices_status", "tenant_id", "status"),
+        UniqueConstraint(
+            "tenant_id",
+            "invoice_code",
+            "invoice_number",
+            name="uq_invoice_tenant_code_number",
+        ),
     )
 
 
@@ -285,6 +291,7 @@ class LlmConfig(Base):
     max_tokens: Mapped[int] = mapped_column(Integer, default=2000)
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=30)
     extra_params: Mapped[dict | None] = mapped_column(JSONB)
+    system_prompt: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(

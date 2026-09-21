@@ -1,0 +1,1268 @@
+<frame id="1:2" name="用户管理与组织权限中台 (清新干爽版)" x="0" y="0" width="1280" height="3298.75">
+  <frame id="1:3" name="(带固定左侧模块树导航与右侧主界面)" x="0" y="0" width="1280" height="3298.75">
+    <frame id="1:4" name="Aside - (一级导航辅助)" x="0" y="64" width="256" height="3234.75">
+      <frame id="1:5" name="Container" x="16" y="16" width="223" height="256">
+        <frame id="1:6" name="Container" x="0" y="0" width="223" height="24">
+          <text id="1:7" name="核心模块导航" x="8" y="5.5" width="207" height="17" />
+        </frame>
+        <frame id="1:8" name="Nav" x="0" y="40" width="223" height="216">
+          <frame id="1:9" name="Link" x="0" y="0" width="223" height="40">
+            <frame id="1:10" name="Container" x="12" y="12.5" width="15" height="15">
+              <vector id="1:11" name="Icon" x="0" y="0" width="15" height="15" />
+            </frame>
+            <frame id="1:12" name="Container" x="39" y="10" width="84" height="20">
+              <text id="1:13" name="Text" x="0" y="0" width="84" height="20" />
+            </frame>
+          </frame>
+          <frame id="1:14" name="Link" x="0" y="44" width="223" height="40">
+            <frame id="1:15" name="Container" x="12" y="11.666666984558105" width="15" height="16.66666603088379">
+              <vector id="1:16" name="Icon" x="0" y="0" width="15" height="16.66666603088379" />
+            </frame>
+            <frame id="1:17" name="Container" x="39" y="10" width="84" height="20">
+              <text id="1:18" name="Text" x="0" y="0" width="84" height="20" />
+            </frame>
+          </frame>
+          <frame id="1:19" name="Link" x="0" y="88" width="223" height="40">
+            <frame id="1:20" name="Container" x="12" y="11.666666984558105" width="13.333333015441895" height="16.66666603088379">
+              <vector id="1:21" name="Icon" x="0" y="0" width="13.333333015441895" height="16.66666603088379" />
+            </frame>
+            <frame id="1:22" name="Container" x="37.33333206176758" y="10" width="84" height="20">
+              <text id="1:23" name="Text" x="0" y="0" width="84" height="20" />
+            </frame>
+          </frame>
+          <frame id="1:24" name="Link" x="0" y="132" width="223" height="40">
+            <frame id="1:25" name="Container" x="12" y="11.875" width="18.33333396911621" height="16.25">
+              <vector id="1:26" name="Icon" x="0" y="0" width="18.33333396911621" height="16.25" />
+            </frame>
+            <frame id="1:27" name="Container" x="42.333335876464844" y="10" width="102.69000244140625" height="20">
+              <text id="1:28" name="Text" x="0" y="0" width="102.69000244140625" height="20" />
+            </frame>
+          </frame>
+          <frame id="1:29" name="Link" x="0" y="176" width="223" height="40">
+            <frame id="1:30" name="Container" x="16" y="11.666666984558105" width="15" height="16.66666603088379">
+              <vector id="1:31" name="Icon" x="0" y="0" width="15" height="16.66666603088379" />
+            </frame>
+            <frame id="1:32" name="Container" x="43" y="10" width="98" height="20">
+              <text id="1:33" name="Text" x="0" y="0" width="98" height="20" />
+            </frame>
+          </frame>
+        </frame>
+      </frame>
+      <frame id="1:34" name="Agent" x="16" y="3111.64990234375" width="223" height="107.0999984741211">
+        <frame id="1:35" name="Container" x="15" y="15" width="193" height="16">
+          <frame id="1:36" name="Container" x="0" y="0.5" width="12" height="15">
+            <vector id="1:37" name="Icon" x="0" y="0" width="12" height="15" />
+          </frame>
+          <frame id="1:38" name="Container" x="20" y="0" width="97.44999694824219" height="16">
+            <text id="1:39" name="Text" x="0" y="0" width="97.44999694824219" height="16" />
+          </frame>
+        </frame>
+        <frame id="1:40" name="Container" x="15" y="36.099998474121094" width="193" height="31">
+          <text id="1:41" name="多租户物理/逻辑隔离已激活，Postgres RLS 强策略执行中。" x="0" y="0" width="193" height="31" />
+        </frame>
+        <frame id="1:42" name="Container" x="15" y="72.19999694824219" width="193" height="19.899999618530273">
+          <rounded-rectangle id="1:43" name="Background" x="0" y="7.400000095367432" width="8" height="8" />
+          <frame id="1:44" name="Container" x="14" y="2.9000000953674316" width="88" height="17">
+            <text id="1:45" name="Text" x="0" y="0" width="88" height="17" />
+          </frame>
+        </frame>
+      </frame>
+    </frame>
+    <frame id="1:46" name="Main" x="256" y="64" width="1024" height="3234.75">
+      <frame id="1:47" name="Header" x="32" y="32" width="960" height="101">
+        <frame id="1:48" name="Container" x="0" y="0" width="304.6333312988281" height="92">
+          <frame id="1:49" name="Container" x="0" y="0" width="304.6333312988281" height="16">
+            <frame id="1:50" name="Container" x="0" y="0" width="72" height="16">
+              <text id="1:51" name="Text" x="0" y="0" width="72" height="16" />
+            </frame>
+            <frame id="1:52" name="Container" x="80" y="4.5" width="4.316666603088379" height="7">
+              <vector id="1:53" name="Icon" x="0" y="0" width="4.316666603088379" height="7" />
+            </frame>
+            <frame id="1:54" name="Container" x="92.31666564941406" y="0" width="84" height="16">
+              <text id="1:55" name="Text" x="0" y="0" width="84" height="16" />
+            </frame>
+            <frame id="1:56" name="Container" x="184.31666564941406" y="4.5" width="4.316666603088379" height="7">
+              <vector id="1:57" name="Icon" x="0" y="0" width="4.316666603088379" height="7" />
+            </frame>
+            <frame id="1:58" name="Container" x="196.63333129882812" y="0" width="108" height="16">
+              <text id="1:59" name="Text" x="0" y="0" width="108" height="16" />
+            </frame>
+          </frame>
+          <frame id="1:60" name="Container" x="0" y="22" width="304.6333312988281" height="70">
+            <frame id="1:61" name="Heading 1" x="0" y="0" width="257.4100036621094" height="32">
+              <text id="1:62" name="Text" x="0" y="0" width="257.4100036621094" height="32" />
+            </frame>
+            <frame id="1:63" name="Background+Border" x="269.4100036621094" y="3" width="197.2566680908203" height="26">
+              <frame id="1:64" name="Container" x="13" y="6.333333492279053" width="10.666666984558105" height="13.333333015441895">
+                <vector id="1:65" name="Icon" x="0" y="0" width="10.666666984558105" height="13.333333015441895" />
+              </frame>
+              <frame id="1:66" name="Container" x="29.666667938232422" y="5" width="154.58999633789062" height="16">
+                <text id="1:67" name="Text" x="0" y="0" width="154.58999633789062" height="16" />
+              </frame>
+            </frame>
+            <frame id="1:68" name="Background+Border" x="0" y="44" width="212.0800018310547" height="26">
+              <rounded-rectangle id="1:69" name="Background" x="13" y="10" width="6" height="6" />
+              <frame id="1:70" name="Container" x="25" y="5" width="174.0800018310547" height="16">
+                <text id="1:71" name="Text" x="0" y="0" width="174.0800018310547" height="16" />
+              </frame>
+            </frame>
+          </frame>
+        </frame>
+        <frame id="1:72" name="Container" x="541.3400268554688" y="6" width="418.6600036621094" height="80">
+          <frame id="1:73" name="Button" x="0" y="1" width="120" height="34">
+            <frame id="1:74" name="Container" x="15" y="11" width="12" height="12">
+              <vector id="1:75" name="Icon" x="0" y="0" width="12" height="12" />
+            </frame>
+            <frame id="1:76" name="Container" x="33" y="9" width="72" height="16">
+              <text id="1:77" name="Text" x="0" y="0" width="72" height="16" />
+            </frame>
+          </frame>
+          <frame id="1:78" name="Button" x="136" y="1" width="138.72000122070312" height="34">
+            <frame id="1:79" name="Container" x="15" y="9.5" width="12" height="15">
+              <vector id="1:80" name="Icon" x="0" y="0" width="12" height="15" />
+            </frame>
+            <frame id="1:81" name="Container" x="33" y="9" width="90.72000122070312" height="16">
+              <text id="1:82" name="Text" x="0" y="0" width="90.72000122070312" height="16" />
+            </frame>
+          </frame>
+          <frame id="1:83" name="Button" x="290.7200012207031" y="1" width="120" height="34">
+            <frame id="1:84" name="Container" x="15" y="9.5" width="12" height="15">
+              <vector id="1:85" name="Icon" x="0" y="0" width="12" height="15" />
+            </frame>
+            <frame id="1:86" name="Container" x="33" y="9" width="72" height="16">
+              <text id="1:87" name="Text" x="0" y="0" width="72" height="16" />
+            </frame>
+          </frame>
+          <frame id="1:88" name="Button" x="0" y="47" width="126.5" height="32">
+            <frame id="1:89" name="Container" x="16" y="10" width="16.5" height="12">
+              <vector id="1:90" name="Icon" x="0" y="0" width="16.5" height="12" />
+            </frame>
+            <frame id="1:91" name="Container" x="38.5" y="8" width="72" height="16">
+              <text id="1:92" name="Text" x="0" y="0" width="72" height="16" />
+            </frame>
+          </frame>
+        </frame>
+      </frame>
+      <frame id="1:93" name="Container" x="32" y="157" width="960" height="198">
+        <frame id="1:94" name="Background+Border" x="0" y="0" width="228" height="183">
+          <frame id="1:95" name="Container" x="21" y="21" width="186" height="32">
+            <frame id="1:96" name="Container" x="0" y="8" width="96" height="16">
+              <text id="1:97" name="Text" x="0" y="0" width="96" height="16" />
+            </frame>
+            <frame id="1:98" name="Background" x="154" y="0" width="32" height="32">
+              <frame id="1:99" name="Container" x="6" y="11" width="20" height="10">
+                <vector id="1:100" name="Icon" x="0" y="0" width="20" height="10" />
+              </frame>
+            </frame>
+          </frame>
+          <frame id="1:101" name="Margin" x="21" y="53" width="186" height="48">
+            <frame id="1:102" name="Paragraph" x="0" y="12" width="186" height="36">
+              <text id="1:103" name="Text" x="0" y="0" width="48.810001373291016" height="36" />
+              <text id="1:104" name="Text" x="56.810001373291016" y="19" width="60" height="16" />
+            </frame>
+          </frame>
+          <frame id="1:105" name="Margin" x="21" y="101" width="186" height="61">
+            <frame id="1:106" name="HorizontalBorder" x="0" y="16" width="186" height="45">
+              <frame id="1:107" name="Container" x="0" y="13" width="133.30999755859375" height="32">
+                <rounded-rectangle id="1:108" name="Background" x="0" y="12" width="6.409999847412109" height="8" />
+                <frame id="1:109" name="Container" x="12.40999984741211" y="0" width="57.52000045776367" height="32">
+                  <text id="1:110" name="Text" x="0" y="0" width="48" height="32" />
+                </frame>
+                <frame id="1:111" name="Container" x="75.93000030517578" y="8" width="4.329999923706055" height="16">
+                  <text id="1:112" name="Text" x="0" y="0" width="4.329999923706055" height="16" />
+                </frame>
+                <frame id="1:113" name="Container" x="86.26000213623047" y="0" width="47.04999923706055" height="32">
+                  <text id="1:114" name="Text" x="0" y="0" width="36" height="32" />
+                </frame>
+              </frame>
+              <frame id="1:115" name="Container" x="135.65333557128906" y="13" width="50.3466682434082" height="32">
+                <frame id="1:116" name="Container" x="0" y="12.5" width="11.666666984558105" height="7">
+                  <vector id="1:117" name="Icon" x="0" y="0" width="11.666666984558105" height="7" />
+                </frame>
+                <text id="1:118" name="Text" x="13.65666675567627" y="0" width="35.65999984741211" height="32" />
+              </frame>
+            </frame>
+          </frame>
+        </frame>
+        <frame id="1:119" name="Background+Border" x="244" y="0" width="228" height="198">
+          <frame id="1:120" name="Container" x="21" y="21" width="186" height="32">
+            <frame id="1:121" name="Container" x="0" y="8" width="72" height="16">
+              <text id="1:122" name="Text" x="0" y="0" width="72" height="16" />
+            </frame>
+            <frame id="1:123" name="Background" x="154" y="0" width="32" height="32">
+              <frame id="1:124" name="Container" x="7.6666669845581055" y="7.6666669845581055" width="16.66666603088379" height="16.66666603088379">
+                <vector id="1:125" name="Icon" x="0" y="0" width="16.66666603088379" height="16.66666603088379" />
+              </frame>
+            </frame>
+          </frame>
+          <frame id="1:126" name="Margin" x="21" y="53" width="186" height="48">
+            <frame id="1:127" name="Paragraph" x="0" y="12" width="186" height="36">
+              <text id="1:128" name="Text" x="0" y="0" width="18.34000015258789" height="36" />
+              <text id="1:129" name="Text" x="26.34000015258789" y="18" width="98.91999816894531" height="16" />
+            </frame>
+          </frame>
+          <frame id="1:130" name="Margin" x="21" y="101" width="186" height="76">
+            <frame id="1:131" name="HorizontalBorder" x="0" y="16" width="186" height="60">
+              <frame id="1:132" name="Background" x="0" y="13" width="186" height="8">
+                <rounded-rectangle id="1:133" name="Background" x="0" y="0" width="156.22999572753906" height="8" />
+                <rounded-rectangle id="1:134" name="Background" x="156.22999572753906" y="0" width="24.170000076293945" height="8" />
+                <rounded-rectangle id="1:135" name="Background" x="180.39999389648438" y="0" width="5.579999923706055" height="8" />
+              </frame>
+              <frame id="1:136" name="Container" x="0" y="27" width="186" height="33">
+                <frame id="1:137" name="Container" x="0" y="0" width="70.58999633789062" height="33">
+                  <text id="1:138" name="Text" x="0" y="0" width="43.5" height="33" />
+                </frame>
+                <frame id="1:139" name="Container" x="70.59500122070312" y="0" width="61.810001373291016" height="33">
+                  <text id="1:140" name="Text" x="0" y="0" width="36.290000915527344" height="33" />
+                </frame>
+                <frame id="1:141" name="Container" x="132.41000366210938" y="0" width="53.59000015258789" height="33">
+                  <text id="1:142" name="Text" x="0" y="0" width="31.56999969482422" height="33" />
+                </frame>
+              </frame>
+            </frame>
+          </frame>
+        </frame>
+        <frame id="1:143" name="Background+Border" x="488" y="0" width="228" height="183">
+          <frame id="1:144" name="Container" x="21" y="21" width="186" height="32">
+            <frame id="1:145" name="Container" x="0" y="8" width="96" height="16">
+              <text id="1:146" name="Text" x="0" y="0" width="96" height="16" />
+            </frame>
+            <frame id="1:147" name="Background" x="154" y="0" width="32" height="32">
+              <frame id="1:148" name="Container" x="9.333333969116211" y="7.6666669845581055" width="13.333333015441895" height="16.66666603088379">
+                <vector id="1:149" name="Icon" x="0" y="0" width="13.333333015441895" height="16.66666603088379" />
+              </frame>
+            </frame>
+          </frame>
+          <frame id="1:150" name="Margin" x="21" y="53" width="186" height="48">
+            <frame id="1:151" name="Paragraph" x="0" y="12" width="186" height="36">
+              <text id="1:152" name="Text" x="0" y="0" width="85.94999694824219" height="36" />
+              <text id="1:153" name="Text" x="93.94999694824219" y="19" width="60" height="16" />
+            </frame>
+          </frame>
+          <frame id="1:154" name="Margin" x="21" y="101" width="186" height="61">
+            <frame id="1:155" name="HorizontalBorder" x="0" y="16" width="186" height="45">
+              <frame id="1:156" name="Container" x="0" y="13" width="112.52999877929688" height="32">
+                <text id="1:157" name="Text" x="0" y="0" width="110" height="32" />
+              </frame>
+              <frame id="1:158" name="Container" x="115.02999877929688" y="13" width="70.97000122070312" height="32">
+                <frame id="1:159" name="Container" x="0" y="9.75" width="12.5" height="12.5">
+                  <vector id="1:160" name="Icon" x="0" y="0" width="12.5" height="12.5" />
+                </frame>
+                <text id="1:161" name="Text" x="16.5" y="0" width="48" height="32" />
+              </frame>
+            </frame>
+          </frame>
+        </frame>
+        <frame id="1:162" name="Background+Border" x="732" y="0" width="228" height="173">
+          <frame id="1:163" name="Container" x="21" y="21" width="186" height="32">
+            <frame id="1:164" name="Container" x="0" y="8" width="131.75" height="16">
+              <text id="1:165" name="Text" x="0" y="0" width="131.75" height="16" />
+            </frame>
+            <frame id="1:166" name="Background" x="154" y="0" width="32" height="32">
+              <frame id="1:167" name="Container" x="9.75" y="6.8333330154418945" width="12.5" height="18.33333396911621">
+                <vector id="1:168" name="Icon" x="0" y="0" width="12.5" height="18.33333396911621" />
+              </frame>
+            </frame>
+          </frame>
+          <frame id="1:169" name="Margin" x="21" y="53" width="186" height="48">
+            <frame id="1:170" name="Paragraph" x="0" y="12" width="186" height="36">
+              <text id="1:171" name="Text" x="0" y="0" width="98.91999816894531" height="36" />
+              <text id="1:172" name="Text" x="106.91999816894531" y="19" width="72" height="16" />
+            </frame>
+          </frame>
+          <frame id="1:173" name="Margin" x="21" y="101" width="186" height="51">
+            <frame id="1:174" name="HorizontalBorder" x="0" y="16" width="186" height="35">
+              <frame id="1:175" name="Container" x="0" y="16" width="104.94000244140625" height="16">
+                <text id="1:176" name="Text" x="0" y="0" width="104.94000244140625" height="16" />
+              </frame>
+              <frame id="1:177" name="Background+Border" x="113" y="13" width="73" height="22">
+                <text id="1:178" name="Text" x="9" y="3" width="55" height="16" />
+              </frame>
+            </frame>
+          </frame>
+        </frame>
+      </frame>
+      <frame id="1:179" name="Container" x="32" y="379" width="960" height="2823.75">
+        <frame id="1:180" name="Aside - (Col-span 3)" x="0" y="0" width="222" height="627.655029296875">
+          <frame id="1:181" name="HorizontalBorder" x="17" y="17" width="188" height="35">
+            <frame id="1:182" name="Container" x="0" y="3" width="94.66666412353516" height="20">
+              <frame id="1:183" name="Container" x="0" y="2.5" width="16.66666603088379" height="15">
+                <vector id="1:184" name="Icon" x="0" y="0" width="16.66666603088379" height="15" />
+              </frame>
+              <frame id="1:185" name="Container" x="24.66666603088379" y="0" width="70" height="20">
+                <text id="1:186" name="Text" x="0" y="0" width="70" height="20" />
+              </frame>
+            </frame>
+            <frame id="1:187" name="Button" x="168" y="0" width="20" height="26">
+              <frame id="1:188" name="Container" x="4" y="4" width="12" height="12">
+                <vector id="1:189" name="Icon" x="0" y="0" width="12" height="12" />
+              </frame>
+            </frame>
+          </frame>
+          <frame id="1:190" name="Container" x="17" y="68" width="188" height="30">
+            <frame id="1:191" name="Input" x="0" y="0" width="188" height="30">
+              <frame id="1:192" name="Container" x="33" y="7" width="142" height="17">
+                <text id="1:193" name="搜索部门或机构分支..." x="0" y="0" width="142" height="15" />
+              </frame>
+            </frame>
+            <vector id="1:194" name="Icon" x="12.25" y="10.25" width="13.5" height="13.5" />
+          </frame>
+          <frame id="1:195" name="Container" x="17" y="114" width="188" height="352">
+            <frame id="1:196" name="Background+Border" x="0" y="0" width="188" height="40">
+              <frame id="1:197" name="Container" x="9" y="12" width="108" height="16">
+                <frame id="1:198" name="Container" x="0" y="5.224999904632568" width="9" height="5.550000190734863">
+                  <vector id="1:199" name="Icon" x="0" y="0" width="9" height="5.550000190734863" />
+                </frame>
+                <frame id="1:200" name="Container" x="15" y="1.25" width="15" height="13.5">
+                  <vector id="1:201" name="Icon" x="0" y="0" width="15" height="13.5" />
+                </frame>
+                <frame id="1:202" name="Container" x="36" y="0" width="72" height="16">
+                  <text id="1:203" name="Text" x="0" y="0" width="72" height="16" />
+                </frame>
+              </frame>
+              <frame id="1:204" name="Background+Border" x="141.9499969482422" y="9" width="37.04999923706055" height="22">
+                <text id="1:205" name="Text" x="9" y="3" width="19.049999237060547" height="16" />
+              </frame>
+            </frame>
+            <frame id="1:206" name="VerticalBorder" x="12" y="44" width="176" height="308">
+              <frame id="1:207" name="(展开)" x="9" y="4" width="167" height="30">
+                <frame id="1:208" name="Container" x="6" y="7" width="104.66666412353516" height="16">
+                  <frame id="1:209" name="Container" x="0" y="5.5333333015441895" width="8" height="4.933333396911621">
+                    <vector id="1:210" name="Icon" x="0" y="0" width="8" height="4.933333396911621" />
+                  </frame>
+                  <frame id="1:211" name="Container" x="14" y="2" width="12.666666984558105" height="12">
+                    <vector id="1:212" name="Icon" x="0" y="0" width="12.666666984558105" height="12" />
+                  </frame>
+                  <frame id="1:213" name="Container" x="32.66666793823242" y="0" width="72" height="16">
+                    <text id="1:214" name="Text" x="0" y="0" width="72" height="16" />
+                  </frame>
+                </frame>
+                <frame id="1:215" name="Background+Border" x="135.3000030517578" y="6" width="25.700000762939453" height="18">
+                  <text id="1:216" name="Text" x="7" y="1" width="11.699999809265137" height="16" />
+                </frame>
+              </frame>
+              <frame id="1:217" name="Container" x="25" y="38" width="151" height="78">
+                <frame id="1:218" name="Container" x="0" y="0" width="151" height="24">
+                  <frame id="1:219" name="Container" x="8" y="4" width="74" height="16">
+                    <rounded-rectangle id="1:220" name="Background" x="0" y="5" width="6" height="6" />
+                    <frame id="1:221" name="Container" x="14" y="0" width="60" height="16">
+                      <text id="1:222" name="Text" x="0" y="0" width="60" height="16" />
+                    </frame>
+                  </frame>
+                  <frame id="1:223" name="Container" x="136.1699981689453" y="4" width="6.829999923706055" height="16">
+                    <text id="1:224" name="Text" x="0" y="0" width="6.829999923706055" height="16" />
+                  </frame>
+                </frame>
+                <frame id="1:225" name="Background+Border" x="0" y="26" width="151" height="26">
+                  <frame id="1:226" name="Container" x="9" y="5" width="110" height="16">
+                    <rounded-rectangle id="1:227" name="Background" x="0" y="5" width="6" height="6" />
+                    <frame id="1:228" name="Container" x="14" y="0" width="96" height="16">
+                      <text id="1:229" name="Text" x="0" y="0" width="96" height="16" />
+                    </frame>
+                  </frame>
+                  <frame id="1:230" name="Container" x="134.9499969482422" y="5" width="7.050000190734863" height="16">
+                    <text id="1:231" name="Text" x="0" y="0" width="7.050000190734863" height="16" />
+                  </frame>
+                </frame>
+                <frame id="1:232" name="Container" x="0" y="54" width="151" height="24">
+                  <frame id="1:233" name="Container" x="8" y="4" width="110" height="16">
+                    <rounded-rectangle id="1:234" name="Background" x="0" y="5" width="6" height="6" />
+                    <frame id="1:235" name="Container" x="14" y="0" width="96" height="16">
+                      <text id="1:236" name="Text" x="0" y="0" width="96" height="16" />
+                    </frame>
+                  </frame>
+                  <frame id="1:237" name="Container" x="135.88999938964844" y="4" width="7.110000133514404" height="16">
+                    <text id="1:238" name="Text" x="0" y="0" width="7.110000133514404" height="16" />
+                  </frame>
+                </frame>
+              </frame>
+              <frame id="1:239" name="Container" x="9" y="120" width="167" height="28">
+                <frame id="1:240" name="Container" x="6" y="6" width="112.93333435058594" height="16">
+                  <frame id="1:241" name="Container" x="0" y="4" width="4.933333396911621" height="8">
+                    <vector id="1:242" name="Icon" x="0" y="0" width="4.933333396911621" height="8" />
+                  </frame>
+                  <frame id="1:243" name="Container" x="10.933333396911621" y="1.6666665077209473" width="12" height="12.666666984558105">
+                    <vector id="1:244" name="Icon" x="0" y="0" width="12" height="12.666666984558105" />
+                  </frame>
+                  <frame id="1:245" name="Container" x="28.933334350585938" y="0" width="84" height="16">
+                    <text id="1:246" name="Text" x="0" y="0" width="84" height="16" />
+                  </frame>
+                </frame>
+                <frame id="1:247" name="Container" x="154.05999755859375" y="6" width="6.940000057220459" height="16">
+                  <text id="1:248" name="Text" x="0" y="0" width="6.940000057220459" height="16" />
+                </frame>
+              </frame>
+              <frame id="1:249" name="Container" x="9" y="152" width="167" height="44">
+                <frame id="1:250" name="Container" x="6" y="6" width="125.8133316040039" height="32">
+                  <frame id="1:251" name="Container" x="0" y="12" width="4.933333396911621" height="8">
+                    <vector id="1:252" name="Icon" x="0" y="0" width="4.933333396911621" height="8" />
+                  </frame>
+                  <frame id="1:253" name="Container" x="10.933333396911621" y="10" width="12" height="12">
+                    <vector id="1:254" name="Icon" x="0" y="0" width="12" height="12" />
+                  </frame>
+                  <frame id="1:255" name="Container" x="28.933334350585938" y="0" width="96.87999725341797" height="32">
+                    <text id="1:256" name="Text" x="0" y="0" width="96" height="32" />
+                  </frame>
+                </frame>
+                <frame id="1:257" name="Container" x="146.8800048828125" y="14" width="14.130000114440918" height="16">
+                  <text id="1:258" name="Text" x="0" y="0" width="14.130000114440918" height="16" />
+                </frame>
+              </frame>
+              <frame id="1:259" name="Container" x="9" y="200" width="167" height="28">
+                <frame id="1:260" name="Container" x="6" y="6" width="126.26666259765625" height="16">
+                  <frame id="1:261" name="Container" x="0" y="4" width="4.933333396911621" height="8">
+                    <vector id="1:262" name="Icon" x="0" y="0" width="4.933333396911621" height="8" />
+                  </frame>
+                  <frame id="1:263" name="Container" x="10.933333396911621" y="1.3333334922790527" width="13.333333015441895" height="13.333333015441895">
+                    <vector id="1:264" name="Icon" x="0" y="0" width="13.333333015441895" height="13.333333015441895" />
+                  </frame>
+                  <frame id="1:265" name="Container" x="30.266666412353516" y="0" width="96" height="16">
+                    <text id="1:266" name="Text" x="0" y="0" width="96" height="16" />
+                  </frame>
+                </frame>
+                <frame id="1:267" name="Container" x="147.27999877929688" y="6" width="13.720000267028809" height="16">
+                  <text id="1:268" name="Text" x="0" y="0" width="13.720000267028809" height="16" />
+                </frame>
+              </frame>
+              <frame id="1:269" name="Container" x="9" y="232" width="167" height="44">
+                <frame id="1:270" name="Container" x="6" y="6" width="127.90925598144531" height="32">
+                  <frame id="1:271" name="Container" x="0" y="12" width="4.933333396911621" height="8">
+                    <vector id="1:272" name="Icon" x="0" y="0" width="4.933333396911621" height="8" />
+                  </frame>
+                  <frame id="1:273" name="Container" x="10.933333396911621" y="10" width="13.395917892456055" height="12">
+                    <vector id="1:274" name="Icon" x="0" y="0" width="13.395917892456055" height="12" />
+                  </frame>
+                  <frame id="1:275" name="Container" x="30.32925033569336" y="0" width="97.58000183105469" height="32">
+                    <text id="1:276" name="Text" x="0" y="0" width="96" height="32" />
+                  </frame>
+                </frame>
+                <frame id="1:277" name="Container" x="147.5800018310547" y="14" width="13.420000076293945" height="16">
+                  <text id="1:278" name="Text" x="0" y="0" width="13.420000076293945" height="16" />
+                </frame>
+              </frame>
+              <frame id="1:279" name="Container" x="9" y="280" width="167" height="28">
+                <frame id="1:280" name="Container" x="6" y="6" width="127.5999984741211" height="16">
+                  <frame id="1:281" name="Container" x="0" y="4" width="4.933333396911621" height="8">
+                    <vector id="1:282" name="Icon" x="0" y="0" width="4.933333396911621" height="8" />
+                  </frame>
+                  <frame id="1:283" name="Container" x="10.933333396911621" y="2.6666665077209473" width="14.666666984558105" height="10.666666984558105">
+                    <vector id="1:284" name="Icon" x="0" y="0" width="14.666666984558105" height="10.666666984558105" />
+                  </frame>
+                  <frame id="1:285" name="Container" x="31.60000228881836" y="0" width="96" height="16">
+                    <text id="1:286" name="Text" x="0" y="0" width="96" height="16" />
+                  </frame>
+                </frame>
+                <frame id="1:287" name="Container" x="147" y="6" width="14" height="16">
+                  <text id="1:288" name="Text" x="0" y="0" width="14" height="16" />
+                </frame>
+              </frame>
+            </frame>
+          </frame>
+          <frame id="1:289" name="Overlay+Border" x="17" y="482" width="188" height="128.65499877929688">
+            <frame id="1:290" name="Container" x="13" y="13" width="162" height="16">
+              <frame id="1:291" name="Container" x="0" y="2" width="13.333333015441895" height="12">
+                <vector id="1:292" name="Icon" x="0" y="0" width="13.333333015441895" height="12" />
+              </frame>
+              <frame id="1:293" name="Container" x="19.333332061767578" y="0" width="84" height="16">
+                <text id="1:294" name="Text" x="0" y="0" width="84" height="16" />
+              </frame>
+            </frame>
+            <frame id="1:295" name="Container" x="13" y="33.900001525878906" width="162" height="54.755001068115234">
+              <text id="1:296" name="企业微信/LDAP 已开启每小时增 量拉取。人员调岗异动实时对 齐。" x="0" y="0" width="162" height="54" />
+            </frame>
+            <frame id="1:297" name="Container" x="13" y="93.55500793457031" width="162" height="22.100000381469727">
+              <frame id="1:298" name="Container" x="0" y="5.099999904632568" width="94.44999694824219" height="17">
+                <text id="1:299" name="Text" x="0" y="0" width="94.44999694824219" height="17" />
+              </frame>
+              <frame id="1:300" name="Container" x="107" y="5.099999904632568" width="55" height="17">
+                <text id="1:301" name="Text" x="0" y="0" width="55" height="17" />
+              </frame>
+            </frame>
+          </frame>
+        </frame>
+        <frame id="1:302" name="Section - (Col-span 9)" x="246" y="0" width="714" height="2816.25">
+          <frame id="1:303" name="Background+Border" x="0" y="0" width="714" height="141">
+            <frame id="1:304" name="Container" x="17" y="17" width="680" height="58">
+              <frame id="1:305" name="Container" x="0" y="0" width="161" height="58">
+                <text id="1:306" name="Label → 姓名/工号/邮箱" x="0" y="5.5" width="80.87999725341797" height="16" />
+                <frame id="1:307" name="Container" x="0" y="28" width="161" height="30">
+                  <frame id="1:308" name="Input" x="0" y="0" width="161" height="30">
+                    <frame id="1:309" name="Container" x="33" y="7" width="115" height="17">
+                      <text id="1:310" name="例: 苏雅馨 / FIN0081" x="0" y="0" width="115" height="15" />
+                    </frame>
+                  </frame>
+                  <vector id="1:311" name="Icon" x="11.5" y="9.5" width="15" height="15" />
+                </frame>
+              </frame>
+              <frame id="1:312" name="Container" x="173" y="0" width="161" height="58">
+                <text id="1:313" name="Label → 系统角色权限" x="0" y="5.5" width="72" height="16" />
+                <frame id="1:314" name="Options" x="0" y="28" width="161" height="30">
+                  <frame id="1:315" name="image clip" x="0" y="0" width="161" height="30">
+                    <frame id="1:316" name="image" x="134" y="6" width="18" height="18" />
+                  </frame>
+                  <frame id="1:318" name="Container" x="13" y="7" width="135" height="16">
+                    <text id="1:319" name="财务主管 / 审计员 (21)" x="0" y="0" width="135" height="16" />
+                  </frame>
+                </frame>
+              </frame>
+              <frame id="1:320" name="Container" x="346" y="0" width="161" height="58">
+                <text id="1:321" name="Label → 账号状态" x="0" y="5.5" width="48" height="16" />
+                <frame id="1:322" name="Options" x="0" y="28" width="161" height="30">
+                  <frame id="1:323" name="image clip" x="0" y="0" width="161" height="30">
+                    <frame id="1:324" name="image" x="134" y="6" width="18" height="18" />
+                  </frame>
+                  <frame id="1:326" name="Container" x="13" y="7" width="135" height="16">
+                    <text id="1:327" name="正常激活 (Active)" x="0" y="0" width="135" height="16" />
+                  </frame>
+                </frame>
+              </frame>
+              <frame id="1:328" name="Container" x="519" y="0" width="161" height="58">
+                <text id="1:329" name="Label → PRD 14.1 行级权限范畴" x="0" y="5.5" width="122.55999755859375" height="16" />
+                <frame id="1:330" name="Options" x="0" y="28" width="161" height="30">
+                  <frame id="1:331" name="image clip" x="0" y="0" width="161" height="30">
+                    <frame id="1:332" name="image" x="134" y="6" width="18" height="18" />
+                  </frame>
+                  <frame id="1:334" name="Container" x="13" y="7" width="135" height="16">
+                    <text id="1:335" name="Text" x="0" y="0" width="172.4499969482422" height="16" />
+                  </frame>
+                </frame>
+              </frame>
+            </frame>
+            <frame id="1:336" name="HorizontalBorder" x="17" y="87" width="680" height="37">
+              <frame id="1:337" name="Container" x="0" y="12" width="405.92333984375" height="22">
+                <frame id="1:338" name="Container" x="0" y="3" width="63.470001220703125" height="16">
+                  <text id="1:339" name="Text" x="0" y="0" width="63.470001220703125" height="16" />
+                </frame>
+                <frame id="1:340" name="Background+Border" x="71.47000122070312" y="0" width="153.44667053222656" height="22">
+                  <text id="1:341" name="Text" x="11" y="3" width="119.27999877929688" height="16" />
+                  <frame id="1:342" name="Container" x="134.27999877929688" y="6.916666507720947" width="8.166666984558105" height="8.166666984558105">
+                    <vector id="1:343" name="Icon" x="0" y="0" width="8.166666984558105" height="8.166666984558105" />
+                  </frame>
+                </frame>
+                <frame id="1:344" name="Background+Border" x="232.9166717529297" y="0" width="113.00666046142578" height="22">
+                  <text id="1:345" name="Text" x="11" y="3" width="78.83999633789062" height="16" />
+                  <frame id="1:346" name="Container" x="93.83999633789062" y="6.916666507720947" width="8.166666984558105" height="8.166666984558105">
+                    <vector id="1:347" name="Icon" x="0" y="0" width="8.166666984558105" height="8.166666984558105" />
+                  </frame>
+                </frame>
+                <frame id="1:348" name="Button:margin" x="353.92333984375" y="3" width="52" height="16">
+                  <frame id="1:349" name="Button" x="4" y="0" width="48" height="16">
+                    <text id="1:350" name="Text" x="0" y="0" width="48" height="16" />
+                  </frame>
+                </frame>
+              </frame>
+              <frame id="1:351" name="Container" x="499.3058776855469" y="9" width="180.69412231445312" height="28">
+                <frame id="1:352" name="Button" x="0" y="0" width="76" height="28">
+                  <text id="1:353" name="Text" x="14" y="6" width="48" height="16" />
+                </frame>
+                <frame id="1:354" name="Button" x="84" y="0" width="96.6941146850586" height="28">
+                  <frame id="1:355" name="Container" x="16" y="8.666666030883789" width="10.694117546081543" height="10.666666984558105">
+                    <vector id="1:356" name="Icon" x="0" y="0" width="10.694117546081543" height="10.666666984558105" />
+                  </frame>
+                  <frame id="1:357" name="Container" x="32.69411849975586" y="6" width="48" height="16">
+                    <text id="1:358" name="Text" x="0" y="0" width="48" height="16" />
+                  </frame>
+                </frame>
+              </frame>
+            </frame>
+          </frame>
+          <frame id="1:359" name="Background+Border" x="0" y="161" width="714" height="2288">
+            <frame id="1:360" name="Background+HorizontalBorder" x="1" y="1" width="712" height="59">
+              <frame id="1:361" name="Container" x="20" y="18" width="276.6099853515625" height="22">
+                <frame id="1:362" name="Container" x="0" y="1" width="84" height="20">
+                  <text id="1:363" name="Text" x="0" y="0" width="84" height="20" />
+                </frame>
+                <frame id="1:364" name="Background+Border" x="92" y="0" width="184.61000061035156" height="22">
+                  <text id="1:365" name="Text" x="11" y="3" width="162.61000061035156" height="16" />
+                </frame>
+              </frame>
+              <frame id="1:366" name="Container" x="638.5187377929688" y="14" width="53.48125076293945" height="30">
+                <frame id="1:367" name="Button" x="0" y="0.75" width="25.481250762939453" height="28.5">
+                  <frame id="1:368" name="Container" x="6" y="6" width="13.481249809265137" height="10.5">
+                    <vector id="1:369" name="Icon" x="0" y="0" width="13.481249809265137" height="10.5" />
+                  </frame>
+                </frame>
+                <frame id="1:370" name="Button" x="29.481250762939453" y="0" width="24" height="30">
+                  <frame id="1:371" name="Container" x="6" y="6" width="12" height="12">
+                    <vector id="1:372" name="Icon" x="0" y="0" width="12" height="12" />
+                  </frame>
+                </frame>
+              </frame>
+            </frame>
+            <frame id="1:373" name="Container" x="1" y="60" width="712" height="2174">
+              <frame id="1:374" name="Table" x="0" y="0" width="902.6699829101562" height="2174">
+                <frame id="1:375" name="Header → Row" x="0" y="0" width="902.6699829101562" height="105.5">
+                  <frame id="1:376" name="Cell" x="0" y="0" width="48" height="104.5">
+                    <rounded-rectangle id="1:377" name="Input" x="16" y="44.36000061035156" width="16" height="16" />
+                  </frame>
+                  <frame id="1:378" name="Cell" x="48" y="0" width="181.58999633789062" height="104.5">
+                    <text id="1:379" name="Text" x="16" y="43.5" width="84" height="16" />
+                  </frame>
+                  <frame id="1:380" name="Cell" x="229.58999633789062" y="0" width="44" height="35.9765625">
+                    <vector id="1:381" name="Icon" x="16" y="12" width="59.484375" height="11.9765625" />
+                  </frame>
+                  <frame id="1:382" name="Cell" x="273.5899963378906" y="0" width="94.87999725341797" height="104.5">
+                    <text id="1:383" name="Text" x="16" y="35.5" width="60" height="32" />
+                  </frame>
+                  <frame id="1:384" name="Cell" x="368.4700012207031" y="0" width="157.38999938964844" height="104.5">
+                    <text id="1:385" name="Text" x="16" y="43.5" width="123" height="16" />
+                  </frame>
+                  <frame id="1:386" name="Cell" x="525.8599853515625" y="0" width="117.80999755859375" height="104.5">
+                    <text id="1:387" name="Text" x="16" y="35.5" width="81.5" height="32" />
+                  </frame>
+                  <frame id="1:388" name="Cell" x="643.6699829101562" y="0" width="75" height="104.5">
+                    <text id="1:389" name="Text" x="25.5" y="43.5" width="24" height="16" />
+                  </frame>
+                  <frame id="1:390" name="Cell" x="718.6699829101562" y="0" width="184" height="104.5">
+                    <text id="1:391" name="Text" x="144" y="43.5" width="24" height="16" />
+                  </frame>
+                </frame>
+                <frame id="1:392" name="Body" x="0" y="104.5" width="902.6699829101562" height="2069.5">
+                  <frame id="1:393" name="Row - 1: 苏雅馨 (财务主管)" x="0" y="0" width="902.6699829101562" height="345">
+                    <frame id="1:394" name="Data" x="0" y="0" width="48" height="345">
+                      <rounded-rectangle id="1:395" name="Input" x="16" y="164.86000061035156" width="16" height="16" />
+                    </frame>
+                    <frame id="1:396" name="Data" x="48" y="146.5" width="165.58999633789062" height="52">
+                      <frame id="1:397" name="Background" x="16" y="10" width="32" height="32">
+                        <vector id="1:398" name="Icon" x="10.3515625" y="9.763671875" width="11.296875" height="11.47265625" />
+                      </frame>
+                      <frame id="1:399" name="Container" x="60" y="0" width="105.61000061035156" height="52">
+                        <frame id="1:400" name="Container" x="0" y="0" width="105.58999633789062" height="20">
+                          <frame id="1:401" name="Container" x="0" y="0" width="42" height="20">
+                            <text id="1:402" name="Text" x="0" y="0" width="42" height="20" />
+                          </frame>
+                          <frame id="1:403" name="Background+Border" x="48" y="1" width="34" height="18">
+                            <text id="1:404" name="Text" x="7" y="1" width="20" height="16" />
+                          </frame>
+                        </frame>
+                        <text id="1:405" name="Text" x="0" y="20" width="105.61000061035156" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:406" name="Data" x="213.58999633789062" y="148.64013671875" width="60" height="47.7197265625">
+                      <frame id="1:407" name="Container" x="32" y="12.5" width="12" height="11.98828125">
+                        <vector id="1:408" name="Icon" x="0" y="0" width="12" height="11.98828125" />
+                      </frame>
+                      <vector id="1:409" name="Icon" x="32" y="24.48828125" width="86.8720703125" height="10.7314453125" />
+                    </frame>
+                    <frame id="1:410" name="Data" x="273.5899963378906" y="132.5" width="78.87999725341797" height="80">
+                      <frame id="1:411" name="Background+Border" x="16" y="0" width="62.880001068115234" height="38">
+                        <text id="1:412" name="Text" x="9" y="3" width="44" height="32" />
+                      </frame>
+                      <frame id="1:413" name="Background+Border" x="16" y="42" width="62.880001068115234" height="38">
+                        <text id="1:414" name="Text" x="9" y="3" width="44" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:415" name="Data" x="352.4700012207031" y="0" width="173.38999938964844" height="345">
+                      <frame id="1:416" name="Container" x="32" y="148.5" width="125.38999938964844" height="32">
+                        <text id="1:417" name="全司无边界 (Company-Wide)" x="0" y="0" width="125.38999938964844" height="32" />
+                      </frame>
+                      <text id="1:418" name="Text" x="32" y="180.5" width="125.41000366210938" height="16" />
+                    </frame>
+                    <frame id="1:419" name="Data" x="525.8599853515625" y="0" width="117.80999755859375" height="345">
+                      <frame id="1:420" name="Container" x="16" y="140.5" width="85.80999755859375" height="32">
+                        <text id="1:421" name="今天 10:24:18" x="0" y="0" width="85.80999755859375" height="32" />
+                      </frame>
+                      <text id="1:422" name="Text" x="16" y="172.5" width="72.61000061035156" height="32" />
+                    </frame>
+                    <frame id="1:423" name="Data" x="643.6699829101562" y="26.7685546875" width="75" height="291.462890625">
+                      <frame id="1:424" name="Background+Border" x="-0.23681640625" y="137.5" width="75.4736328125" height="16.462890625">
+                        <rounded-rectangle id="1:425" name="Background" x="11" y="5.2314453125" width="2.049999952316284" height="6" />
+                        <vector id="1:426" name="Icon" x="19.020000457763672" y="3" width="43.4736328125" height="10.462890625" />
+                      </frame>
+                    </frame>
+                    <frame id="1:427" name="Data" x="718.6699829101562" y="0" width="184" height="345">
+                      <frame id="1:428" name="Container" x="16" y="160.5" width="152" height="24">
+                        <frame id="1:429" name="Button" x="0" y="0" width="40" height="24">
+                          <text id="1:430" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                        <frame id="1:431" name="Button" x="44" y="0" width="64" height="24">
+                          <text id="1:432" name="Text" x="8" y="4" width="48" height="16" />
+                        </frame>
+                        <frame id="1:433" name="Button" x="112" y="0" width="40" height="24">
+                          <text id="1:434" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                      </frame>
+                    </frame>
+                  </frame>
+                  <frame id="1:435" name="Row - 2: 周启明 (超级管理员)" x="0" y="344" width="902.6699829101562" height="346">
+                    <frame id="1:436" name="Data" x="0" y="1" width="48" height="345">
+                      <rounded-rectangle id="1:437" name="Input" x="16" y="164.86000061035156" width="16" height="16" />
+                    </frame>
+                    <frame id="1:438" name="Data" x="48" y="137.5" width="165.58999633789062" height="72">
+                      <frame id="1:439" name="Background" x="16" y="20" width="32" height="32">
+                        <vector id="1:440" name="Icon" x="10.779296875" y="10.04470443725586" width="10.44140625" height="10.910590171813965" />
+                      </frame>
+                      <frame id="1:441" name="Container" x="60" y="0" width="105.60000610351562" height="72">
+                        <frame id="1:442" name="Container" x="0" y="0" width="105.60000610351562" height="40">
+                          <frame id="1:443" name="Container" x="0" y="0" width="39.08000183105469" height="40">
+                            <text id="1:444" name="Text" x="0" y="0" width="28" height="40" />
+                          </frame>
+                          <frame id="1:445" name="Background+Border" x="45.08000183105469" y="3" width="60.52000045776367" height="34">
+                            <text id="1:446" name="Text" x="7" y="1" width="40" height="32" />
+                          </frame>
+                        </frame>
+                        <text id="1:447" name="Text" x="0" y="40" width="99" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:448" name="Data" x="213.58999633789062" y="149.58935546875" width="60" height="47.8212890625">
+                      <frame id="1:449" name="Container" x="32" y="12.5" width="12" height="11.91796875">
+                        <vector id="1:450" name="Icon" x="0" y="0" width="12" height="11.91796875" />
+                      </frame>
+                      <vector id="1:451" name="Icon" x="32" y="24.41796875" width="97.990234375" height="10.9033203125" />
+                    </frame>
+                    <frame id="1:452" name="Data" x="273.5899963378906" y="133.5" width="78.87999725341797" height="80">
+                      <frame id="1:453" name="Background+Border" x="16" y="0" width="62.599998474121094" height="38">
+                        <text id="1:454" name="Text" x="9" y="3" width="44.599998474121094" height="32" />
+                      </frame>
+                      <frame id="1:455" name="Background+Border" x="16" y="42" width="62.5" height="38">
+                        <text id="1:456" name="Text" x="9" y="3" width="44.5" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:457" name="Data" x="352.4700012207031" y="1" width="173.38999938964844" height="345">
+                      <frame id="1:458" name="Container" x="32" y="140.5" width="125.38999938964844" height="32">
+                        <text id="1:459" name="系统拓扑特权 (Root Ops)" x="0" y="0" width="125.38999938964844" height="32" />
+                      </frame>
+                      <text id="1:460" name="Text" x="32" y="172.5" width="118.80999755859375" height="32" />
+                    </frame>
+                    <frame id="1:461" name="Data" x="525.8599853515625" y="1" width="117.80999755859375" height="345">
+                      <frame id="1:462" name="Container" x="16" y="140.5" width="85.80999755859375" height="32">
+                        <text id="1:463" name="今天 11:42:02" x="0" y="0" width="85.80999755859375" height="32" />
+                      </frame>
+                      <text id="1:464" name="Text" x="16" y="172.5" width="68.19999694824219" height="32" />
+                    </frame>
+                    <frame id="1:465" name="Data" x="643.6699829101562" y="27.7685546875" width="75" height="291.462890625">
+                      <frame id="1:466" name="Background+Border" x="-0.23681640625" y="137.5" width="75.4736328125" height="16.462890625">
+                        <rounded-rectangle id="1:467" name="Background" x="11" y="5.2314453125" width="2.049999952316284" height="6" />
+                        <vector id="1:468" name="Icon" x="19.020000457763672" y="3" width="43.4736328125" height="10.462890625" />
+                      </frame>
+                    </frame>
+                    <frame id="1:469" name="Data" x="718.6699829101562" y="1" width="184" height="345">
+                      <frame id="1:470" name="Container" x="16" y="160.5" width="152" height="24">
+                        <frame id="1:471" name="Button" x="0" y="0" width="40" height="24">
+                          <text id="1:472" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                        <frame id="1:473" name="Button" x="44" y="0" width="64" height="24">
+                          <text id="1:474" name="Text" x="8" y="4" width="48" height="16" />
+                        </frame>
+                        <frame id="1:475" name="Button" x="112" y="0" width="40" height="24">
+                          <text id="1:476" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                      </frame>
+                    </frame>
+                  </frame>
+                  <frame id="1:477" name="Row - 3: 杜若冰 (合规官)" x="0" y="689" width="902.6699829101562" height="298">
+                    <frame id="1:478" name="Data" x="0" y="1" width="48" height="297">
+                      <rounded-rectangle id="1:479" name="Input" x="16" y="140.86000061035156" width="16" height="16" />
+                    </frame>
+                    <frame id="1:480" name="Data" x="48" y="123.5" width="165.58999633789062" height="52">
+                      <frame id="1:481" name="Background" x="16" y="10" width="32" height="32">
+                        <vector id="1:482" name="Icon" x="13.984375" y="8.84375" width="4.03125" height="13.3125" />
+                      </frame>
+                      <frame id="1:483" name="Container" x="60" y="0" width="105.58999633789062" height="52">
+                        <frame id="1:484" name="Container" x="0" y="0" width="105.58999633789062" height="20">
+                          <frame id="1:485" name="Container" x="0" y="0" width="42" height="20">
+                            <text id="1:486" name="Text" x="0" y="0" width="42" height="20" />
+                          </frame>
+                          <frame id="1:487" name="Background+Border" x="48" y="1" width="44" height="18">
+                            <text id="1:488" name="Text" x="7" y="1" width="30" height="16" />
+                          </frame>
+                        </frame>
+                        <text id="1:489" name="Text" x="0" y="20" width="85.80999755859375" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:490" name="Data" x="213.58999633789062" y="125.60302734375" width="60" height="47.7939453125">
+                      <frame id="1:491" name="Container" x="32" y="12.5" width="12" height="11.84765625">
+                        <vector id="1:492" name="Icon" x="0" y="0" width="12" height="11.84765625" />
+                      </frame>
+                      <vector id="1:493" name="Icon" x="32" y="24.34765625" width="108.431640625" height="10.9462890625" />
+                    </frame>
+                    <frame id="1:494" name="Data" x="273.5899963378906" y="109.5" width="78.87999725341797" height="80">
+                      <frame id="1:495" name="Background+Border" x="16" y="0" width="62.880001068115234" height="38">
+                        <text id="1:496" name="Text" x="9" y="3" width="44" height="32" />
+                      </frame>
+                      <frame id="1:497" name="Background+Border" x="16" y="42" width="62.880001068115234" height="38">
+                        <text id="1:498" name="Text" x="9" y="3" width="44" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:499" name="Data" x="352.4700012207031" y="1" width="173.38999938964844" height="297">
+                      <frame id="1:500" name="Container" x="32" y="132.5" width="125.38999938964844" height="16">
+                        <text id="1:501" name="跨部门关联合同检索" x="0" y="0" width="125.38999938964844" height="16" />
+                      </frame>
+                      <text id="1:502" name="Text" x="32" y="148.5" width="116.61000061035156" height="16" />
+                    </frame>
+                    <frame id="1:503" name="Data" x="525.8599853515625" y="1" width="117.80999755859375" height="297">
+                      <frame id="1:504" name="Container" x="16" y="116.5" width="85.80999755859375" height="32">
+                        <text id="1:505" name="昨天 17:15:30" x="0" y="0" width="85.80999755859375" height="32" />
+                      </frame>
+                      <text id="1:506" name="Text" x="16" y="148.5" width="79.19999694824219" height="32" />
+                    </frame>
+                    <frame id="1:507" name="Data" x="643.6699829101562" y="27.7685546875" width="75" height="243.462890625">
+                      <frame id="1:508" name="Background+Border" x="-0.23681640625" y="113.5" width="75.4736328125" height="16.462890625">
+                        <rounded-rectangle id="1:509" name="Background" x="11" y="5.2314453125" width="2.049999952316284" height="6" />
+                        <vector id="1:510" name="Icon" x="19.020000457763672" y="3" width="43.4736328125" height="10.462890625" />
+                      </frame>
+                    </frame>
+                    <frame id="1:511" name="Data" x="718.6699829101562" y="1" width="184" height="297">
+                      <frame id="1:512" name="Container" x="16" y="136.5" width="152" height="24">
+                        <frame id="1:513" name="Button" x="0" y="0" width="40" height="24">
+                          <text id="1:514" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                        <frame id="1:515" name="Button" x="44" y="0" width="64" height="24">
+                          <text id="1:516" name="Text" x="8" y="4" width="48" height="16" />
+                        </frame>
+                        <frame id="1:517" name="Button" x="112" y="0" width="40" height="24">
+                          <text id="1:518" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                      </frame>
+                    </frame>
+                  </frame>
+                  <frame id="1:519" name="Row - 4: 陈思远 (核算专员)" x="0" y="986" width="902.6699829101562" height="426">
+                    <frame id="1:520" name="Data" x="0" y="1" width="48" height="425">
+                      <rounded-rectangle id="1:521" name="Input" x="16" y="204.86000061035156" width="16" height="16" />
+                    </frame>
+                    <frame id="1:522" name="Data" x="48" y="187.5" width="165.58999633789062" height="52">
+                      <frame id="1:523" name="Background" x="16" y="10" width="32" height="32">
+                        <vector id="1:524" name="Icon" x="10.580078125" y="9.822265625" width="10.83984375" height="11.35546875" />
+                      </frame>
+                      <frame id="1:525" name="Container" x="60" y="0" width="105.58999633789062" height="52">
+                        <frame id="1:526" name="Container" x="0" y="0" width="105.58999633789062" height="20">
+                          <frame id="1:527" name="Container" x="0" y="0" width="42" height="20">
+                            <text id="1:528" name="Text" x="0" y="0" width="42" height="20" />
+                          </frame>
+                          <frame id="1:529" name="Background+Border" x="48" y="1" width="54" height="18">
+                            <text id="1:530" name="Text" x="7" y="1" width="40" height="16" />
+                          </frame>
+                        </frame>
+                        <text id="1:531" name="Text" x="0" y="20" width="99" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:532" name="Data" x="213.58999633789062" y="189.5166015625" width="60" height="47.966796875">
+                      <frame id="1:533" name="Container" x="32" y="12.5" width="12" height="11.8486328125">
+                        <vector id="1:534" name="Icon" x="0" y="0" width="12" height="11.8486328125" />
+                      </frame>
+                      <vector id="1:535" name="Icon" x="32" y="24.3486328125" width="131.4521484375" height="11.1181640625" />
+                    </frame>
+                    <frame id="1:536" name="Data" x="273.5899963378906" y="165.5" width="78.87999725341797" height="96">
+                      <frame id="1:537" name="Background+Border" x="16" y="0" width="62.880001068115234" height="54">
+                        <text id="1:538" name="Text" x="9" y="3" width="44" height="48" />
+                      </frame>
+                      <frame id="1:539" name="Background+Border" x="16" y="58" width="62.880001068115234" height="38">
+                        <text id="1:540" name="Text" x="9" y="3" width="34.540000915527344" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:541" name="Data" x="352.4700012207031" y="1" width="173.38999938964844" height="425">
+                      <frame id="1:542" name="Container" x="32" y="188.5" width="125.38999938964844" height="16">
+                        <text id="1:543" name="本中心及下属二级账套" x="0" y="0" width="125.38999938964844" height="16" />
+                      </frame>
+                      <text id="1:544" name="Text" x="32" y="204.5" width="125.41000366210938" height="32" />
+                    </frame>
+                    <frame id="1:545" name="Data" x="525.8599853515625" y="1" width="117.80999755859375" height="425">
+                      <frame id="1:546" name="Container" x="16" y="180.5" width="85.80999755859375" height="32">
+                        <text id="1:547" name="今天 09:12:44" x="0" y="0" width="85.80999755859375" height="32" />
+                      </frame>
+                      <text id="1:548" name="Text" x="16" y="212.5" width="79.19999694824219" height="32" />
+                    </frame>
+                    <frame id="1:549" name="Data" x="643.6699829101562" y="27.7685546875" width="75" height="371.462890625">
+                      <frame id="1:550" name="Background+Border" x="-0.23681640625" y="177.5" width="75.4736328125" height="16.462890625">
+                        <rounded-rectangle id="1:551" name="Background" x="11" y="5.2314453125" width="2.049999952316284" height="6" />
+                        <vector id="1:552" name="Icon" x="19.020000457763672" y="3" width="43.4736328125" height="10.462890625" />
+                      </frame>
+                    </frame>
+                    <frame id="1:553" name="Data" x="718.6699829101562" y="1" width="184" height="425">
+                      <frame id="1:554" name="Container" x="16" y="200.5" width="152" height="24">
+                        <frame id="1:555" name="Button" x="0" y="0" width="40" height="24">
+                          <text id="1:556" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                        <frame id="1:557" name="Button" x="44" y="0" width="64" height="24">
+                          <text id="1:558" name="Text" x="8" y="4" width="48" height="16" />
+                        </frame>
+                        <frame id="1:559" name="Button" x="112" y="0" width="40" height="24">
+                          <text id="1:560" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                      </frame>
+                    </frame>
+                  </frame>
+                  <frame id="1:561" name="Row - 5: 高振峰 (业务人员)" x="0" y="1411" width="902.6699829101562" height="346">
+                    <frame id="1:562" name="Data" x="0" y="1" width="48" height="345">
+                      <rounded-rectangle id="1:563" name="Input" x="16" y="164.86000061035156" width="16" height="16" />
+                    </frame>
+                    <frame id="1:564" name="Data" x="48" y="147.5" width="165.58999633789062" height="52">
+                      <frame id="1:565" name="Background" x="16" y="10" width="32" height="32">
+                        <vector id="1:566" name="Icon" x="10.6328125" y="9.640466690063477" width="10.734375" height="11.719066619873047" />
+                      </frame>
+                      <frame id="1:567" name="Container" x="60" y="0" width="105.58999633789062" height="52">
+                        <frame id="1:568" name="Container" x="0" y="0" width="105.58999633789062" height="20">
+                          <frame id="1:569" name="Container" x="0" y="0" width="42" height="20">
+                            <text id="1:570" name="Text" x="0" y="0" width="42" height="20" />
+                          </frame>
+                          <frame id="1:571" name="Background+Border" x="48" y="1" width="54" height="18">
+                            <text id="1:572" name="Text" x="7" y="1" width="40" height="16" />
+                          </frame>
+                        </frame>
+                        <text id="1:573" name="Text" x="0" y="20" width="92.41000366210938" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:574" name="Data" x="213.58999633789062" y="149.70703125" width="60" height="47.5859375">
+                      <frame id="1:575" name="Container" x="32" y="12.5" width="12" height="11.80078125">
+                        <vector id="1:576" name="Icon" x="0" y="0" width="12" height="11.80078125" />
+                      </frame>
+                      <vector id="1:577" name="Icon" x="32" y="24.30078125" width="76.162109375" height="10.78515625" />
+                    </frame>
+                    <frame id="1:578" name="Data" x="273.5899963378906" y="133.5" width="78.87999725341797" height="80">
+                      <frame id="1:579" name="Background+Border" x="16" y="0" width="62.880001068115234" height="38">
+                        <text id="1:580" name="Text" x="9" y="3" width="44" height="32" />
+                      </frame>
+                      <frame id="1:581" name="Background+Border" x="16" y="42" width="62.880001068115234" height="38">
+                        <text id="1:582" name="Text" x="9" y="3" width="44" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:583" name="Data" x="352.4700012207031" y="1" width="173.38999938964844" height="345">
+                      <frame id="1:584" name="Container" x="32" y="140.5" width="125.38999938964844" height="32">
+                        <text id="1:585" name="严格仅本人 (Strict Self-Only)" x="0" y="0" width="125.38999938964844" height="32" />
+                      </frame>
+                      <text id="1:586" name="Text" x="32" y="172.5" width="99" height="32" />
+                    </frame>
+                    <frame id="1:587" name="Data" x="525.8599853515625" y="1" width="117.80999755859375" height="345">
+                      <frame id="1:588" name="Container" x="16" y="140.5" width="85.80999755859375" height="32">
+                        <text id="1:589" name="昨天 19:40:11" x="0" y="0" width="85.80999755859375" height="32" />
+                      </frame>
+                      <text id="1:590" name="Text" x="16" y="172.5" width="85.80999755859375" height="32" />
+                    </frame>
+                    <frame id="1:591" name="Data" x="643.6699829101562" y="27.7685546875" width="75" height="291.462890625">
+                      <frame id="1:592" name="Background+Border" x="-0.23681640625" y="137.5" width="75.4736328125" height="16.462890625">
+                        <rounded-rectangle id="1:593" name="Background" x="11" y="5.2314453125" width="2.049999952316284" height="6" />
+                        <vector id="1:594" name="Icon" x="19.020000457763672" y="3" width="43.4736328125" height="10.462890625" />
+                      </frame>
+                    </frame>
+                    <frame id="1:595" name="Data" x="718.6699829101562" y="1" width="184" height="345">
+                      <frame id="1:596" name="Container" x="16" y="160.5" width="152" height="24">
+                        <frame id="1:597" name="Button" x="0" y="0" width="40" height="24">
+                          <text id="1:598" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                        <frame id="1:599" name="Button" x="44" y="0" width="64" height="24">
+                          <text id="1:600" name="Text" x="8" y="4" width="48" height="16" />
+                        </frame>
+                        <frame id="1:601" name="Button" x="112" y="0" width="40" height="24">
+                          <text id="1:602" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                      </frame>
+                    </frame>
+                  </frame>
+                  <frame id="1:603" name="Row - 6: 沈梦媛 (锁定状态)" x="0" y="1756" width="902.6699829101562" height="313.5">
+                    <frame id="1:604" name="Data" x="0" y="1" width="48" height="312.5">
+                      <rounded-rectangle id="1:605" name="Input" x="16" y="148.86000061035156" width="16" height="16" />
+                    </frame>
+                    <frame id="1:606" name="Data" x="47.999996185302734" y="121.25" width="165.58999633789062" height="72">
+                      <frame id="1:607" name="Background" x="16" y="20" width="32" height="32">
+                        <vector id="1:608" name="Icon" x="10.251953125" y="9.875" width="11.49609375" height="11.25" />
+                      </frame>
+                      <frame id="1:609" name="Container" x="60" y="0" width="105.60000610351562" height="72">
+                        <frame id="1:610" name="Container" x="0" y="0" width="105.60000610351562" height="40">
+                          <frame id="1:611" name="Container" x="0" y="0" width="39.08000183105469" height="40">
+                            <text id="1:612" name="Text" x="0" y="0" width="28" height="40" />
+                          </frame>
+                          <frame id="1:613" name="Background+Border" x="45.08000183105469" y="3" width="60.52000045776367" height="34">
+                            <text id="1:614" name="Text" x="7" y="1" width="40" height="32" />
+                          </frame>
+                        </frame>
+                        <text id="1:615" name="Text" x="0" y="40" width="99" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:616" name="Data" x="213.58999633789062" y="133.97607421875" width="60" height="46.5478515625">
+                      <frame id="1:617" name="Container" x="32" y="12" width="12" height="11.859375">
+                        <vector id="1:618" name="Icon" x="0" y="0" width="12" height="11.859375" />
+                      </frame>
+                      <vector id="1:619" name="Icon" x="32" y="23.859375" width="54.4951171875" height="10.6884765625" />
+                    </frame>
+                    <frame id="1:620" name="Data" x="273.5899963378906" y="1" width="94.87999725341797" height="312.5">
+                      <frame id="1:621" name="Paragraph+Background+Border" x="16" y="130.5" width="62.88999938964844" height="52">
+                        <text id="1:622" name="Text" x="9" y="2" width="44" height="16" />
+                        <text id="1:623" name="Text" x="0" y="18" width="53.88999938964844" height="32" />
+                      </frame>
+                    </frame>
+                    <frame id="1:624" name="Data" x="368.4700012207031" y="1" width="157.38999938964844" height="312.5">
+                      <frame id="1:625" name="Container" x="16" y="140.5" width="125.38999938964844" height="16">
+                        <text id="1:626" name="拒绝所有数据读写调用" x="0" y="0" width="125.38999938964844" height="16" />
+                      </frame>
+                      <text id="1:627" name="Text" x="16" y="156.5" width="116.61000061035156" height="16" />
+                    </frame>
+                    <frame id="1:628" name="Data" x="525.8599853515625" y="1" width="117.80999755859375" height="312.5">
+                      <frame id="1:629" name="Container" x="16" y="124.5" width="85.80999755859375" height="32">
+                        <text id="1:630" name="2025-02-18 16:05" x="0" y="0" width="85.80999755859375" height="32" />
+                      </frame>
+                      <text id="1:631" name="Text" x="16" y="156.5" width="83.61000061035156" height="32" />
+                    </frame>
+                    <frame id="1:632" name="Data" x="643.6699829101562" y="19.5322265625" width="75" height="275.435546875">
+                      <frame id="1:633" name="Background+Border" x="5.87548828125" y="129.5" width="63.2490234375" height="16.935546875">
+                        <rounded-rectangle id="1:634" name="Background" x="11" y="5.4677734375" width="2.609999895095825" height="6" />
+                        <vector id="1:635" name="Icon" x="19.299999237060547" y="3" width="31.2490234375" height="10.935546875" />
+                      </frame>
+                    </frame>
+                    <frame id="1:636" name="Data" x="718.6699829101562" y="1" width="184" height="312.5">
+                      <frame id="1:637" name="Container" x="16" y="144.5" width="152" height="24">
+                        <frame id="1:638" name="Button" x="0" y="0" width="40" height="24">
+                          <text id="1:639" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                        <frame id="1:640" name="Button" x="44" y="0" width="64" height="24">
+                          <text id="1:641" name="Text" x="8" y="4" width="48" height="16" />
+                        </frame>
+                        <frame id="1:642" name="Button" x="112" y="0" width="40" height="24">
+                          <text id="1:643" name="Text" x="8" y="4" width="24" height="16" />
+                        </frame>
+                      </frame>
+                    </frame>
+                  </frame>
+                </frame>
+              </frame>
+            </frame>
+            <frame id="1:644" name="Background+HorizontalBorder" x="1" y="2234" width="712" height="53">
+              <frame id="1:645" name="Container" x="20" y="14" width="270.91998291015625" height="26">
+                <frame id="1:646" name="Container" x="0" y="5" width="166.3300018310547" height="16">
+                  <text id="1:647" name="Text" x="0" y="0" width="166.3300018310547" height="16" />
+                </frame>
+                <frame id="1:648" name="Container" x="178.3300018310547" y="0" width="92.58999633789062" height="26">
+                  <frame id="1:649" name="Container" x="0" y="5" width="24" height="16">
+                    <text id="1:650" name="Text" x="0" y="0" width="24" height="16" />
+                  </frame>
+                  <frame id="1:651" name="Options" x="28" y="0" width="64.58999633789062" height="26">
+                    <frame id="1:652" name="image clip" x="0" y="0" width="65" height="26">
+                      <frame id="1:653" name="image" x="38" y="4" width="18" height="18" />
+                    </frame>
+                    <frame id="1:655" name="Container" x="9" y="5" width="46.59000015258789" height="16">
+                      <text id="1:656" name="Text" x="0" y="0" width="46.59000015258789" height="16" />
+                    </frame>
+                  </frame>
+                </frame>
+              </frame>
+              <frame id="1:657" name="Container" x="507.7633056640625" y="13" width="184.24667358398438" height="28">
+                <frame id="1:658" name="Button" x="0" y="3" width="14.933333396911621" height="22">
+                  <frame id="1:659" name="Container" x="5" y="5" width="4.933333396911621" height="8">
+                    <vector id="1:660" name="Icon" x="0" y="0" width="4.933333396911621" height="8" />
+                  </frame>
+                </frame>
+                <frame id="1:661" name="Button" x="18.933334350585938" y="0" width="28" height="28">
+                  <text id="1:662" name="Text" x="11.460000038146973" y="5.5" width="5.079999923706055" height="16" />
+                </frame>
+                <frame id="1:663" name="Button" x="50.93333435058594" y="0" width="28" height="28">
+                  <text id="1:664" name="Text" x="10.295000076293945" y="5.5" width="7.409999847412109" height="16" />
+                </frame>
+                <frame id="1:665" name="Button" x="82.93333435058594" y="0" width="28" height="28">
+                  <text id="1:666" name="Text" x="10.234999656677246" y="5.5" width="7.53000020980835" height="16" />
+                </frame>
+                <frame id="1:667" name="Container" x="114.93333435058594" y="6" width="18.3799991607666" height="16">
+                  <text id="1:668" name="Text" x="4" y="0" width="10.380000114440918" height="16" />
+                </frame>
+                <frame id="1:669" name="Button" x="137.31333923339844" y="0" width="28" height="28">
+                  <text id="1:670" name="Text" x="10.220000267028809" y="5.5" width="7.559999942779541" height="16" />
+                </frame>
+                <frame id="1:671" name="Button" x="169.31333923339844" y="3" width="14.933333396911621" height="22">
+                  <frame id="1:672" name="Container" x="5" y="5" width="4.933333396911621" height="8">
+                    <vector id="1:673" name="Icon" x="0" y="0" width="4.933333396911621" height="8" />
+                  </frame>
+                </frame>
+              </frame>
+            </frame>
+          </frame>
+          <frame id="1:674" name="PRD 14章 行级隔离与 Agent" x="0" y="2469" width="714" height="347.25">
+            <frame id="1:675" name="HorizontalBorder" x="21" y="21" width="672" height="45">
+              <frame id="1:676" name="Container" x="0" y="0" width="392.0199890136719" height="36">
+                <frame id="1:677" name="Background" x="0" y="2" width="32" height="32">
+                  <frame id="1:678" name="Container" x="6.8333330154418945" y="7.25" width="18.33333396911621" height="17.5">
+                    <vector id="1:679" name="Icon" x="0" y="0" width="18.33333396911621" height="17.5" />
+                  </frame>
+                </frame>
+                <frame id="1:680" name="Container" x="42" y="0" width="350.0199890136719" height="36">
+                  <frame id="1:681" name="Heading 2" x="0" y="0" width="350.0199890136719" height="20">
+                    <text id="1:682" name="Text" x="0" y="0" width="332.79998779296875" height="20" />
+                  </frame>
+                  <frame id="1:683" name="Container" x="0" y="20" width="350.0199890136719" height="16">
+                    <text id="1:684" name="Text" x="0" y="0" width="350.0199890136719" height="16" />
+                  </frame>
+                </frame>
+              </frame>
+              <frame id="1:685" name="Background+Border" x="522" y="5" width="150" height="26">
+                <frame id="1:686" name="Container" x="13" y="6.4375" width="10" height="13.125">
+                  <vector id="1:687" name="Icon" x="0" y="0" width="10" height="13.125" />
+                </frame>
+                <frame id="1:688" name="Container" x="29" y="5" width="108" height="16">
+                  <text id="1:689" name="Text" x="0" y="0" width="108" height="16" />
+                </frame>
+              </frame>
+            </frame>
+            <frame id="1:690" name="Container" x="21" y="82" width="672" height="244.25">
+              <frame id="1:691" name="Background+Border" x="0" y="0" width="213.3333282470703" height="243.75">
+                <frame id="1:692" name="Container" x="17" y="17" width="179.3333282470703" height="40">
+                  <frame id="1:693" name="Container" x="0" y="0" width="129.44000244140625" height="40">
+                    <text id="1:694" name="Text" x="0" y="0" width="97.61000061035156" height="40" />
+                  </frame>
+                  <frame id="1:695" name="Background+Border" x="129.44332885742188" y="1" width="49.88999938964844" height="38">
+                    <text id="1:696" name="Text" x="9" y="3" width="22" height="32" />
+                  </frame>
+                </frame>
+                <frame id="1:697" name="Container" x="17" y="65" width="179.3333282470703" height="117.75">
+                  <text id="1:698" name="Text" x="0" y="-0.25" width="168" height="39" />
+                  <frame id="1:699" name="Code" x="0" y="40" width="103" height="37.880001068115234">
+                    <text id="1:700" name="Text" x="4" y="0" width="99" height="18" />
+                    <text id="1:701" name="Text" x="0" y="19.8799991607666" width="79.19999694824219" height="18" />
+                  </frame>
+                  <text id="1:702" name="Text" x="83.19999694824219" y="58.380001068115234" width="96" height="20" />
+                  <text id="1:703" name="Text" x="0" y="78.5" width="168" height="39" />
+                </frame>
+                <frame id="1:704" name="Container" x="17" y="190.75" width="179.3333282470703" height="36">
+                  <frame id="1:705" name="Container" x="0" y="16.2421875" width="10.1875" height="7.515625">
+                    <vector id="1:706" name="Icon" x="0" y="0" width="10.1875" height="7.515625" />
+                  </frame>
+                  <frame id="1:707" name="Container" x="14.1875" y="4" width="160.3300018310547" height="32">
+                    <text id="1:708" name="Text" x="0" y="0" width="157.69000244140625" height="32" />
+                  </frame>
+                </frame>
+              </frame>
+              <frame id="1:709" name="Background+Border" x="229.3333282470703" y="0" width="213.33334350585938" height="243.75">
+                <frame id="1:710" name="Container" x="17" y="17" width="179.33334350585938" height="40">
+                  <frame id="1:711" name="Container" x="0" y="0" width="129.3800048828125" height="40">
+                    <text id="1:712" name="Text" x="0" y="0" width="122.25" height="40" />
+                  </frame>
+                  <frame id="1:713" name="Background+Border" x="129.3800048828125" y="1" width="49.95000076293945" height="38">
+                    <text id="1:714" name="Text" x="9" y="3" width="22" height="32" />
+                  </frame>
+                </frame>
+                <frame id="1:715" name="Container" x="17" y="65" width="179.33334350585938" height="98.62999725341797">
+                  <text id="1:716" name="Text" x="0" y="-0.25" width="168" height="39" />
+                  <frame id="1:717" name="Code" x="99.37000274658203" y="20.5" width="54.20000076293945" height="18">
+                    <text id="1:718" name="Text" x="4" y="0" width="46.20000076293945" height="18" />
+                  </frame>
+                  <text id="1:719" name="Text" x="153.5800018310547" y="19" width="15.380000114440918" height="20" />
+                  <text id="1:720" name="Text" x="0" y="38.880001068115234" width="99.37999725341797" height="20" />
+                  <frame id="1:721" name="Code" x="0" y="40.380001068115234" width="175.97999572753906" height="37.880001068115234">
+                    <text id="1:722" name="Text" x="103.37000274658203" y="0" width="72.61000061035156" height="18" />
+                    <text id="1:723" name="Text" x="0" y="19.8700008392334" width="46.20000076293945" height="18" />
+                  </frame>
+                  <text id="1:724" name="Text" x="50.20000076293945" y="58.75" width="120" height="20" />
+                  <text id="1:725" name="Text" x="0" y="78.62999725341797" width="96" height="20" />
+                </frame>
+                <frame id="1:726" name="Container" x="17" y="171.6300048828125" width="179.33334350585938" height="36">
+                  <frame id="1:727" name="Container" x="0" y="16.2421875" width="10.1875" height="7.515625">
+                    <vector id="1:728" name="Icon" x="0" y="0" width="10.1875" height="7.515625" />
+                  </frame>
+                  <frame id="1:729" name="Container" x="14.1875" y="4" width="160.3300018310547" height="32">
+                    <text id="1:730" name="Text" x="0" y="0" width="154" height="32" />
+                  </frame>
+                </frame>
+              </frame>
+              <frame id="1:731" name="Background+Border" x="458.66668701171875" y="0" width="213.33334350585938" height="244.25">
+                <frame id="1:732" name="Container" x="17" y="17" width="179.33334350585938" height="40">
+                  <frame id="1:733" name="Container" x="0" y="0" width="123.66000366210938" height="40">
+                    <text id="1:734" name="Text" x="0" y="0" width="86.30999755859375" height="40" />
+                  </frame>
+                  <frame id="1:735" name="Background+Border" x="123.66000366210938" y="1" width="55.66999816894531" height="38">
+                    <text id="1:736" name="Text" x="9" y="3" width="33" height="32" />
+                  </frame>
+                </frame>
+                <frame id="1:737" name="Container" x="17" y="65" width="179.33334350585938" height="98">
+                  <text id="1:738" name="负责大模型 API Token 调度、向 量切分参数设置、SSO 目录集成 配置与防篡改审计日志导出。遵 循职责分离原则，管理员无法直 接篡改已归档的业务记账凭证。" x="0" y="0" width="179.33334350585938" height="98" />
+                </frame>
+                <frame id="1:739" name="Container" x="17" y="171" width="179.33334350585938" height="36">
+                  <frame id="1:740" name="Container" x="0" y="16.2421875" width="10.1875" height="7.515625">
+                    <vector id="1:741" name="Icon" x="0" y="0" width="10.1875" height="7.515625" />
+                  </frame>
+                  <frame id="1:742" name="Container" x="14.1875" y="4" width="160.3300018310547" height="32">
+                    <text id="1:743" name="Text" x="0" y="0" width="154" height="32" />
+                  </frame>
+                </frame>
+              </frame>
+            </frame>
+          </frame>
+        </frame>
+      </frame>
+    </frame>
+  </frame>
+  <frame id="1:744" name="Header - (1920x1080 桌面端规格，固定置顶)" x="0" y="0" width="1280" height="64">
+    <frame id="1:745" name="Container" x="0" y="0" width="1280" height="63">
+      <frame id="1:746" name="Container" x="24" y="12" width="602.4299926757812" height="39">
+        <frame id="1:747" name="Logo" x="0" y="0" width="123.4800033569336" height="39">
+          <frame id="1:748" name="Background+Shadow" x="0" y="1.5" width="36" height="36">
+            <frame id="1:749" name="Container" x="8.833333015441895" y="8.833333015441895" width="18.33333396911621" height="18.33333396911621">
+              <vector id="1:750" name="Icon" x="0" y="0" width="18.33333396911621" height="18.33333396911621" />
+            </frame>
+          </frame>
+          <frame id="1:751" name="Container" x="48" y="0" width="75.4800033569336" height="39">
+            <frame id="1:752" name="Container" x="0" y="0" width="75.4800033569336" height="18">
+              <text id="1:753" name="Text" x="0" y="0" width="75.4800033569336" height="18" />
+            </frame>
+            <frame id="1:754" name="Margin" x="0" y="18" width="75.4800033569336" height="21">
+              <frame id="1:755" name="Container" x="0" y="4" width="75.4800033569336" height="17">
+                <text id="1:756" name="财务智能中台" x="0" y="0" width="75.4800033569336" height="17" />
+              </frame>
+            </frame>
+          </frame>
+        </frame>
+        <frame id="1:757" name="Nav" x="163.48001098632812" y="2.5" width="438.95001220703125" height="34">
+          <frame id="1:758" name="Link" x="0" y="1" width="70" height="32">
+            <text id="1:759" name="Text" x="14" y="6" width="42" height="20" />
+          </frame>
+          <frame id="1:760" name="Link" x="74" y="1" width="84" height="32">
+            <text id="1:761" name="Text" x="14" y="6" width="56" height="20" />
+          </frame>
+          <frame id="1:762" name="Link" x="162" y="1" width="84" height="32">
+            <text id="1:763" name="Text" x="14" y="6" width="56" height="20" />
+          </frame>
+          <frame id="1:764" name="Link" x="250" y="1" width="98.94999694824219" height="32">
+            <text id="1:765" name="Text" x="14" y="6" width="70.94999694824219" height="20" />
+          </frame>
+          <frame id="1:766" name="Link" x="352.95001220703125" y="0" width="86" height="34">
+            <text id="1:767" name="Text" x="15" y="7" width="56" height="20" />
+          </frame>
+        </frame>
+      </frame>
+      <frame id="1:768" name="Container" x="837.3599853515625" y="13.5" width="418.6400146484375" height="36">
+        <frame id="1:769" name="Background+Border" x="0" y="3" width="152.63999938964844" height="30">
+          <frame id="1:770" name="Container" x="13" y="8.25" width="15" height="13.5">
+            <vector id="1:771" name="Icon" x="0" y="0" width="15" height="13.5" />
+          </frame>
+          <frame id="1:772" name="Container" x="36" y="7" width="87.63999938964844" height="16">
+            <text id="1:773" name="Text" x="0" y="0" width="87.63999938964844" height="16" />
+          </frame>
+          <rounded-rectangle id="1:774" name="Background" x="131.63999938964844" y="11" width="8" height="8" />
+        </frame>
+        <frame id="1:775" name="Button" x="168.63999938964844" y="0" width="36" height="36">
+          <frame id="1:776" name="Container" x="10.5" y="10.5" width="15" height="15">
+            <vector id="1:777" name="Icon" x="0" y="0" width="15" height="15" />
+          </frame>
+        </frame>
+        <frame id="1:778" name="Container" x="220.63999938964844" y="0" width="36" height="36">
+          <frame id="1:779" name="Button" x="0" y="0" width="36" height="36">
+            <frame id="1:780" name="Container" x="11.333333969116211" y="9.666666984558105" width="13.333333015441895" height="16.66666603088379">
+              <vector id="1:781" name="Icon" x="0" y="0" width="13.333333015441895" height="16.66666603088379" />
+            </frame>
+          </frame>
+          <frame id="1:782" name="Background" x="22" y="6" width="8" height="8">
+            <rounded-rectangle id="1:783" name="Overlay+Shadow" x="0" y="0" width="8" height="8" />
+          </frame>
+        </frame>
+        <rounded-rectangle id="1:784" name="Vertical Divider" x="272.6400146484375" y="8" width="1" height="20" />
+        <frame id="1:785" name="Container" x="289.6400146484375" y="2" width="129" height="32">
+          <frame id="1:786" name="Background" x="4" y="0" width="32" height="32">
+            <rounded-rectangle id="1:787" name="Overlay+Shadow" x="0" y="0" width="32" height="32" />
+            <frame id="1:788" name="Container" x="10.498046875" y="10.45703125" width="11.00390625" height="11.0859375">
+              <vector id="1:789" name="Icon" x="0" y="0" width="11.00390625" height="11.0859375" />
+            </frame>
+            <frame id="1:790" name="Background" x="22" y="22" width="10" height="10">
+              <rounded-rectangle id="1:791" name="Overlay+Shadow" x="0" y="0" width="10" height="10" />
+            </frame>
+          </frame>
+          <frame id="1:792" name="Container" x="48" y="0" width="60" height="32">
+            <frame id="1:793" name="Container" x="0" y="0" width="60" height="15">
+              <text id="1:794" name="Text" x="0" y="0" width="60" height="15" />
+            </frame>
+            <frame id="1:795" name="Container" x="0" y="15" width="60" height="17">
+              <text id="1:796" name="Text" x="0" y="0" width="55" height="17" />
+            </frame>
+          </frame>
+          <frame id="1:797" name="Container" x="120" y="13.225000381469727" width="9" height="5.550000190734863">
+            <vector id="1:798" name="Icon" x="0" y="0" width="9" height="5.550000190734863" />
+          </frame>
+        </frame>
+      </frame>
+    </frame>
+  </frame>
+</frame>

@@ -139,7 +139,92 @@ else
   warn "/llm/configs 只返回 $CONFIGS_COUNT 条（期望 ≥ 4，seed 可能未跑）"
 fi
 
-# 9. 总结
+# 9. POST /invoices/archive 直接归档（兼容旧 API）
+echo ""
+echo "[9/11] POST /invoices/archive"
+ARCHIVE=$(curl -sf -X POST "$API/invoices/archive" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "invoice_title": "烟测测试发票",
+    "company": "烟测公司",
+    "tax_id": "91110000SMOKE",
+    "invoice_code": "SMOKE0001",
+    "invoice_number": "SMOKE00000001",
+    "invoice_date": "2026-09-21",
+    "amount_excl_tax": "1000.00",
+    "tax_amount": "130.00",
+    "amount_incl_tax": "1130.00",
+    "invoice_type": "electronic",
+    "seller": "销售方",
+    "buyer": "购买方",
+    "file_url": "s3://invoices/smoke/sample.pdf",
+    "file_hash": "smoke0001hash"
+  }')
+ARCH_ID=$(echo "$ARCHIVE" | "$PY" -c "import sys, json; print(json.load(sys.stdin).get('id',''))")
+if [ -n "$ARCH_ID" ]; then
+  ok "归档成功 id=$ARCH_ID"
+else
+  fail "归档失败：$ARCHIVE"
+fi
+
+# 10. 上传发票文件（multipart → SSE → Celery）
+echo ""
+echo "[10/11] POST /chat/stream (multipart file upload)"
+FIXTURE="$(dirname "$0")/../backend/tests/fixtures/sample_invoice.pdf"
+if [ ! -f "$FIXTURE" ]; then
+  warn "fixture 不存在：$FIXTURE（跳过文件上传步骤）"
+else
+  SSE_OUT=$(mktemp)
+  HTTP_CODE=$(curl -s -o "$SSE_OUT" -w "%{http_code}" \
+    --max-time 30 \
+    -X POST "$API/chat/stream" \
+    -H "Authorization: Bearer $TOKEN" \
+    -F "session_id=$SID" \
+    -F "message=" \
+    -F "file=@${FIXTURE};type=application/pdf")
+  if [ "$HTTP_CODE" = "200" ]; then
+    HAS_SIDEPANEL=$(grep -c "\"sidepanel\"" "$SSE_OUT" 2>/dev/null || echo 0)
+    HAS_PROCESSING=$(grep -c "\"status\": \"processing\"\|\"status\":\"processing\"" "$SSE_OUT" 2>/dev/null || echo 0)
+    if [ "$HAS_SIDEPANEL" -gt 0 ] && [ "$HAS_PROCESSING" -gt 0 ]; then
+      ok "SSE 含 sidepanel{status:processing}，OCR 任务已派发"
+    else
+      warn "SSE 缺少 sidepanel processing（可能被路由分支绕过）："
+      head -10 "$SSE_OUT"
+    fi
+  else
+    fail "SSE multipart 上传返回 HTTP $HTTP_CODE"
+    head -5 "$SSE_OUT"
+  fi
+  rm -f "$SSE_OUT"
+fi
+
+# 11. 列表查询 + 确认归档
+echo ""
+echo "[11/11] POST /invoices/{id}/confirm + GET /invoices/"
+if [ -n "$ARCH_ID" ]; then
+  CONFIRM=$(curl -sf -X POST "$API/invoices/$ARCH_ID/confirm" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{}')
+  CONF_STATUS=$(echo "$CONFIRM" | "$PY" -c "import sys, json; print(json.load(sys.stdin).get('status',''))")
+  if [ "$CONF_STATUS" = "active" ]; then
+    ok "confirm 后 status=active"
+  else
+    fail "confirm 后 status=$CONF_STATUS（期望 active）"
+  fi
+
+  # 列表应可见
+  LIST=$(curl -sf "$API/invoices/?status_filter=active&search=烟测" -H "Authorization: Bearer $TOKEN")
+  FOUND=$(echo "$LIST" | "$PY" -c "import sys, json; print(sum(1 for i in json.load(sys.stdin)['items'] if i['id']=='$ARCH_ID'))")
+  if [ "$FOUND" -ge 1 ]; then
+    ok "列表查询找到归档发票"
+  else
+    warn "列表中未找到（可能是 search 过滤）"
+  fi
+fi
+
+# 12. 总结
 echo ""
 echo "================================================"
 echo "📊 烟测结果：通过 $PASS / 失败 $FAIL / 警告 $WARN"

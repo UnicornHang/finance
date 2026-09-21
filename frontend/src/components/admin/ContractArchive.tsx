@@ -3,7 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import { Download, FileText, Search } from 'lucide-react'
 
 import { Card, CardContent } from '@/components/ui/card'
-import { Input, Select } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { SectionHeader } from '@/components/ui/stat'
 import { Table, TBody, TD, TH, THead, TR, EmptyState, Toolbar } from '@/components/ui/table'
@@ -71,15 +78,16 @@ export function ContractArchive() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <Select
-            className="h-9 w-40"
-            value={riskFilter}
-            onChange={(e) => setRiskFilter(e.target.value)}
-          >
-            <option value="">全部风险</option>
-            <option value="high">高风险</option>
-            <option value="medium">中风险</option>
-            <option value="low">低风险</option>
+          <Select value={riskFilter} onValueChange={setRiskFilter}>
+            <SelectTrigger className="h-9 w-40">
+              <SelectValue placeholder="全部风险" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">全部风险</SelectItem>
+              <SelectItem value="high">高风险</SelectItem>
+              <SelectItem value="medium">中风险</SelectItem>
+              <SelectItem value="low">低风险</SelectItem>
+            </SelectContent>
           </Select>
           <span className="ml-auto text-body-sm text-ink-tertiary tabular-nums">
             共 {list.length} 份

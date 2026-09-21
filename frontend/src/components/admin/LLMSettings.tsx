@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, Cpu, PlayCircle, XCircle } from 'lucide-react'
+import { CheckCircle2, Cpu, PlayCircle, RefreshCw, XCircle } from 'lucide-react'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input, Label, Textarea } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SectionHeader } from '@/components/ui/stat'
@@ -17,6 +18,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { llmApi } from '@/api/admin'
 import { PROVIDERS, PROVIDER_LIST } from '@/api/providers'
 import { cn } from '@/lib/utils'
@@ -358,6 +366,25 @@ function EditConfigDialog({
   const providerDef = PROVIDERS[state.provider]
   const models = providerDef?.models || []
 
+  // 拉取 provider 清单（含每个 provider 的模型列表）
+  const providersQuery = useQuery({
+    queryKey: ['llm-providers'],
+    queryFn: () => llmApi.listProviders(),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // 当前 provider 在服务端返回的模型清单
+  const remoteModels =
+    providersQuery.data?.find((p) => p.key === state.provider)?.models || []
+  // 优先用服务端最新数据；尚未返回时回退到本地静态列表
+  const availableModels = remoteModels.length > 0 ? remoteModels : models
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const filteredModels = useMemo(() => {
+    const q = state.model.trim().toLowerCase()
+    if (!q) return availableModels
+    return availableModels.filter((m) => m.toLowerCase().includes(q))
+  }, [availableModels, state.model])
+
   const handleProviderChange = (provider: string) => {
     const def = PROVIDERS[provider]
     setState((s) => ({
@@ -381,36 +408,93 @@ function EditConfigDialog({
 
         <div className="space-y-3">
           <FieldInline label="Provider">
-            <select
-              className="flex h-10 w-full rounded border border-line bg-surface px-3 text-body-md text-ink focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-              value={state.provider}
-              onChange={(e) => handleProviderChange(e.target.value)}
-            >
-              {PROVIDER_LIST.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+            <Select value={state.provider} onValueChange={handleProviderChange}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择 Provider" />
+              </SelectTrigger>
+              <SelectContent>
+                {PROVIDER_LIST.map((p) => (
+                  <SelectItem key={p.key} value={p.key}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </FieldInline>
 
           <FieldInline label="模型">
-            <Input
-              value={state.model}
-              onChange={(e) =>
-                setState((s) => ({ ...s, model: e.target.value }))
-              }
-              placeholder={models[0] || '例如 gpt-4o'}
-              list={`models-${cfg.scene}`}
-              className="font-mono"
-            />
-            {models.length > 0 && (
-              <datalist id={`models-${cfg.scene}`}>
-                {models.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
-            )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Input
+                  value={state.model}
+                  onChange={(e) => {
+                    setState((s) => ({ ...s, model: e.target.value }))
+                    setModelDropdownOpen(true)
+                  }}
+                  onFocus={() => setModelDropdownOpen(true)}
+                  onBlur={() => {
+                    // 延迟收起，避免点不到下拉项
+                    setTimeout(() => setModelDropdownOpen(false), 150)
+                  }}
+                  placeholder="选择或输入模型名"
+                  autoComplete="off"
+                  className="font-mono"
+                />
+                {modelDropdownOpen && filteredModels.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-auto rounded-md border border-line-strong bg-surface shadow-raised">
+                    {filteredModels.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        tabIndex={-1}
+                        onMouseDown={(e) => {
+                          // onMouseDown 在 input blur 之前触发，避免提前关闭
+                          e.preventDefault()
+                          setState((s) => ({ ...s, model: m }))
+                          setModelDropdownOpen(false)
+                        }}
+                        className={cn(
+                          'block w-full px-3 py-1.5 text-left font-mono text-body-sm hover:bg-surface-inset',
+                          state.model === m && 'bg-primary-tint text-primary',
+                        )}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                onClick={async () => {
+                  const result = await providersQuery.refetch()
+                  if (result.data) {
+                    const def = result.data.find((p) => p.key === state.provider)
+                    if (def) {
+                      toast.success(
+                        `已刷新 ${def.label} 模型列表（共 ${def.models.length} 个）`,
+                      )
+                    } else {
+                      toast.success('已刷新模型列表')
+                    }
+                  } else {
+                    toast.error('获取模型列表失败')
+                  }
+                }}
+                disabled={providersQuery.isFetching}
+                title="从服务端重新拉取模型清单"
+              >
+                <RefreshCw
+                  className={cn(
+                    'h-4 w-4',
+                    providersQuery.isFetching && 'animate-spin',
+                  )}
+                />
+                {providersQuery.isFetching ? '刷新中...' : '获取模型列表'}
+              </Button>
+            </div>
           </FieldInline>
 
           <FieldInline label="Base URL">

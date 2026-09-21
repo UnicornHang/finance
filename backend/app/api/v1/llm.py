@@ -43,6 +43,7 @@ class LlmConfigUpsert(BaseModel):
     timeout_seconds: int = Field(default=30, ge=5, le=300)
     enabled: bool = True
     extra_params: dict | None = None
+    system_prompt: str | None = None  # Phase A：场景级 prompt 持久化
 
 
 class LlmConfigTest(BaseModel):

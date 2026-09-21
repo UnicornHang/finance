@@ -13,7 +13,17 @@ export function ContractPanel() {
 
   if (!sidePanelOpen || !sidePanelData) return null
 
-  const review = sidePanelData.review_result
+  const data = sidePanelData as {
+    review_result?: { violations?: unknown[]; summary?: string }
+    risk_level?: 'high' | 'medium' | 'low' | null
+    contract_name?: string | null
+    party_a?: string | null
+    party_b?: string | null
+    sign_date?: string | null
+    amount?: number | null
+  }
+
+  const review = data.review_result
   const violationCount = review?.violations?.length || 0
 
   return (
@@ -46,7 +56,7 @@ export function ContractPanel() {
               风险评估
             </p>
             <div className="mt-1.5 flex items-center gap-2">
-              <RiskBadge level={sidePanelData.risk_level} />
+              <RiskBadge level={data.risk_level} />
               <span className="text-body-sm text-ink-tertiary">
                 检出 <span className="font-semibold text-ink tabular-nums">{violationCount}</span> 项风险
               </span>
@@ -63,7 +73,7 @@ export function ContractPanel() {
         <section className="space-y-4">
           <Field label="合同名称">
             <Input
-              value={sidePanelData.contract_name || ''}
+              value={data.contract_name || ''}
               readOnly
               className="bg-canvas"
             />
@@ -71,24 +81,24 @@ export function ContractPanel() {
 
           <div className="grid grid-cols-2 gap-4">
             <Field label="甲方">
-              <Input value={sidePanelData.party_a || ''} readOnly className="bg-canvas" />
+              <Input value={data.party_a || ''} readOnly className="bg-canvas" />
             </Field>
             <Field label="乙方">
-              <Input value={sidePanelData.party_b || ''} readOnly className="bg-canvas" />
+              <Input value={data.party_b || ''} readOnly className="bg-canvas" />
             </Field>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <Field label="签订日期">
               <Input
-                value={formatDate(sidePanelData.sign_date)}
+                value={formatDate(data.sign_date)}
                 readOnly
                 className="bg-canvas"
               />
             </Field>
             <Field label="合同金额">
               <Input
-                value={formatCurrency(sidePanelData.amount)}
+                value={formatCurrency(data.amount)}
                 readOnly
                 className="bg-canvas tabular-nums"
               />

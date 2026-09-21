@@ -312,7 +312,7 @@ Agent 回复采用流式（SSE/WebSocket），提升体验。
 
 #### 5.6.6 LLM 设置
 - 模型选择：GPT/Claude/通义/文心/本地
-- API Key、Base URL、温度、Max Tokens
+- API Key、Base URL、温度、Max Tokens、System Prompt
 - 按场景配置：
   - 闲聊模型
   - 制度问答模型
@@ -989,5 +989,58 @@ async def get_invoice(
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | V1.0 | 2026-09-20 | 初版，覆盖产品定位、功能模块、用户旅程、数据模型 |
+| V1.1 | 2026-09-21 | **Phase A 完成**：发票 OCR 归档全链路验收（详见 §20） |
+
+---
+
+## 20. Phase A 验收清单（2026-09-21）
+
+**范围**：发票智能识别 + 人工确认 + 归档（旅程一）。
+
+### 20.1 端到端流程
+
+```
+用户上传 → chat_stream multipart → MinIO 存 + SHA-256
+  → Celery process_invoice_ocr → 腾讯云 OCR（或 Mock 降级）
+  → InvoiceOCRResult → invoice_service.create_pending(status='pending_review')
+  → 前端轮询 GET /invoices/preview/by-hash/{hash}
+  → 用户编辑 → POST /invoices/{id}/confirm → status='active'
+  → 档案页可见
+```
+
+### 20.2 验收项
+
+| # | 验收点 | 验证方式 | 状态 |
+|---|---|---|---|
+| 1 | 上传 PDF/JPG → SSE 收到 `sidepanel{status:processing}` + `done` | smoke.sh step 10 + test_chat_with_file | ✅ |
+| 2 | 3-10s 后前端 InvoicePanel 弹出可编辑表单 | 轮询 `/preview/by-hash/{hash}` 拿到 ready | ✅ |
+| 3 | 编辑字段 → 点确认 → toast 成功 + 档案列表刷新 | `invoiceApi.confirm(id, data)` | ✅ |
+| 4 | 重复上传相同 (code+number) 发票 → 后端 409 | `uq_invoice_tenant_code_number` 唯一约束 | ✅ |
+| 5 | 员工看不到别人的发票 | 行级 `WHERE user_id = current_user.id` | ✅ |
+| 6 | 软删 → 列表不显示 | status='deleted' 过滤 | ✅ |
+| 7 | 详情页拿 MinIO 预签名 URL 下载原件 | `GET /invoices/{id}/file` | ✅ |
+| 8 | LLM 设置编辑 system_prompt → 持久化 | `llm_configs.system_prompt` 列 + 迁移 002 | ✅ |
+| 9 | 测试全绿 | `pytest tests/test_invoice_archive.py tests/test_chat_with_file.py` | ✅ |
+| 10 | smoke.sh 11 步全绿 | 见 scripts/smoke.sh | ✅ |
+| 11 | Celery worker 自动接管 OCR 任务 | docker-compose worker 已挂载 | ✅ |
+
+### 20.3 关键设计决策
+
+1. **不用 Redis pubsub**：前端轮询 `GET /invoices/preview/by-hash/{hash}`，避免长 SSE + 重连复杂度。
+2. **两阶段入库**：OCR 完成先 `status='pending_review'`，用户确认才 `active`，符合"AI 做识别，人做确认"原则。
+3. **去重策略**：硬拒绝（409 Conflict），不静默覆盖。重复上传时 OCR 任务主动跳过。
+4. **降级策略**：`TENCENT_OCR_SECRET_ID` 为空时返回 `MockOCRProvider`，开发环境无需真密钥。
+5. **审计日志**：编辑/确认/删除均写入 `audit_logs`，记录 `before_value` / `after_value` 快照。
+6. **行级权限**：员工只查自己发票，财务/管理员查全部；service 层用 `user.role` 强制过滤。
+
+### 20.4 不在 Phase A 范围
+
+- 流式中断（`/chat/interrupt/{id}` 仍 MVP 占位）
+- LLM 归一（`_llm_normalize` 当前直接透传 OCR 结果；scene='ocr_post' 留给 Phase B）
+- 批量上传 / 拖拽上传 UI
+- 发票字段版本历史（仅快照当前值）
+- PDF 多页发票拆分识别
+
+
 
 ---

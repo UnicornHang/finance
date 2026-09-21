@@ -44,8 +44,22 @@ export interface Invoice {
   buyer: string | null
   remark: string | null
   file_url: string | null
-  status: string
+  file_hash: string | null
+  ocr_confidence: Record<string, number> | null
+  status: 'pending_review' | 'active' | 'deleted' | string
+  user_id: string
   created_at: string
+  updated_at: string | null
+}
+
+export interface InvoicePreviewResponse {
+  status: 'processing' | 'ready' | 'not_found'
+  invoice?: Invoice
+}
+
+export interface InvoiceFileResponse {
+  url: string
+  expires_in: number
 }
 
 export interface Contract {
@@ -119,7 +133,16 @@ export interface KbDocument {
 
 // SSE 事件类型
 export type StreamEvent =
-  | { type: 'text'; content: string }
-  | { type: 'sidepanel'; payload: { type: 'invoice' | 'contract'; data: any } }
+  | { type: 'text'; content: string; session_id?: string }
+  | {
+      type: 'sidepanel'
+      payload: {
+        type: 'invoice' | 'contract'
+        data:
+          | { status: 'processing'; file_url: string; file_hash: string }
+          | { status: 'ready'; invoice_id: string; invoice_title?: string; [k: string]: unknown }
+          | Record<string, unknown>
+      }
+    }
   | { type: 'done' }
   | { type: 'error'; message: string }

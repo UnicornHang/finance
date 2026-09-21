@@ -1,6 +1,7 @@
 """Chat 编排服务。
 
 负责消息持久化、上下文组装、LLM 流式输出。
+Phase A：支持文件上传触发 OCR 异步任务，OCR 完成后写 Invoice 供前端轮询。
 """
 
 import logging
@@ -96,14 +97,24 @@ class ChatService:
         user: "User",
         session_id: UUID,
         user_message: str,
+        *,
+        file_url: str | None = None,
+        file_hash: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """流式处理用户输入，yield SSE 事件字典。
 
         事件类型：
         - {type: "session", session_id: "..."}  ：会话确认（新建会话时）
         - {type: "text", content: "..."}        ：增量文本
+        - {type: "sidepanel", payload: {...}}   ：侧弹窗（OCR 上传时触发）
         - {type: "done"}                       ：流结束
         - {type: "error", message: "..."}       ：错误
+
+        文件上传分支（Phase A）：
+        1. 持久化用户消息（含文件名）
+        2. 触发 Celery process_invoice_ocr.delay(...)
+        3. 立即 yield sidepanel{status:'processing'} + text + done
+        4. 前端轮询 GET /invoices/preview/by-hash/{hash} 获取 OCR 结果
         """
         # 1. 校验会话归属
         try:
@@ -119,6 +130,45 @@ class ChatService:
             db, session_id, user.tenant_id, "user", user_message
         )
 
+        # ========== Phase A：文件上传分支 ==========
+        if file_url and file_hash:
+            try:
+                # 触发 Celery（异步，不 await）
+                from app.tasks.ocr_task import process_invoice_ocr
+
+                process_invoice_ocr.delay(
+                    tenant_id=str(user.tenant_id),
+                    user_id=str(user.id),
+                    file_url=file_url,
+                    file_hash=file_hash,
+                    user_message=user_message or None,
+                )
+                logger.info(
+                    "OCR task dispatched: tenant=%s hash=%s session=%s",
+                    user.tenant_id, file_hash, session_id,
+                )
+
+                # 推 sidepanel processing 事件
+                yield {
+                    "type": "sidepanel",
+                    "payload": {
+                        "type": "invoice",
+                        "data": {
+                            "status": "processing",
+                            "file_url": file_url,
+                            "file_hash": file_hash,
+                        },
+                    },
+                }
+                yield {"type": "text", "content": "正在识别发票字段，请稍候…"}
+                yield {"type": "done"}
+                return
+            except Exception as exc:
+                logger.exception("Failed to dispatch OCR task")
+                yield {"type": "error", "message": f"OCR 任务派发失败：{exc}"}
+                return
+
+        # ========== 常规对话分支（保持原逻辑） ==========
         # 3. 加载上下文
         history = await self.load_recent_messages(db, session_id, limit=20)
         # 移除刚保存的用户消息（避免重复）

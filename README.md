@@ -65,7 +65,7 @@ finance/
 
 ```bash
 ./scripts/smoke.sh
-# 9 步覆盖：health → 登录 → /me → /sessions → SSE 流式 → 消息历史 → /llm/providers → /llm/configs
+# 11 步覆盖：health → 登录 → /me → /sessions → SSE 流式 → 消息历史 → /llm/providers + /llm/configs → /invoices/archive → multipart 上传 → confirm + 列表查询
 ```
 
 ### 手动分步启动（如需自定义）
@@ -120,6 +120,23 @@ npm run dev
 - **Phase 1（4-6 周）**：登录 + Chat + 发票 OCR 归档
 - **Phase 2（4 周）**：合同审查 + RAG 知识库
 - **Phase 3（3 周）**：制度问答 + 后台看板 + 权限细化
+
+### Phase A 完成情况（2026-09）
+
+发票 OCR 归档全链路已实现：
+
+- ✅ 用户上传发票 → MinIO 存储 → Celery 异步 OCR 识别
+- ✅ 腾讯云 OCR Provider + Mock 降级（无密钥时不崩）
+- ✅ 前端侧弹窗轮询 `/invoices/preview/by-hash/{hash}` 实时刷新
+- ✅ 用户确认 → `status: pending_review → active` 归档
+- ✅ 唯一约束 `(tenant_id, invoice_code, invoice_number)` 硬去重（409）
+- ✅ 行级权限：员工仅看自己的发票；财务/管理员看全部
+- ✅ 审计日志：编辑/确认/删除均落 audit_logs
+- ✅ MinIO 预签名下载 URL（默认 1h 过期）
+- ✅ 后台档案页：分页 + 类型/状态筛选 + CSV 导出 + 详情对话框
+- ✅ LLM 场景配置新增 `system_prompt` 字段持久化
+
+详细验收清单见 [docs/PRD.md §Phase A 验收](docs/PRD.md)。
 
 ## License
 

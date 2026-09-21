@@ -1,29 +1,35 @@
 import * as React from 'react'
+
 import { cn } from '@/lib/utils'
+
+/**
+ * shadcn/ui 风格 Input —— 保留原生 <input> 的同时对齐视觉/焦点行为
+ *
+ * 配套：
+ * - 焦点环：focus-visible:ring-2 focus-visible:ring-primary/40
+ * - 失效态：invalid:border-danger + invalid:ring-danger/40
+ * - Label 关联：使用 peer-disabled 时由 <Label> 自动灰化
+ */
 
 export interface InputProps
   extends React.InputHTMLAttributes<HTMLInputElement> {
   invalid?: boolean
 }
 
-/**
- * Pristine Crisp Fintech 输入控件
- * - 白底 + 1px 边框 + 4px 圆角
- * - 高度 40px，字号 14px
- * - Focus: 边框 primary + 2px primary focus ring
- */
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, type, invalid, ...props }, ref) => (
     <input
       type={type}
       ref={ref}
       className={cn(
-        'flex h-10 w-full rounded border bg-surface px-3 text-body-md text-ink',
+        'flex h-10 w-full rounded-md border border-line bg-surface px-3 py-2 text-body-md text-ink',
         'placeholder:text-ink-muted',
         'transition-colors duration-150',
-        'focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary',
         'disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-canvas',
-        invalid && 'border-danger focus-visible:border-danger focus-visible:ring-danger/30',
+        'file:border-0 file:bg-transparent file:text-sm file:font-medium',
+        invalid &&
+          'border-danger focus-visible:border-danger focus-visible:ring-danger/40',
         !invalid && 'border-line',
         className,
       )}
@@ -34,7 +40,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 Input.displayName = 'Input'
 
 /**
- * 多行文本域
+ * shadcn/ui 风格 Textarea
  */
 export const Textarea = React.forwardRef<
   HTMLTextAreaElement,
@@ -43,10 +49,10 @@ export const Textarea = React.forwardRef<
   <textarea
     ref={ref}
     className={cn(
-      'flex min-h-[80px] w-full rounded border border-line bg-surface px-3 py-2 text-body-md text-ink',
+      'flex min-h-[80px] w-full rounded-md border border-line bg-surface px-3 py-2 text-body-md text-ink',
       'placeholder:text-ink-muted',
       'transition-colors duration-150',
-      'focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:border-primary',
       'disabled:cursor-not-allowed disabled:opacity-50',
       className,
     )}
@@ -54,47 +60,3 @@ export const Textarea = React.forwardRef<
   />
 ))
 Textarea.displayName = 'Textarea'
-
-/**
- * Select
- */
-export const Select = React.forwardRef<
-  HTMLSelectElement,
-  React.SelectHTMLAttributes<HTMLSelectElement>
->(({ className, children, ...props }, ref) => (
-  <select
-    ref={ref}
-    className={cn(
-      'flex h-10 w-full rounded border border-line bg-surface px-3 text-body-md text-ink',
-      'transition-colors duration-150',
-      'focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/30',
-      'disabled:cursor-not-allowed disabled:opacity-50',
-      className,
-    )}
-    {...props}
-  >
-    {children}
-  </select>
-))
-Select.displayName = 'Select'
-
-/**
- * Label
- */
-export const Label = React.forwardRef<
-  HTMLLabelElement,
-  React.LabelHTMLAttributes<HTMLLabelElement> & { required?: boolean }
->(({ className, required, children, ...props }, ref) => (
-  <label
-    ref={ref}
-    className={cn(
-      'block text-label-md font-semibold uppercase tracking-wider text-ink-tertiary mb-1.5',
-      className,
-    )}
-    {...props}
-  >
-    {children}
-    {required && <span className="ml-1 text-danger normal-case">*</span>}
-  </label>
-))
-Label.displayName = 'Label'

@@ -3,7 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import { Plus, Search, UserCog, Users } from 'lucide-react'
 
 import { Card, CardContent } from '@/components/ui/card'
-import { Input, Select } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { SectionHeader } from '@/components/ui/stat'
@@ -75,15 +82,16 @@ export function UserManage() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <Select
-            className="h-9 w-40"
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-          >
-            <option value="">全部角色</option>
-            <option value="admin">管理员</option>
-            <option value="finance">财务</option>
-            <option value="employee">员工</option>
+          <Select value={roleFilter} onValueChange={setRoleFilter}>
+            <SelectTrigger className="h-9 w-40">
+              <SelectValue placeholder="全部角色" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">全部角色</SelectItem>
+              <SelectItem value="admin">管理员</SelectItem>
+              <SelectItem value="finance">财务</SelectItem>
+              <SelectItem value="employee">员工</SelectItem>
+            </SelectContent>
           </Select>
           <span className="ml-auto text-body-sm text-ink-tertiary tabular-nums">
             共 {list.length} 个账号

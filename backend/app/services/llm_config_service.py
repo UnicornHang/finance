@@ -86,6 +86,7 @@ class LlmConfigService:
                 timeout_seconds=data.get("timeout_seconds", 30),
                 enabled=data.get("enabled", True),
                 extra_params=data.get("extra_params"),
+                system_prompt=data.get("system_prompt"),
             )
             db.add(cfg)
 
@@ -163,6 +164,7 @@ class LlmConfigService:
             "temperature": float(cfg.temperature) if cfg.temperature else 0.7,
             "max_tokens": cfg.max_tokens or 2000,
             "timeout": cfg.timeout_seconds or 30,
+            "system_prompt": cfg.system_prompt,
         }
 
         _config_cache[cache_key] = result
@@ -200,6 +202,7 @@ class LlmConfigService:
             "api_key_masked": (
                 "****" + cfg.api_key_encrypted[-8:] if cfg.api_key_encrypted and len(cfg.api_key_encrypted) >= 8 else "****"
             ) if cfg.api_key_encrypted else None,
+            "system_prompt": cfg.system_prompt,
             "updated_at": cfg.updated_at.isoformat() if cfg.updated_at else None,
         }
 
