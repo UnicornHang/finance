@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { CheckCircle2, Cpu, PlayCircle, XCircle } from 'lucide-react'
 
@@ -44,7 +44,7 @@ interface EditState {
 }
 
 export function LLMSettings() {
-  const { data: configs, isLoading } = useQuery({
+  const { data: configs, isLoading } = useQuery<LLMConfig[]>({
     queryKey: ['llm-configs'],
     queryFn: () => llmApi.listConfigs(),
   })
