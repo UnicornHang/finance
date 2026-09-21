@@ -32,6 +32,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Field } from '@/components/ui/surface'
 import { Table, TBody, TD, TH, THead, TR, EmptyState, Toolbar } from '@/components/ui/table'
 import { invoiceApi } from '@/api/invoice'
@@ -122,6 +132,7 @@ export function InvoiceArchive() {
   const [page, setPage] = useState(1)
   const pageSize = 20
   const [detail, setDetail] = useState<Invoice | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['invoices', page, pageSize, typeFilter, statusFilter],
@@ -479,11 +490,7 @@ export function InvoiceArchive() {
             )}
             <Button
               variant="danger"
-              onClick={() => {
-                if (!detail) return
-                if (!confirm('确认删除该发票？此操作不可撤销。')) return
-                removeMutation.mutate(detail.id)
-              }}
+              onClick={() => setConfirmDelete(true)}
               disabled={removeMutation.isPending || !detailQuery.data}
             >
               <Trash2 className="h-4 w-4" />
@@ -495,6 +502,38 @@ export function InvoiceArchive() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 删除确认 AlertDialog —— 替代原生 confirm() */}
+      <AlertDialog
+        open={confirmDelete}
+        onOpenChange={(o) => {
+          if (!o && !removeMutation.isPending) setConfirmDelete(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定删除该发票？</AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作不可撤销，发票记录将从档案中移除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removeMutation.isPending}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!detail) return
+                removeMutation.mutate(detail.id)
+                setConfirmDelete(false)
+              }}
+              disabled={removeMutation.isPending}
+            >
+              {removeMutation.isPending ? '删除中...' : '确定'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 隐藏的文件图标，避免未使用警告 */}
       <span className="hidden">

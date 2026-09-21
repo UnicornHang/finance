@@ -6,6 +6,7 @@ import { User2, Lock, Eye, EyeOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 import { loginSchema, type LoginInput } from '@/lib/validators'
@@ -170,11 +171,10 @@ export function Login() {
                 {/* 记住我 + 忘记密码 */}
                 <div className="flex items-center justify-between pt-1">
                   <label className="flex items-center gap-2 cursor-pointer select-none group">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-sky-500 focus:ring-sky-400 focus:ring-offset-0 cursor-pointer"
+                      onCheckedChange={(v) => setRememberMe(v === true)}
+                      className="border-slate-300 data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500"
                     />
                     <span className="text-body-md text-slate-600 group-hover:text-slate-900">
                       记住我

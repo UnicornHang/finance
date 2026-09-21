@@ -10,6 +10,30 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BrandLogo } from '@/components/ui/brand'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSessions } from '@/hooks/useSession'
 import { cn, formatDate } from '@/lib/utils'
@@ -19,7 +43,7 @@ import { cn, formatDate } from '@/lib/utils'
  * - 280px 固定宽度
  * - 顶部品牌 + 搜索
  * - "新建会话" 突出
- * - 会话项 hover 显示操作菜单 (重命名/删除)
+ * - 会话项 hover 显示 DropdownMenu (重命名/删除)
  */
 export function SessionList() {
   const { sessions, createSession } = useSessions()
@@ -30,7 +54,10 @@ export function SessionList() {
   const clearMessages = useSessionStore((s) => s.clearMessages)
 
   const [query, setQuery] = useState('')
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   const handleNew = async () => {
     const session = await createSession()
@@ -39,31 +66,44 @@ export function SessionList() {
 
   const handleSwitch = (id: string) => switchSession(id)
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setMenuOpenId(null)
-    if (!confirm('确定删除此会话？此操作不可恢复')) return
+  const openRename = (id: string, title: string | null) => {
+    setRenameTarget({ id, title: title || '' })
+    setRenameValue(title || '')
+  }
+
+  const submitRename = async () => {
+    if (!renameTarget) return
+    const newTitle = renameValue.trim()
+    if (!newTitle || newTitle === renameTarget.title) {
+      setRenameTarget(null)
+      return
+    }
+    setBusy(true)
     try {
       const { sessionApi } = await import('@/api/chat')
-      await sessionApi.remove(id)
-      removeSession(id)
-      clearMessages(id)
+      const updated = await sessionApi.update(renameTarget.id, { title: newTitle })
+      updateSession(renameTarget.id, { title: updated.title })
     } catch {
       // ignore
+    } finally {
+      setBusy(false)
+      setRenameTarget(null)
     }
   }
 
-  const handleRename = async (id: string, title: string | null) => {
-    setMenuOpenId(null)
-    const newTitle = prompt('重命名会话', title || '')
-    if (newTitle && newTitle !== title) {
-      try {
-        const { sessionApi } = await import('@/api/chat')
-        const updated = await sessionApi.update(id, { title: newTitle })
-        updateSession(id, { title: updated.title })
-      } catch {
-        // ignore
-      }
+  const confirmDelete = async () => {
+    if (!deleteTargetId) return
+    setBusy(true)
+    try {
+      const { sessionApi } = await import('@/api/chat')
+      await sessionApi.remove(deleteTargetId)
+      removeSession(deleteTargetId)
+      clearMessages(deleteTargetId)
+    } catch {
+      // ignore
+    } finally {
+      setBusy(false)
+      setDeleteTargetId(null)
     }
   }
 
@@ -116,7 +156,6 @@ export function SessionList() {
           <div className="space-y-0.5">
             {filtered.map((session) => {
               const isActive = currentSessionId === session.id
-              const isMenuOpen = menuOpenId === session.id
               return (
                 <div
                   key={session.id}
@@ -150,48 +189,117 @@ export function SessionList() {
                     </p>
                   </div>
 
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setMenuOpenId(isMenuOpen ? null : session.id)
-                    }}
-                    aria-label="会话操作"
-                    className={cn(
-                      'flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-tertiary hover:bg-surface hover:text-ink',
-                      (isMenuOpen || isActive) && 'opacity-100',
-                      !isMenuOpen && !isActive && 'opacity-0 group-hover:opacity-100',
-                    )}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </button>
-
-                  {isMenuOpen && (
-                    <div
-                      className="absolute right-2 top-9 z-10 min-w-[140px] rounded-md border border-line-strong bg-surface shadow-raised"
-                      onClick={(e) => e.stopPropagation()}
-                    >
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
                       <button
-                        className="flex w-full items-center gap-2 px-3 py-2 text-body-md text-ink hover:bg-surface-inset"
-                        onClick={() => handleRename(session.id, session.title)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="会话操作"
+                        className={cn(
+                          'flex h-7 w-7 shrink-0 items-center justify-center rounded text-ink-tertiary hover:bg-surface hover:text-ink',
+                          'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+                          isActive && 'opacity-100',
+                          'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                        )}
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-[140px]">
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openRename(session.id, session.title)
+                        }}
                       >
                         <Pencil className="h-3.5 w-3.5" />
                         重命名
-                      </button>
-                      <button
-                        className="flex w-full items-center gap-2 px-3 py-2 text-body-md text-danger hover:bg-danger-tint"
-                        onClick={(e) => handleDelete(session.id, e)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDeleteTargetId(session.id)
+                        }}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         删除
-                      </button>
-                    </div>
-                  )}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               )
             })}
           </div>
         )}
       </div>
+
+      {/* 重命名 Dialog —— 替代原生 prompt() */}
+      <Dialog
+        open={!!renameTarget}
+        onOpenChange={(o) => {
+          if (!o && !busy) setRenameTarget(null)
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>重命名会话</DialogTitle>
+            <DialogDescription>
+              为当前会话设置一个新标题，最多 60 个字符。
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            placeholder="请输入会话标题"
+            maxLength={60}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !busy) submitRename()
+            }}
+          />
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              size="md"
+              onClick={() => setRenameTarget(null)}
+              disabled={busy}
+            >
+              取消
+            </Button>
+            <Button
+              size="md"
+              onClick={submitRename}
+              disabled={busy || !renameValue.trim()}
+              className="text-white"
+            >
+              {busy ? '保存中...' : '确定'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 删除确认 AlertDialog —— 替代原生 confirm() */}
+      <AlertDialog
+        open={!!deleteTargetId}
+        onOpenChange={(o) => {
+          if (!o && !busy) setDeleteTargetId(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定删除此会话？</AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作不可恢复，会话消息将被永久删除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={busy}>
+              {busy ? '删除中...' : '确定'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </aside>
   )
 }

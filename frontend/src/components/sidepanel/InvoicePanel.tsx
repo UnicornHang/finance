@@ -21,7 +21,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { SidePanel, Field } from '@/components/ui/surface'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetFooter,
+} from '@/components/ui/sheet'
+import { Field } from '@/components/ui/surface'
 import { Badge } from '@/components/ui/badge'
 import { useUIStore, type InvoiceSidePanelData } from '@/stores/uiStore'
 import { invoiceApi } from '@/api/invoice'
@@ -176,23 +184,22 @@ export function InvoicePanel() {
   // ============ 处理中视图 ============
   if (isProcessing) {
     return (
-      <SidePanel
-        open={sidePanelOpen}
-        onClose={closeSidePanel}
-        icon={<Receipt className="h-4 w-4" />}
-        title="正在识别发票"
-        subtitle="AI 智能提取字段中"
-        width={560}
-        footer={
-          <>
-            <div className="flex-1" />
-            <Button variant="secondary" onClick={closeSidePanel}>
-              取消
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-5">
+      <Sheet open={sidePanelOpen} onOpenChange={(o) => !o && closeSidePanel()}>
+        <SheetContent side="right" className="w-full sm:max-w-xl flex flex-col">
+          <SheetHeader>
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 items-center justify-center rounded bg-primary-tint text-primary">
+                <Receipt className="h-4 w-4" />
+              </div>
+              <div>
+                <SheetTitle>正在识别发票</SheetTitle>
+                <SheetDescription>AI 智能提取字段中</SheetDescription>
+              </div>
+            </div>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto px-5 py-5">
+            <div className="space-y-5">
           {/* 加载骨架 */}
           <div className="flex flex-col items-center justify-center gap-4 py-10">
             <div className="relative flex h-16 w-16 items-center justify-center">
@@ -235,8 +242,17 @@ export function InvoicePanel() {
               </li>
             </ul>
           </div>
-        </div>
-      </SidePanel>
+            </div>
+          </div>
+
+          <SheetFooter>
+            <div className="flex-1" />
+            <Button variant="secondary" onClick={closeSidePanel}>
+              取消
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+    </Sheet>
     )
   }
 
@@ -245,33 +261,23 @@ export function InvoicePanel() {
   const confidencePct = confidence !== null ? Math.round(confidence * 100) : null
 
   return (
-    <SidePanel
-      open={sidePanelOpen}
-      onClose={closeSidePanel}
-      icon={<Receipt className="h-4 w-4" />}
-      title="发票识别结果"
-      subtitle={isReady ? 'AI 智能提取 · 请核对后归档' : '手动归档'}
-      width={560}
-      footer={
-        <>
-          <Button variant="ghost" size="md" type="button">
-            <RotateCw className="h-4 w-4" />
-            重新识别
-          </Button>
-          <div className="flex-1" />
-          <Button variant="secondary" onClick={closeSidePanel} type="button">
-            取消
-          </Button>
-          <Button
-            onClick={form.handleSubmit(onSubmit)}
-            disabled={submitting}
-            type="button"
-          >
-            {submitting ? '归档中...' : '确定归档'}
-          </Button>
-        </>
-      }
-    >
+    <Sheet open={sidePanelOpen} onOpenChange={(o) => !o && closeSidePanel()}>
+      <SheetContent side="right" className="w-full sm:max-w-xl flex flex-col">
+        <SheetHeader>
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-7 w-7 items-center justify-center rounded bg-primary-tint text-primary">
+              <Receipt className="h-4 w-4" />
+            </div>
+            <div>
+              <SheetTitle>发票识别结果</SheetTitle>
+              <SheetDescription>
+                {isReady ? 'AI 智能提取 · 请核对后归档' : '手动归档'}
+              </SheetDescription>
+            </div>
+          </div>
+        </SheetHeader>
+
+        <div className="flex-1 overflow-y-auto px-5 py-5">
       <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)}>
         {/* 顶部信息条 */}
         <div className="flex items-center justify-between rounded-md border border-line-subtle bg-canvas px-4 py-3">
@@ -401,7 +407,27 @@ export function InvoicePanel() {
             <span>识别完成，点击「确定归档」即可保存到档案</span>
           </div>
         )}
-      </form>
-    </SidePanel>
+        </form>
+        </div>
+
+        <SheetFooter>
+          <Button variant="ghost" size="md" type="button">
+            <RotateCw className="h-4 w-4" />
+            重新识别
+          </Button>
+          <div className="flex-1" />
+          <Button variant="secondary" onClick={closeSidePanel} type="button">
+            取消
+          </Button>
+          <Button
+            onClick={form.handleSubmit(onSubmit)}
+            disabled={submitting}
+            type="button"
+          >
+            {submitting ? '归档中...' : '确定归档'}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   )
 }

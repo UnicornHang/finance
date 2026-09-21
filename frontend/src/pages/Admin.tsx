@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   NavLink,
   Navigate,
@@ -19,13 +18,20 @@ import {
   Settings,
   MessageSquare,
   LogOut,
-  ChevronDown,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { BrandLogo } from '@/components/ui/brand'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -52,7 +58,6 @@ const ROLE_TONE: Record<string, 'primary' | 'success' | 'neutral'> = {
 
 export function Admin() {
   const user = useAuthStore((s) => s.user)
-  const [userMenuOpen, setUserMenuOpen] = useState(false)
   const { logout } = useAuth()
 
   if (user?.role !== 'admin' && user?.role !== 'finance') {
@@ -98,14 +103,10 @@ export function Admin() {
           {/* 搜索框 */}
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
-            <input
+            <Input
               type="text"
               placeholder="搜索菜单 / 用户 / 文档…"
-              className={cn(
-                'h-8 w-56 rounded-md border border-line bg-canvas pl-8 pr-3',
-                'text-body-sm text-ink placeholder:text-ink-tertiary',
-                'transition-colors focus:border-line-focus focus:outline-none',
-              )}
+              className="h-8 w-56 pl-8 pr-3 bg-canvas"
             />
           </div>
 
@@ -120,79 +121,64 @@ export function Admin() {
           </Button>
 
           {/* 用户下拉 */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setUserMenuOpen((v) => !v)}
-              className={cn(
-                'flex items-center gap-2 rounded-md px-2 py-1',
-                'hover:bg-surface-inset transition-colors',
-              )}
-            >
-              <div
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
                 className={cn(
-                  'flex h-8 w-8 items-center justify-center rounded-full',
-                  'bg-primary-tint text-primary text-body-md font-semibold',
+                  'flex items-center gap-2 rounded-md px-2 py-1',
+                  'hover:bg-surface-inset transition-colors',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                 )}
               >
-                {user?.name?.[0] || 'U'}
-              </div>
-              <div className="hidden flex-col items-start leading-tight md:flex">
-                <span className="text-body-sm font-semibold text-ink">
-                  {user?.name || '未登录'}
-                </span>
-                <span className="text-label-sm text-ink-tertiary">
-                  {ROLE_LABEL[role]}
-                </span>
-              </div>
-              <ChevronDown className="h-4 w-4 text-ink-tertiary" />
-            </button>
-
-            {userMenuOpen && (
-              <div
-                className={cn(
-                  'absolute right-0 top-full z-50 mt-1 min-w-[220px]',
-                  'rounded-md border border-line-strong bg-surface shadow-raised',
-                )}
-                onMouseLeave={() => setUserMenuOpen(false)}
-              >
-                <div className="border-b border-line-subtle px-4 py-3">
-                  <p className="text-body-md font-semibold text-ink">
-                    {user?.name}
-                  </p>
-                  <p className="mt-0.5 text-label-sm text-ink-tertiary">
-                    {user?.account}
-                  </p>
-                  <Badge tone={ROLE_TONE[role]} className="mt-2">
-                    {ROLE_LABEL[role]}
-                  </Badge>
+                <div
+                  className={cn(
+                    'flex h-8 w-8 items-center justify-center rounded-full',
+                    'bg-primary-tint text-primary text-body-md font-semibold',
+                  )}
+                >
+                  {user?.name?.[0] || 'U'}
                 </div>
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 px-4 py-2.5 text-body-md text-ink hover:bg-surface-inset"
-                >
-                  <Settings className="h-4 w-4 text-ink-tertiary" />
-                  账户设置
-                </button>
-                <Link
-                  to="/chat"
-                  onClick={() => setUserMenuOpen(false)}
-                  className="flex w-full items-center gap-2 border-t border-line-subtle px-4 py-2.5 text-body-md text-ink hover:bg-surface-inset"
-                >
+                <div className="hidden flex-col items-start leading-tight md:flex">
+                  <span className="text-body-sm font-semibold text-ink">
+                    {user?.name || '未登录'}
+                  </span>
+                  <span className="text-label-sm text-ink-tertiary">
+                    {ROLE_LABEL[role]}
+                  </span>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[220px]">
+              <div className="px-2 py-2">
+                <p className="text-body-md font-semibold text-ink">
+                  {user?.name}
+                </p>
+                <p className="mt-0.5 text-label-sm text-ink-tertiary">
+                  {user?.account}
+                </p>
+                <Badge tone={ROLE_TONE[role]} className="mt-2">
+                  {ROLE_LABEL[role]}
+                </Badge>
+              </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem>
+                <Settings className="h-4 w-4 text-ink-tertiary" />
+                账户设置
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/chat">
                   <MessageSquare className="h-4 w-4 text-ink-tertiary" />
                   返回对话工作台
                 </Link>
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="flex w-full items-center gap-2 border-t border-line-subtle px-4 py-2.5 text-body-md text-danger hover:bg-danger-tint"
-                >
-                  <LogOut className="h-4 w-4" />
-                  登出
-                </button>
-              </div>
-            )}
-          </div>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={logout}>
+                <LogOut className="h-4 w-4" />
+                登出
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -242,22 +228,12 @@ export function Admin() {
                 'rounded-md border border-primary-border bg-primary-tint p-3',
               )}
             >
-              <div className="mb-1.5 flex items-center gap-2">
+              <div className="flex items-center justify-center gap-2">
                 <ShieldCheck className="h-4 w-4 shrink-0 text-primary" />
                 <span className="text-body-sm font-semibold text-primary">
                   系统策略 / 权限合规
                 </span>
               </div>
-              <p className="text-label-sm leading-relaxed text-ink-secondary">
-                多租户隔离 / 高级权限已激活，Postgres RLS 强制执行中。
-              </p>
-              <Button
-                variant="link"
-                size="sm"
-                className="mt-1.5 h-auto px-0 text-primary"
-              >
-                查看详情 →
-              </Button>
             </div>
           </div>
         </aside>
