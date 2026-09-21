@@ -10,7 +10,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 import { loginSchema, type LoginInput } from '@/lib/validators'
 
-import loginBg from '@/assets/image/login_bg.jpg'
+import loginBg from '@/assets/image/login_bg.png'
 import loginContent from '@/assets/image/login_content.jpg'
 import logoPng from '@/assets/image/logo.png'
 
@@ -46,12 +46,12 @@ export function Login() {
               className="h-12 w-12 object-contain drop-shadow-[0_2px_8px_rgba(59,130,246,0.5)]"
             /> */}
             <div className="flex flex-col leading-tight text-center">
-              <h1 className="text-headline-md font-bold tracking-wide">
+              {/* <h1 className="text-headline-md font-bold tracking-wide">
                 企业AI Agent 财务平台
               </h1>
               <p className="text-label-sm uppercase tracking-[0.3em] text-blue-200/80">
                 AI · FINANCE · FUTURE
-              </p>
+              </p> */}
             </div>
           </header>
 
@@ -93,12 +93,12 @@ export function Login() {
                 <img
                   src={logoPng}
                   alt="logo"
-                  className="h-26 w-26 shrink-0 object-contain"
+                  className="h-20 w-20 shrink-0 object-contain"
                 />
                 <div className="flex flex-col leading-tight pt-1">
-                  <h5 className="text-headline-lg font-bold text-slate-900">
+                  <div className="text-headline-lg font-bold text-slate-900">
                     企业AI Agent 财务平台
-                  </h5>
+                  </div>
                   <p className="text-body-md text-slate-500 mt-1">
                     智能财务 · 让企业更有未来
                   </p>
