@@ -54,8 +54,7 @@ export function UserManage() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        eyebrow="权限"
-        title="用户管理"
+        title="权限"
         description="管理企业内部账号、角色与组织归属"
         actions={
           <Button size="md">

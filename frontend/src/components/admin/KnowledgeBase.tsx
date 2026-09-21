@@ -60,8 +60,7 @@ export function KnowledgeBase() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        eyebrow="RAG"
-        title="知识库"
+        title="RAG"
         description="上传制度文档以增强制度问答与合同审查能力"
         actions={
           <label>

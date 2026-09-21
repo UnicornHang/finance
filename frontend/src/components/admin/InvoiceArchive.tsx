@@ -47,8 +47,7 @@ export function InvoiceArchive() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        eyebrow="档案"
-        title="发票归档"
+        title="档案"
         description="检索、筛选与导出发票原始凭证与结构化字段"
         actions={
           <>

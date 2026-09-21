@@ -94,16 +94,17 @@ export function StatCard({
 }
 
 /**
- * KPI 区块标题
+ * 区块标题
+ * - title: 蓝色 headline 大标题（统一替代原 eyebrow + title 两段式）
+ * - description: 灰色副说明
+ * - actions: 右侧操作区（如 "新增" 按钮）
  */
 export function SectionHeader({
-  eyebrow,
   title,
   description,
   actions,
   className,
 }: {
-  eyebrow?: string
   title: string
   description?: React.ReactNode
   actions?: React.ReactNode
@@ -111,13 +112,8 @@ export function SectionHeader({
 }) {
   return (
     <div className={cn('flex items-end justify-between gap-4', className)}>
-      <div className="min-w-0 space-y-1">
-        {eyebrow && (
-          <p className="text-label-sm font-semibold uppercase tracking-wider text-primary">
-            {eyebrow}
-          </p>
-        )}
-        <h1 className="text-headline-lg font-semibold text-ink tracking-tight">
+      <div className="min-w-0 space-y-1.5">
+        <h1 className="text-headline-lg font-semibold text-primary tracking-tight">
           {title}
         </h1>
         {description && (

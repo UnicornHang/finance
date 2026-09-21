@@ -23,8 +23,7 @@ export function Dashboard() {
   return (
     <div className="space-y-8">
       <SectionHeader
-        eyebrow="数据概览"
-        title="首页看板"
+        title="数据概览"
         description="实时跟踪财务归档、合同审查与制度问答的关键指标"
       />
 
