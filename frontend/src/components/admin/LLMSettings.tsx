@@ -248,25 +248,40 @@ function ConfigCard({
         {testResult && (
           <div
             className={cn(
-              'flex items-center justify-between rounded-md border px-3 py-2 text-body-sm',
+              'flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-body-sm',
               testResult.ok
                 ? 'border-success-border bg-success-tint text-success'
                 : 'border-danger-border bg-danger-tint text-danger',
             )}
           >
-            <span className="flex items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               {testResult.ok ? (
-                <CheckCircle2 className="h-3.5 w-3.5" />
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
               ) : (
-                <XCircle className="h-3.5 w-3.5" />
+                <XCircle className="h-4 w-4 shrink-0" />
               )}
-              {testResult.ok
-                ? `连通成功 (${testResult.latency_ms}ms)`
-                : `连通失败：${testResult.message}`}
-            </span>
+              <div className="min-w-0 flex-1">
+                <p className="leading-5 font-medium">
+                  {testResult.ok
+                    ? `连通成功 (${testResult.latency_ms}ms)`
+                    : `连通失败：${testResult.message}`}
+                </p>
+                {testResult.ok && testResult.message && (
+                  <p
+                    className="mt-1 leading-5 break-words text-ink-secondary"
+                    title={testResult.message}
+                  >
+                    {testResult.message.length > 100
+                      ? testResult.message.slice(0, 100) + '…'
+                      : testResult.message}
+                  </p>
+                )}
+              </div>
+            </div>
             <button
+              type="button"
               onClick={() => setTestResult(null)}
-              className="text-label-sm underline-offset-2 hover:underline"
+              className="shrink-0 leading-5 underline-offset-2 hover:underline"
             >
               清除
             </button>
@@ -289,11 +304,15 @@ function ConfigCard({
           </span>
           <div className="flex items-center gap-2">
             <Button
-              variant="ghost"
+              variant="secondary"
               size="sm"
               onClick={() => test.mutate()}
-              disabled={test.isPending || !cfg.has_api_key}
-              title={!cfg.has_api_key ? '未配置 API Key，无法测试' : ''}
+              disabled={test.isPending}
+              title={
+                !cfg.has_api_key
+                  ? '未配置 API Key，将直接测试当前保存的配置'
+                  : '使用当前保存的模型与 API Key 测试连通性'
+              }
             >
               {test.isPending ? '测试中...' : '测试连通性'}
             </Button>

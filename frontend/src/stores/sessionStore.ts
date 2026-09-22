@@ -14,6 +14,11 @@ interface SessionState {
   switchSession: (id: string) => void
   setMessages: (sessionId: string, messages: Message[]) => void
   appendMessage: (sessionId: string, message: Message) => void
+  updateMessage: (
+    sessionId: string,
+    messageId: string,
+    patch: Partial<Message>,
+  ) => void
   clearMessages: (sessionId: string) => void
 }
 
@@ -61,6 +66,20 @@ export const useSessionStore = create<SessionState>((set) => ({
         [sessionId]: [...(state.messages[sessionId] || []), message],
       },
     })),
+
+  updateMessage: (sessionId, messageId, patch) =>
+    set((state) => {
+      const list = state.messages[sessionId]
+      if (!list) return state
+      return {
+        messages: {
+          ...state.messages,
+          [sessionId]: list.map((m) =>
+            m.id === messageId ? { ...m, ...patch } : m,
+          ),
+        },
+      }
+    }),
 
   clearMessages: (sessionId) =>
     set((state) => {
