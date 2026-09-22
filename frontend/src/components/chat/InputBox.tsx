@@ -41,10 +41,10 @@ export function InputBox() {
   }
 
   return (
-    <div className="border-t border-line bg-surface px-6 py-4">
+    <div className="border-line px-6 py-4">
       <div className="mx-auto max-w-3xl space-y-2">
         {file && (
-          <div className="flex items-center gap-2 rounded-md border border-line bg-surface-inset px-3 py-2 text-body-sm">
+          <div className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-body-sm">
             <Paperclip className="h-3.5 w-3.5 text-ink-tertiary shrink-0" />
             <span className="flex-1 truncate text-ink">{file.name}</span>
             <span className="text-label-sm text-ink-tertiary shrink-0">

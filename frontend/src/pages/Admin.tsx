@@ -101,14 +101,14 @@ export function Admin() {
         {/* 右：搜索 + 通知 + 帮助 + 用户 */}
         <div className="flex shrink-0 items-center gap-2">
           {/* 搜索框 */}
-          <div className="relative">
+          {/* <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
             <Input
               type="text"
               placeholder="搜索菜单 / 用户 / 文档…"
               className="h-8 w-56 pl-8 pr-3 bg-canvas"
             />
-          </div>
+          </div> */}
 
           {/* 通知 */}
           <Button variant="ghost" size="icon" aria-label="通知">
