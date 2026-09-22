@@ -990,6 +990,7 @@ async def get_invoice(
 |---|---|---|
 | V1.0 | 2026-09-20 | 初版，覆盖产品定位、功能模块、用户旅程、数据模型 |
 | V1.1 | 2026-09-21 | **Phase A 完成**：发票 OCR 归档全链路验收（详见 §20） |
+| V1.2 | 2026-09-23 | **Phase A+ UI/UX 增量**：shadcn/ui 全面替换手搓控件、LLM 设置编辑体验优化、错误提示与消息渲染重构、DeepSeek 风格会话侧栏（详见 §21） |
 
 ---
 
@@ -1041,6 +1042,101 @@ async def get_invoice(
 - 发票字段版本历史（仅快照当前值）
 - PDF 多页发票拆分识别
 
+---
+
+## 21. Phase A+ UI/UX 增量（2026-09-23）
+
+**定位**：Phase A 验收之后、Phase B 启动之前的「打磨批次」。不改主链路、不动数据模型，只对 **管理后台 + 会话界面** 做工程化与体验升级。共 4 个提交：
+
+```
+7a2a835 用 shadcn/ui 替换原生 confirm/prompt 及手搓下拉菜单，新增 AGENT.md
+69725e3 LLM 配置编辑：API Key 输入 + system_prompt 持久化
+2a7f868 编辑态 LLM 连通性测试 + 错误提示 / 消息渲染优化
+a8ea2b7 会话侧栏重构为 DeepSeek 风格：时间桶分组 + 用户底部信息条
+```
+
+### 21.1 UI 控件体系统一（7a2a835）
+
+**目标**：把过去散落的手搓控件（`onMouseLeave` 下拉、原生 `confirm/prompt/alert`、`<select>`、手搓 checkbox / dialog）全部替换为 shadcn/ui，新增 [`AGENT.md`](AGENT.md) 工程规约强制后续提交遵守。
+
+**改动摘要**：
+
+| 旧形态 | 新形态 | 文件 |
+|---|---|---|
+| 原生 `confirm()` 删会议 / 会话 / 消息 | `AlertDialog` + `AlertDialogAction` / `AlertDialogCancel` | [`alert-dialog.tsx`](frontend/src/components/ui/alert-dialog.tsx) |
+| 原生 `prompt()` 重命名会话 | `Dialog` + `Input` + 受控 state | [`dialog.tsx`](frontend/src/components/ui/dialog.tsx) + [`input.tsx`](frontend/src/components/ui/input.tsx) |
+| 原生 `alert()` | shadcn `Toast` / `Badge` 替代 | — |
+| 手搓 `<select>` | `Select` + `SelectTrigger` + `SelectContent` + `SelectItem` | [`select.tsx`](frontend/src/components/ui/select.tsx) |
+| 手搓 onMouseLeave 菜单 | `DropdownMenu` + `DropdownMenuContent` | [`dropdown-menu.tsx`](frontend/src/components/ui/dropdown-menu.tsx) |
+| 手搓居中弹窗 | `Dialog` | [`dialog.tsx`](frontend/src/components/ui/dialog.tsx) |
+| 手搓侧滑面板 | `Sheet`（`SidePanel` 已废弃，标注于 [`AGENT.md §2`](AGENT.md)） | [`sheet.tsx`](frontend/src/components/ui/sheet.tsx) |
+
+**关键设计决策**：
+
+1. **AGENT.md 作为"工程规约"存在**：所有后续 UI 改动必须先读 [`AGENT.md`](AGENT.md)；新增 UI 控件必须基于 Radix + CVA + tailwindcss-animate 写到 `components/ui/`。
+2. **`SidePanel` 弃用但保留旧文件**：避免大爆炸重写；新代码强制用 `Sheet`。
+3. **`Login` 玻璃拟态卡片保留**：品牌一致性大于控件统一。
+
+### 21.2 LLM 配置编辑体验（69725e3）
+
+**目标**：让管理员在「LLM 设置」对话框里能完整地配置一个场景，不再需要去数据库改 `llm_configs`。
+
+**新增能力**：
+
+- **API Key 显式输入框**：旧版本只读 + 占位 `****xxxx`，管理员必须直连数据库才能换 key；现在用 `<Input type="password">` 显式录入，明文提交到后端，后端负责加密落盘 [`api_key_encrypted`](backend/app/models/__init__.py)。
+- **`system_prompt` 多行文本**：场景级 prompt 直接在 UI 里编辑，持久化到 `llm_configs.system_prompt`（迁移 `002_invoice_dedup_and_system_prompt.py`）。
+- **未填字段保留旧值**：API Key 输入框为空 = 不动原 key；system_prompt 为空字符串 → 后端存 `NULL`。
+
+**改动文件**：
+
+- [`frontend/src/components/admin/LLMSettings.tsx`](frontend/src/components/admin/LLMSettings.tsx)：表单 `EditState` 扩展 `api_key_input` + `system_prompt`，提交时分别处理。
+- [`backend/app/services/llm_config_service.py`](backend/app/services/llm_config_service.py)：update 路径区分「仅更新元数据」「更新 API Key」「更新 system_prompt」三种 case。
+- [`frontend/src/api/admin.ts`](frontend/src/api/admin.ts) + [`frontend/src/types/index.ts`](frontend/src/types/index.ts)：类型补齐。
+
+### 21.3 编辑态连通性测试 + 错误提示（2a7f868）
+
+**目标**：管理员编辑 LLM 配置时就能验证连通性，不用保存后再去对话窗口试错。
+
+**新增能力**：
+
+- 「测试连接」按钮在编辑态可点 → 触发 `/admin/llm/configs/{id}/test`（临时用表单值拼装请求，不写库）。
+- 错误分级：
+  - `4xx`：参数错误 → toast 高亮字段 + 红框
+  - `5xx`：服务端异常 → toast + 重试入口
+  - 网络断：`fetch` reject → 「请检查网络」+ 重试入口
+- 流式消息渲染：把通用 SSE 解析抽到 [`StreamRenderer`](frontend/src/components/chat/StreamRenderer.tsx)，错误事件统一渲染为带复制按钮的错误块。
+
+### 21.4 DeepSeek 风格会话侧栏（a8ea2b7）
+
+**目标**：会话列表视觉与交互对齐 DeepSeek / ChatGPT 风格（时间桶分组 + 顶栏用户区）。
+
+**改动要点**：
+
+- **时间桶**：按 `今天 / 昨天 / 本周 / 本月 / 更早` 分组，会话项 hover 显示完整时间。
+- **用户底部信息条**：侧栏底部固定一条用户卡片（头像 + 邮箱 + 设置入口），不再依赖顶栏 Avatar Dropdown。
+- **会话项**：左侧 icon 区（"普通对话" / "OCR" / "审查" 三种状态色），右侧"更多"菜单（`DropdownMenu`：重命名 / 删除）。
+- **状态库**：[`sessionStore.ts`](frontend/src/stores/sessionStore.ts) 增加 `groupByTimeBucket()` 纯函数 + `activeSessionId` 选择器；UI 用 Zustand 订阅。
+
+**改动文件**：[`SessionList.tsx`](frontend/src/components/chat/SessionList.tsx)（侧栏主体）、[`sessionStore.ts`](frontend/src/stores/sessionStore.ts)（状态层）、[`uiStore.ts`](frontend/src/stores/uiStore.ts)（侧栏折叠状态）、[`Chat.tsx`](frontend/src/pages/Chat.tsx)（整体布局调整）。
+
+### 21.5 验收
+
+| # | 验收点 | 验证方式 | 状态 |
+|---|---|---|---|
+| 1 | `AGENT.md` 规约与代码现状一致 | §2 / §8 清单可对照 | ✅ |
+| 2 | 旧 `confirm/prompt/alert` 在 grep 结果中归零 | `rg "confirm\(|prompt\(|alert\(" frontend/src` | ✅ |
+| 3 | LLM 设置能填能保存 API Key | 管理后台 → 切换场景 → 保存 → 后端 `api_key_encrypted` 落盘 | ✅ |
+| 4 | `system_prompt` 持久化 | DB 列 `llm_configs.system_prompt` 不为空 | ✅ |
+| 5 | 编辑态测试连接 | 保存前点「测试连接」→ 看到连通结果 | ✅ |
+| 6 | 侧栏时间桶分组渲染正确 | mock 跨多日会话数据 | ✅ |
+| 7 | 前端 `tsc --noEmit` + `npm run build` 全绿 | 见 [`AGENT.md §6`](AGENT.md) | ✅ |
+
+### 21.6 不在 Phase A+ 范围
+
+- 新的业务功能（合同审查 / RAG 知识库 / 制度问答 → Phase B）
+- 后端架构改动（Celery / MinIO / pgvector 均未触碰）
+- 数据模型扩展（除 `llm_configs.system_prompt` 列外无新表 / 新字段）
+- 移动端适配（仍沿用桌面端 `≥ 768px` 布局约束）
 
 
 ---

@@ -138,6 +138,18 @@ npm run dev
 
 详细验收清单见 [docs/PRD.md §Phase A 验收](docs/PRD.md)。
 
+### Phase A+ UI/UX 增量（2026-09-23）
+
+Phase A 验收之后、Phase B 启动之前的打磨批次，仅改管理后台与会话界面，主链路 / 数据模型未动：
+
+- ✅ shadcn/ui 全面替换手搓下拉 / 原生 confirm/prompt/alert / 原生 select，新增 [AGENT.md](AGENT.md) 工程规约
+- ✅ LLM 设置：API Key 显式录入 + `system_prompt` 多行编辑（持久化至 `llm_configs.system_prompt`）
+- ✅ 编辑态「测试连接」按钮 + 错误分级提示（4xx 高亮字段 / 5xx 重试入口 / 网络断开重试）
+- ✅ 流式渲染抽出 `StreamRenderer`，错误事件统一带复制按钮
+- ✅ 会话侧栏重构为 DeepSeek 风格：今天 / 昨天 / 本周 / 本月 / 更早 时间桶 + 用户底部信息条
+
+详细改动清单见 [docs/PRD.md §Phase A+ 增量](docs/PRD.md)。
+
 ## License
 
 Proprietary - 私有化部署版本
