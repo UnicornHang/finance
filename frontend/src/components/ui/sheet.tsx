@@ -33,7 +33,7 @@ export const SheetOverlay = React.forwardRef<
     ref={ref}
     data-slot="sheet-overlay"
     className={cn(
-      'fixed inset-0 z-50 bg-ink/30',
+      'fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md',
       'data-[state=open]:animate-in data-[state=closed]:animate-out',
       'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className,
@@ -45,18 +45,18 @@ SheetOverlay.displayName = 'SheetOverlay'
 
 const sheetVariants = cva(
   [
-    'fixed z-50 gap-4 bg-surface shadow-raised',
+    'fixed z-50 gap-4 bg-surface shadow-elevated',
     'data-[state=open]:animate-in data-[state=closed]:animate-out',
-    'transition ease-in-out',
+    'duration-300 ease-smooth',
   ].join(' '),
   {
     variants: {
       side: {
-        top: 'inset-x-0 top-0 border-b border-line-strong',
-        bottom: 'inset-x-0 bottom-0 border-t border-line-strong',
-        left: 'inset-y-0 left-0 h-full w-3/4 border-r border-line-strong sm:max-w-sm',
+        top: 'inset-x-0 top-0 border-b border-line/80 rounded-b-2xl',
+        bottom: 'inset-x-0 bottom-0 border-t border-line/80 rounded-t-2xl',
+        left: 'inset-y-0 left-0 h-full w-3/4 border-r border-line/80 sm:max-w-sm',
         right:
-          'inset-y-0 right-0 h-full w-3/4 border-l border-line-strong sm:max-w-md',
+          'inset-y-0 right-0 h-full w-3/4 border-l border-line/80 sm:max-w-md',
       },
     },
     defaultVariants: { side: 'right' },
@@ -82,9 +82,9 @@ export const SheetContent = React.forwardRef<
       {children}
       <DialogPrimitive.Close
         className={cn(
-          'absolute right-4 top-4 rounded-sm text-ink-tertiary',
-          'opacity-70 transition-opacity hover:opacity-100',
-          'focus:outline-none focus:ring-2 focus:ring-primary/40',
+          'absolute right-4 top-4 rounded-md p-1 text-ink-tertiary',
+          'opacity-70 transition-all duration-150 hover:opacity-100 hover:bg-surface-inset hover:text-ink',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
           'disabled:pointer-events-none',
         )}
       >

@@ -14,13 +14,13 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        // 容器内通过服务名 backend:8000；本机直跑时 fallback 到 localhost:8000
-        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+        // 容器内通过服务名 backend:8000；本机直跑时 fallback 到 localhost:8001
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8001',
         changeOrigin: true,
         ws: true,
       },
       '/metrics': {
-        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8000',
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8001',
         changeOrigin: true,
       },
     },

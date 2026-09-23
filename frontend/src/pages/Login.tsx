@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { loginSchema, type LoginInput } from '@/lib/validators'
 
 import loginBg from '@/assets/image/login_bg.png'
-import loginContent from '@/assets/image/login_content.jpg'
+import loginContent from '@/assets/image/login_content.png'
 import logoPng from '@/assets/image/logo.png'
 
 export function Login() {

@@ -1,13 +1,18 @@
 import type { Config } from 'tailwindcss'
 
 /**
- * Pristine Crisp Fintech 设计系统
- * 来源: docs/SystemColor.md
+ * 现代 AI Agent 设计系统 (Modern AI Agent)
  *
- * 设计原则:
- * - 绝对平面 (Flat Stratification)，禁止渐变与重投影
- * - 手术级精度，1px hairline 边框 + 充足留白
- * - 配色克制: 单一冷蓝主色 + 翠绿成功色 + 暗红警示色 + 琥珀警告色
+ * 设计原则 (vs. 上一版 Pristine Crisp Fintech):
+ * - 柔和边角: 圆角整体上调一档 (控件 6 / 卡片 12 / 弹窗 16)
+ * - 软染色投影: 用低透明度 + 略大模糊替代硬边阴影
+ * - 现代字体: Inter (主) + JetBrains Mono (等宽)
+ * - 平滑缓动: smooth/snappy 替代线性 / 标准 cubic-bezier
+ *
+ * 设计 Token 速查:
+ * - 圆角: sm 4 / md 8 / lg 12 / xl 16 / 2xl 20
+ * - 投影: hairline / soft / elevated / glow-primary
+ * - 字体: Inter (sans) + JetBrains Mono (mono)
  */
 export default {
   darkMode: ['class'],
@@ -21,35 +26,35 @@ export default {
     extend: {
       colors: {
         // ===== 中性画布与表面 =====
-        canvas: '#f8fafc', // 应用背景 (Cool Slate Off-White)
+        canvas: '#f7f8fb', // 应用背景 (Soft Mist)
         surface: {
           DEFAULT: '#ffffff', // 卡片/容器主表面
-          inset: '#f1f5f9', // 二级内嵌表面 (Subtle Flat Ice)
-          muted: '#f8fafc', // 表格 / 表面板
+          inset: '#f3f5f9', // 二级内嵌表面
+          muted: '#f7f8fb', // 表格 / 表面板
         },
 
         // ===== 文本层级 =====
         ink: {
-          DEFAULT: '#0f172a', // Primary Text - Crisp Charcoal Slate
-          secondary: '#334155', // Mid Slate
-          tertiary: '#64748b', // Soft Slate
-          muted: '#94a3b8', // Disabled / Placeholder
+          DEFAULT: '#0b1220', // Primary Text - Deep Slate
+          secondary: '#3b475c', // Mid Slate
+          tertiary: '#6b7691', // Soft Slate
+          muted: '#aab3c5', // Disabled / Placeholder
           inverse: '#ffffff',
         },
 
         // ===== 结构边框 =====
         line: {
-          DEFAULT: '#e2e8f0', // Primary Structural Border
-          subtle: '#f1f5f9', // Hairline Subtle Border
-          strong: '#cbd5e1', // Hover Border / Raised Border
+          DEFAULT: '#e6e9f0', // Primary Structural Border (柔和)
+          subtle: '#f1f3f7', // Hairline Subtle Border
+          strong: '#d4d9e3', // Hover Border / Raised Border
           focus: '#0284c7', // Focused Element Border
         },
 
-        // ===== 主色 - Vibrant Cerulean Blue =====
+        // ===== 主色 - AI Agent Cerulean (略调亮，更通透) =====
         primary: {
-          DEFAULT: '#0284c7',
-          hover: '#0369a1',
-          active: '#075985',
+          DEFAULT: '#0ea5e9',
+          hover: '#0284c7',
+          active: '#0369a1',
           tint: '#f0f9ff',
           border: '#bae6fd',
           focus: '#bae6fd',
@@ -58,24 +63,24 @@ export default {
 
         // ===== 成功 / Jade =====
         success: {
-          DEFAULT: '#059669',
+          DEFAULT: '#10b981',
           tint: '#ecfdf5',
           border: '#a7f3d0',
-          foreground: '#059669',
+          foreground: '#047857',
         },
 
         // ===== 警示 / Crimson =====
         danger: {
-          DEFAULT: '#dc2626',
-          hover: '#b91c1c',
+          DEFAULT: '#ef4444',
+          hover: '#dc2626',
           tint: '#fef2f2',
           border: '#fecaca',
-          foreground: '#dc2626',
+          foreground: '#b91c1c',
         },
 
         // ===== 警告 / Amber =====
         warning: {
-          DEFAULT: '#d97706',
+          DEFAULT: '#f59e0b',
           tint: '#fffbeb',
           border: '#fde68a',
           foreground: '#b45309',
@@ -84,12 +89,12 @@ export default {
         // ===== Neutral / Draft =====
         neutral: {
           DEFAULT: '#475569',
-          tint: '#f8fafc',
-          border: '#e2e8f0',
+          tint: '#f7f8fb',
+          border: '#e6e9f0',
           foreground: '#475569',
         },
 
-        // shadcn/ui 兼容别名 (保留以维持现有组件)
+        // shadcn/ui 兼容别名
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
@@ -118,7 +123,7 @@ export default {
       },
       fontFamily: {
         sans: [
-          '"Plus Jakarta Sans"',
+          'Inter',
           '-apple-system',
           'BlinkMacSystemFont',
           '"Segoe UI"',
@@ -128,14 +133,22 @@ export default {
           '"Microsoft YaHei"',
           'sans-serif',
         ],
+        mono: [
+          '"JetBrains Mono"',
+          'ui-monospace',
+          'SFMono-Regular',
+          'Menlo',
+          'Monaco',
+          'Consolas',
+          'monospace',
+        ],
       },
       fontSize: {
-        // 与 SystemColor.md typography 对齐
         'display-lg': ['44px', { lineHeight: '52px', letterSpacing: '-0.03em', fontWeight: '700' }],
         'headline-lg': ['32px', { lineHeight: '40px', letterSpacing: '-0.02em', fontWeight: '600' }],
         'headline-md': ['24px', { lineHeight: '30px', letterSpacing: '-0.015em', fontWeight: '600' }],
-        'headline-sm': ['18px', { lineHeight: '24px', letterSpacing: '-0.01em', fontWeight: '600' }],
-        'title-lg': ['16px', { lineHeight: '22px', letterSpacing: '-0.005em', fontWeight: '600' }],
+        'headline-sm': ['18px', { lineHeight: '26px', letterSpacing: '-0.01em', fontWeight: '600' }],
+        'title-lg': ['16px', { lineHeight: '24px', letterSpacing: '-0.005em', fontWeight: '600' }],
         'body-lg': ['16px', { lineHeight: '24px', letterSpacing: '0em', fontWeight: '400' }],
         'body-md': ['14px', { lineHeight: '20px', letterSpacing: '0em', fontWeight: '400' }],
         'body-sm': ['13px', { lineHeight: '18px', letterSpacing: '0em', fontWeight: '400' }],
@@ -145,26 +158,41 @@ export default {
         'numeric-md': ['15px', { lineHeight: '20px', letterSpacing: '-0.01em', fontWeight: '600' }],
       },
       borderRadius: {
-        // 与 SystemColor.md rounded 对齐
-        sm: '0.125rem', // 2px
-        DEFAULT: '0.25rem', // 4px - 控件
-        md: '0.375rem', // 6px
-        lg: '0.5rem', // 8px - 卡片/容器
-        xl: '0.75rem', // 12px
-        full: '9999px', // pill
+        // 升级圆角 token: 控件 6 / 卡片 12 / 弹窗 16 / 大弹窗 20
+        sm: '0.25rem', // 4px - chip / 标签
+        DEFAULT: '0.375rem', // 6px - 按钮 / 输入
+        md: '0.5rem', // 8px - 控件
+        lg: '0.75rem', // 12px - 卡片
+        xl: '1rem', // 16px - 弹窗 / Sheet
+        '2xl': '1.25rem', // 20px - 大弹窗
+        '3xl': '1.5rem', // 24px - 全屏弹层
+        full: '9999px',
       },
       spacing: {
-        // 与 SystemColor.md spacing 对齐
-        gutter: '1.5rem', // 24px
-        'gutter-mobile': '0.75rem', // 12px
-        margin: '2rem', // 32px
-        'margin-mobile': '1rem', // 16px
+        gutter: '1.5rem',
+        'gutter-mobile': '0.75rem',
+        margin: '2rem',
+        'margin-mobile': '1rem',
       },
       boxShadow: {
-        // 移除重投影，仅保留精确的边缘分隔 (Ultra-crisp, non-diffuse)
+        // 软染色投影 - 现代 AI 产品主流 (低透明度 + 略大模糊)
+        hairline: '0 0 0 1px rgb(230 233 240)', // 1px 边框模拟
+        soft: '0 1px 2px 0 rgba(15, 23, 42, 0.04), 0 1px 3px 0 rgba(15, 23, 42, 0.06)',
+        // 弹层 / 菜单 / 模态 - 比原 raised 更通透
+        elevated:
+          '0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 12px 24px -6px rgba(15, 23, 42, 0.10), 0 0 0 1px rgba(15, 23, 42, 0.04)',
+        // 主色光晕 - 焦点/激活态使用
+        'glow-primary':
+          '0 0 0 4px rgba(14, 165, 233, 0.12), 0 4px 12px -2px rgba(14, 165, 233, 0.20)',
+        // 向后兼容别名 (旧组件仍引用 shadow-raised 时不会破坏构建)
         raised:
-          '0 4px 12px 0 rgba(15, 23, 42, 0.05), 0 0 0 1px rgb(203 213 225)', // 弹层/菜单/模态
-        hairline: '0 0 0 1px rgb(226 232 240)', // 1px border 模拟
+          '0 4px 6px -1px rgba(15, 23, 42, 0.06), 0 12px 24px -6px rgba(15, 23, 42, 0.10)',
+      },
+      transitionTimingFunction: {
+        // 平滑缓动 (现代 AI 产品主流)
+        smooth: 'cubic-bezier(0.32, 0.72, 0, 1)',
+        snappy: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        soft: 'cubic-bezier(0.4, 0, 0.2, 1)',
       },
       keyframes: {
         'pulse-soft': {
@@ -175,10 +203,25 @@ export default {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0' },
         },
+        'fade-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        'slide-up': {
+          from: { opacity: '0', transform: 'translateY(8px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'scale-in': {
+          from: { opacity: '0', transform: 'scale(0.96)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
       },
       animation: {
         'pulse-soft': 'pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'stream-blink': 'stream-blink 1s steps(1) infinite',
+        'fade-in': 'fade-in 200ms cubic-bezier(0.32, 0.72, 0, 1) both',
+        'slide-up': 'slide-up 280ms cubic-bezier(0.32, 0.72, 0, 1) both',
+        'scale-in': 'scale-in 200ms cubic-bezier(0.32, 0.72, 0, 1) both',
       },
     },
   },
