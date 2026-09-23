@@ -576,7 +576,7 @@ def extract_entities(session_id, message):
 |---|---|---|
 | P1 | 登录 | 账号密码登录、3 次失败锁定、JWT 刷新 |
 | P1 | Chat 界面 | 会话列表、新建/重命名/删除、切换 |
-| P1 | 发票上传 | 上传 → OCR → 侧弹窗 → 编辑 → 归档全链路 |
+| P1 | 发票上传 | 输入框选文件 → **立刻**调 `POST /files/upload` 落 MinIO（不阻塞文本输入） → 用户点发送：`POST /chat/stream` JSON 体带 `file_url`+`file_hash`，由 LLM 决定调用 OCR → 右栏持久展示 → 编辑 → 归档全链路 |
 | P1 | 发票去重 | 同代码+号码重复归档时阻断 |
 | P2 | 合同审查 | 解析 → 脱敏 → 审查 → 风险等级展示 |
 | P2 | RAG 知识库 | 文档上传、切分、向量化、检索测试 |

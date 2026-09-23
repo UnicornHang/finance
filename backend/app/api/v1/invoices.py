@@ -1,14 +1,17 @@
 """发票归档 API。
 
-Phase A 实现（8 个端点）：
-- GET    /invoices/                          列表（分页+筛选）
+实现端点：
+- GET    /invoices/                           列表（分页+筛选）
 - POST   /invoices/archive                    兼容老 API：直接 JSON 入库
-- GET    /invoices/preview/by-hash/{hash}     前端轮询查 OCR 结果
+- GET    /invoices/preview/by-hash/{hash}    前端轮询查 OCR 结果
 - GET    /invoices/{invoice_id}               详情
 - PATCH  /invoices/{invoice_id}               编辑字段
 - POST   /invoices/{invoice_id}/confirm       pending_review → active
 - DELETE /invoices/{invoice_id}               软删
 - GET    /invoices/{invoice_id}/file          预签名下载 URL
+
+通用文件上传走 `POST /api/v1/files/upload`（只存 MinIO，不触发 OCR/审查）；
+OCR 任务由 chat_service 在用户发送消息后根据 LLM 语义判断派发。
 """
 
 import logging

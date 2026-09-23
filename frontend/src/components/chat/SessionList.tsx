@@ -279,7 +279,7 @@ export function SessionList() {
           </p>
         </div>
       ) : (
-        <div className="px-3 pb-3">
+        <div className="space-y-1.5 px-3 pb-3">
           <button
             type="button"
             onClick={handleNew}

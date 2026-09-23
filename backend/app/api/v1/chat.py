@@ -1,102 +1,80 @@
-"""Chat API：流式对话（SSE）+ 文件上传触发 OCR。
+"""Chat API：流式 Agent 回复（SSE）。
 
-Phase A：增加 multipart 文件上传分支：
-1. 上传文件到 MinIO invoices 桶（s3://bucket/key）
-2. 计算 SHA-256 hash
-3. 调 chat_service.stream_response(..., file_url, file_hash)
-4. SSE 返回 sidepanel{status:processing} + text + done
-5. Celery worker 异步跑 OCR，结果写库后前端轮询 /invoices/preview/by-hash/{hash} 获取
+调用模型：客户端先 `POST /api/v1/files/upload` 把文件落到 MinIO，
+拿到 `{file_hash, file_url}` 后带这两个值进 `POST /api/v1/chat/stream`。
+
+文件决定权交给 chat_service / LLM：根据 user_message 语义判断是 ocr_invoice /
+parse_document / kb_query，agent 内部选择下一步动作。
 """
 
-import hashlib
 import json
 import logging
-import uuid
-from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.core.database import get_db
 from app.core.exceptions import BusinessError
 from app.deps import get_current_user
 from app.models import User
 from app.services.chat_service import chat_service
 from app.services.session_service import session_service
-from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+class ChatStreamRequest(BaseModel):
+    """SSE 流式 Agent 请求体（JSON）。"""
+
+    session_id: str | None = None
+    message: str = ""
+    file_url: str | None = None
+    file_hash: str | None = None
+    file_meta: dict | None = None  # {original_filename, content_type, size}
+
+
 @router.post("/stream")
 async def chat_stream(
-    session_id: str | None = Form(default=None),
-    message: str = Form(default=""),
-    file: UploadFile | None = File(default=None),
+    body: ChatStreamRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """SSE 流式 Agent 回复。
+    """SSE 流式 Agent 回复（JSON 请求体）。
 
-    multipart/form-data：
-    - session_id: 可选，空 = 自动创建
-    - message: 可选（纯文件上传时可为空）
-    - file: 可选，PDF/JPG/PNG/WebP
+    请求字段：
+    - session_id: 可选（空 = 自动新建会话）
+    - message: 用户文本（可选，但与 file_url 至少要有一个）
+    - file_url / file_hash: 由 `POST /files/upload` 预先产出
+    - file_meta: 可选，原始文件名 / content_type / size
 
     SSE 事件：
-    - {type: "text", content}       增量文本
-    - {type: "sidepanel", payload}  侧弹窗（OCR 上传时为 {type:'invoice', data:{status:'processing',...}}）
-    - {type: "done"}                流结束
-    - {type: "error", message}      错误
+    - {type: "text", content}             增量文本（模型流式返回 / 思考中间步骤）
+    - {type: "sidepanel", payload}        结构化数据 ready 时右侧持久栏触发
+    - {type: "done"}                      流结束
+    - {type: "error", message}            错误
     """
-    if not (message or "").strip() and not file:
+    if not (body.message or "").strip() and not body.file_url:
         raise BusinessError("消息或文件不能同时为空", code="EMPTY_INPUT")
 
     # 1. 解析 session_id（空则自动创建）
-    if not session_id or not session_id.strip():
+    if not body.session_id or not body.session_id.strip():
         new_session = await session_service.create(
             db, user.id, user.tenant_id, title=None
         )
         actual_session_id: UUID = new_session.id
     else:
         try:
-            actual_session_id = UUID(session_id)
+            actual_session_id = UUID(body.session_id)
         except (ValueError, TypeError):
             raise BusinessError("无效的会话 ID", code="INVALID_SESSION_ID")
 
-    # 2. 如果有文件：上传到 MinIO + 计算 hash
-    file_url: str | None = None
-    file_hash: str | None = None
-    if file:
-        try:
-            content = await file.read()
-            if not content:
-                raise BusinessError("文件内容为空", code="EMPTY_FILE")
-
-            file_hash = hashlib.sha256(content).hexdigest()
-            # 保留原始扩展名以利预览
-            ext = Path(file.filename or "invoice.bin").suffix.lower() or ".bin"
-            obj_key = f"{user.tenant_id}/{actual_session_id}/{uuid.uuid4()}{ext}"
-
-            file_url = storage_service.upload_file(
-                bucket=settings.minio_bucket_invoice,
-                object_name=obj_key,
-                data=content,
-                content_type=file.content_type or "application/octet-stream",
-            )
-            logger.info(
-                "Chat stream: uploaded file tenant=%s session=%s key=%s hash=%s bytes=%d",
-                user.tenant_id, actual_session_id, obj_key, file_hash, len(content),
-            )
-        except BusinessError:
-            raise
-        except Exception as exc:
-            logger.exception("File upload to MinIO failed")
-            raise BusinessError(f"文件上传失败：{exc}", code="UPLOAD_FAILED")
+    # 2. 文件已在 /files/upload 阶段落到 MinIO；这里只携带引用
+    file_url = body.file_url
+    file_hash = body.file_hash
 
     async def event_generator():
         try:
@@ -104,7 +82,7 @@ async def chat_stream(
                 db,
                 user,
                 actual_session_id,
-                message or "",
+                body.message or "",
                 file_url=file_url,
                 file_hash=file_hash,
             ):

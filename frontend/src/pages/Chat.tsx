@@ -9,15 +9,23 @@ import { ContractPanel } from '@/components/sidepanel/ContractPanel'
 import { useUIStore } from '@/stores/uiStore'
 
 /**
- * 对话工作台 — DeepSeek 风格双栏布局
+ * 对话工作台 — 两栏 / 三栏自适应
  *
- * 顶栏已下沉到 SessionList 底部（用户信息 / 后台 / 登出），
- * 整页只剩：左侧会话栏 + 右侧对话区。
- * 侧栏可整体收起 —— 收起后主区顶部展示一个浮动按钮用于展开。
+ * 顶栏已下沉到 SessionList 底部（用户信息 / 后台 / 登出）。
+ * 默认布局：左 SessionList + 中对话区（双栏）。
+ * 当用户通过"上传发票"按钮或 SSE sidepanel 事件产生 invoice/contract 数据时，
+ * 右侧持久化展示结构化面板（三栏）。用户点击面板"关闭"按钮回到两栏。
+ *
+ * SessionList 可整体收起 —— 收起后主区顶部展示一个浮动按钮用于展开。
  */
 export function Chat() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
   const setSidebarCollapsed = useUIStore((s) => s.setSidebarCollapsed)
+  const sidePanelOpen = useUIStore((s) => s.sidePanelOpen)
+  const sidePanelType = useUIStore((s) => s.sidePanelType)
+
+  const rightPaneOpen =
+    sidePanelOpen && (sidePanelType === 'invoice' || sidePanelType === 'contract')
 
   return (
     <div className="flex h-screen bg-canvas text-ink">
@@ -42,8 +50,11 @@ export function Chat() {
         <InputBox />
       </main>
 
-      <InvoicePanel />
-      <ContractPanel />
+      {rightPaneOpen && (
+        <aside className="flex w-[360px] shrink-0 border-l border-line bg-surface animate-fade-in sm:w-[400px]">
+          {sidePanelType === 'invoice' ? <InvoicePanel /> : <ContractPanel />}
+        </aside>
+      )}
     </div>
   )
 }

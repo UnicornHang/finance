@@ -16,21 +16,30 @@ export const sessionApi = {
 
 // ================ Chat 流式 ================
 
+/**
+ * 调用模型：客户端**先** `POST /files/upload` 拿到 `fileUrl/fileHash`，再把它们
+ * 作为 JSON body 字段随 `message` 一起发到这里。chat_service 根据语义判断
+ * 是否需要调用 OCR / 合同审查 / RAG 等工具。
+ */
 export async function* streamChat(
   sessionId: string,
   message: string,
-  file?: File,
+  fileRef?: { file_url: string; file_hash: string; file_meta?: Record<string, unknown> },
 ): AsyncGenerator<StreamEvent> {
-  const formData = new FormData()
-  formData.append('session_id', sessionId)
-  formData.append('message', message)
-  if (file) formData.append('file', file)
-
   const token = localStorage.getItem('access_token')
   const response = await fetch('/api/v1/chat/stream', {
     method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      message,
+      file_url: fileRef?.file_url,
+      file_hash: fileRef?.file_hash,
+      file_meta: fileRef?.file_meta,
+    }),
   })
 
   if (!response.ok) {

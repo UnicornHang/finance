@@ -1,7 +1,9 @@
 import { useCallback } from 'react'
+
 import { useUIStore } from '@/stores/uiStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { streamChat } from '@/api/chat'
+import type { FileRef } from '@/api/file'
 import type { Message } from '@/types'
 
 /**
@@ -16,6 +18,13 @@ function tmpId(prefix: 'user' | 'assistant'): string {
   return `tmp-${prefix}-${uuid}`
 }
 
+/**
+ * Chat 流式发送 hook
+ *
+ * 注意：附件上传**已经在 InputBox 选文件那一瞬触发**（`POST /files/upload`），
+ * 拿到 `FileRef` 后这里只负责把 `message + file_url + file_hash` 进 SSE 流。
+ * chat_service 根据 LLM 语义判断调用 OCR / 合同审查 / RAG / 直接问答。
+ */
 export function useChat() {
   const openSidePanel = useUIStore((s) => s.openSidePanel)
   const setStreaming = useUIStore((s) => s.setStreaming)
@@ -23,7 +32,7 @@ export function useChat() {
   const updateMessage = useSessionStore((s) => s.updateMessage)
 
   const send = useCallback(
-    async (message: string, file?: File) => {
+    async (message: string, fileRef?: FileRef) => {
       const sessionId = useSessionStore.getState().currentSessionId
       if (!sessionId) return
 
@@ -52,7 +61,7 @@ export function useChat() {
 
       setStreaming(true)
       try {
-        for await (const event of streamChat(sessionId, message, file)) {
+        for await (const event of streamChat(sessionId, message, fileRef)) {
           if (event.type === 'text') {
             accumulated += event.content
             updateMessage(sessionId, assistantMsg.id, { content: accumulated })

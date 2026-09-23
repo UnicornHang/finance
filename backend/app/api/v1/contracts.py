@@ -1,4 +1,10 @@
-"""合同归档 API。"""
+"""合同归档 API。
+
+> **TODO(Phase B):** 完整流水线（PDF 解析 + 合规审查 + RAG 规则匹配 + 持久化）
+> 留到 Phase B 接入。当前 5 个端点均为 stub。本期文件**上传**走通用
+> `POST /api/v1/files/upload`，由 chat_service 在用户发送消息时根据 LLM
+> 语义判断是否调用合同审查工具。
+"""
 
 from fastapi import APIRouter
 
