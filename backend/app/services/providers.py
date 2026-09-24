@@ -149,8 +149,8 @@ SCENES: dict[str, dict] = {
         "default_max_tokens": 2000,
     },
     "ocr_post": {
-        "label": "单据识别后处理",
-        "description": "对 OCR 提取结果做结构化、补全字段",
+        "label": "单据识别（Vision / 后处理）",
+        "description": "方案B：多模态识票主路径；失败回落 OCR。请配置支持视觉的模型（如 gpt-4o）",
         "default_temperature": 0.1,
         "default_max_tokens": 1500,
     },

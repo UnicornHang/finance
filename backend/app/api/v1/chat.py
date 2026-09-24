@@ -85,6 +85,7 @@ async def chat_stream(
                 body.message or "",
                 file_url=file_url,
                 file_hash=file_hash,
+                file_meta=body.file_meta,
             ):
                 # 首条事件带上 session_id 方便前端确认
                 if event.get("type") == "text" and "session_id" not in event:
