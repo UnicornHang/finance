@@ -23,10 +23,14 @@ interface UIState {
   sidePanelType: 'invoice' | 'contract' | null
   sidePanelData: SidePanelData
   streaming: boolean
+  /** Chat 左侧会话栏是否收起（DeepSeek 风：可整页折叠给主区更多空间） */
+  sidebarCollapsed: boolean
 
   openSidePanel: (type: 'invoice' | 'contract', data: SidePanelData) => void
   closeSidePanel: () => void
   setStreaming: (streaming: boolean) => void
+  setSidebarCollapsed: (collapsed: boolean) => void
+  toggleSidebar: () => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -34,10 +38,14 @@ export const useUIStore = create<UIState>((set) => ({
   sidePanelType: null,
   sidePanelData: null,
   streaming: false,
+  sidebarCollapsed: false,
 
   openSidePanel: (type, data) =>
     set({ sidePanelOpen: true, sidePanelType: type, sidePanelData: data }),
   closeSidePanel: () =>
     set({ sidePanelOpen: false, sidePanelType: null, sidePanelData: null }),
   setStreaming: (streaming) => set({ streaming }),
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+  toggleSidebar: () =>
+    set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 }))

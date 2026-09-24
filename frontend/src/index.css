@@ -3,30 +3,30 @@
 @tailwind utilities;
 
 /*
- * Pristine Crisp Fintech — CSS Variables
- * 与 tailwind.config.ts 保持一致；shadcn 兼容别名保留
+ * 现代 AI Agent 设计系统 — CSS Variables
+ * 与 tailwind.config.ts 保持一致
  */
 @layer base {
   :root {
     /* shadcn/ui 兼容 (HSL) */
-    --background: 210 40% 98%;          /* canvas */
-    --foreground: 222 47% 11%;          /* ink */
+    --background: 220 30% 98%;          /* canvas - soft mist */
+    --foreground: 222 47% 8%;           /* ink - deep slate */
     --card: 0 0% 100%;                  /* surface */
-    --card-foreground: 222 47% 11%;
-    --primary: 200 98% 40%;             /* #0284c7 */
+    --card-foreground: 222 47% 8%;
+    --primary: 199 89% 48%;             /* #0ea5e9 */
     --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;    /* ink-tertiary */
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 72% 51%;           /* #dc2626 */
+    --secondary: 220 30% 96%;
+    --secondary-foreground: 222 47% 8%;
+    --muted: 220 30% 96%;
+    --muted-foreground: 220 14% 46%;    /* ink-tertiary */
+    --accent: 220 30% 96%;
+    --accent-foreground: 222 47% 8%;
+    --destructive: 0 84% 60%;           /* #ef4444 */
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 91%;              /* line */
-    --input: 214 32% 91%;
-    --ring: 200 98% 40%;                /* primary */
-    --radius: 0.5rem;
+    --border: 222 22% 92%;              /* line - 柔和 */
+    --input: 222 22% 92%;
+    --ring: 199 89% 48%;                /* primary */
+    --radius: 0.75rem;                  /* 12px - 与 design token 对齐 */
   }
 
   * {
@@ -42,6 +42,7 @@
     font-feature-settings: 'cv11', 'ss01', 'ss03';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   /* 数字字体对齐 - 用于财务数字 */
@@ -53,33 +54,39 @@
     font-feature-settings: 'tnum';
   }
 
-  /* 滚动条 */
+  /* 滚动条 - 更柔和、更细 */
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #e2e8f0;
+    background: rgba(148, 163, 184, 0.35);
     border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #cbd5e1;
+    background: rgba(148, 163, 184, 0.55);
+    background-clip: content-box;
   }
 
-  /* 焦点环 */
+  /* 焦点环 - 软光晕风格 */
   :focus-visible {
-    outline: 2px solid #0284c7;
+    outline: 2px solid transparent;
     outline-offset: 2px;
   }
 
-  /* 移除按钮默认 focus ring，与设计系统统一 */
   button:focus-visible,
-  a:focus-visible {
-    outline: 2px solid #0284c7;
-    outline-offset: 2px;
+  a:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [role="button"]:focus-visible {
+    box-shadow: 0 0 0 2px rgb(247 248 251), 0 0 0 4px rgba(14, 165, 233, 0.30);
+    border-radius: inherit;
   }
 }
 
@@ -96,7 +103,7 @@
   }
 
   .surface-card {
-    @apply bg-surface border border-line rounded-lg;
+    @apply bg-surface border border-line rounded-xl shadow-soft;
   }
 
   .surface-inset {
@@ -105,16 +112,16 @@
 
   /* 状态徽章 */
   .pill-success {
-    @apply inline-flex items-center gap-1 rounded-full border border-success-border bg-success-tint px-2.5 py-0.5 text-label-md font-semibold text-success;
+    @apply inline-flex items-center gap-1 rounded-full border border-success-border bg-success-tint px-2.5 py-0.5 text-label-md font-semibold text-success-foreground;
   }
   .pill-primary {
     @apply inline-flex items-center gap-1 rounded-full border border-primary-border bg-primary-tint px-2.5 py-0.5 text-label-md font-semibold text-primary;
   }
   .pill-warning {
-    @apply inline-flex items-center gap-1 rounded-full border border-warning-border bg-warning-tint px-2.5 py-0.5 text-label-md font-semibold text-warning;
+    @apply inline-flex items-center gap-1 rounded-full border border-warning-border bg-warning-tint px-2.5 py-0.5 text-label-md font-semibold text-warning-foreground;
   }
   .pill-danger {
-    @apply inline-flex items-center gap-1 rounded-full border border-danger-border bg-danger-tint px-2.5 py-0.5 text-label-md font-semibold text-danger;
+    @apply inline-flex items-center gap-1 rounded-full border border-danger-border bg-danger-tint px-2.5 py-0.5 text-label-md font-semibold text-danger-foreground;
   }
   .pill-neutral {
     @apply inline-flex items-center gap-1 rounded-full border border-line bg-canvas px-2.5 py-0.5 text-label-md font-semibold text-ink-secondary;

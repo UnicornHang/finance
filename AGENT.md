@@ -177,4 +177,4 @@ frontend/src/
 
 ---
 
-**最后更新**：本规约与代码现状同步。每次大规模 UI 改动（如新增 shadcn 组件、修改 Tailwind 主题）后请同步更新本文第 2 节与第 8 节。
+**最后更新**：2026-09-23（Phase A+ UI/UX 增量批次；§2 表格确认 `alert-dialog` / `dialog` / `dropdown-menu` / `select` / `sheet` 已覆盖全部新增 UI 改动；§8 迁移提示内容与现状一致：`LLMSettings` 模型组合下拉仍按"保留 + 禁止复制"原则维护）。本规约与代码现状同步。每次大规模 UI 改动（如新增 shadcn 组件、修改 Tailwind 主题）后请同步更新本文第 2 节与第 8 节。

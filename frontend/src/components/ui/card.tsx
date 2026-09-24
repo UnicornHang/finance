@@ -18,7 +18,7 @@ export const Card = React.forwardRef<
     ref={ref}
     data-slot="card"
     className={cn(
-      'rounded-lg border border-line bg-surface text-ink',
+      'rounded-xl border border-line/90 bg-surface text-ink shadow-soft',
       className,
     )}
     {...props}

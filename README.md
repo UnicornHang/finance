@@ -125,9 +125,11 @@ npm run dev
 
 发票 OCR 归档全链路已实现：
 
-- ✅ 用户上传发票 → MinIO 存储 → Celery 异步 OCR 识别
+- ✅ 通用上传接口 `POST /api/v1/files/upload`（multipart）落 MinIO（与具体业务解耦）
+- ✅ **选完即传**：Chat 输入框选中文件立刻调 `/files/upload`（显示"上传中→已上传"状态），不阻塞用户继续输入
+- ✅ 用户点击发送时只携带 `file_url` + `file_hash` 进 `POST /api/v1/chat/stream`（JSON 体）；chat_service 根据 LLM 语义决定调用 OCR / 文档解析 / 直接问答
 - ✅ 腾讯云 OCR Provider + Mock 降级（无密钥时不崩）
-- ✅ 前端侧弹窗轮询 `/invoices/preview/by-hash/{hash}` 实时刷新
+- ✅ 右栏持久轮询 `/invoices/preview/by-hash/{hash}` 实时刷新识别进度
 - ✅ 用户确认 → `status: pending_review → active` 归档
 - ✅ 唯一约束 `(tenant_id, invoice_code, invoice_number)` 硬去重（409）
 - ✅ 行级权限：员工仅看自己的发票；财务/管理员看全部
@@ -137,3 +139,23 @@ npm run dev
 - ✅ LLM 场景配置新增 `system_prompt` 字段持久化
 
 详细验收清单见 [docs/PRD.md §Phase A 验收](docs/PRD.md)。
+
+### Phase A+ UI/UX 增量（2026-09-23）
+
+Phase A 验收之后、Phase B 启动之前的打磨批次，仅改管理后台与会话界面，主链路 / 数据模型未动：
+
+- ✅ shadcn/ui 全面替换手搓下拉 / 原生 confirm/prompt/alert / 原生 select，新增 [AGENT.md](AGENT.md) 工程规约
+- ✅ LLM 设置：API Key 显式录入 + `system_prompt` 多行编辑（持久化至 `llm_configs.system_prompt`）
+- ✅ 编辑态「测试连接」按钮 + 错误分级提示（4xx 高亮字段 / 5xx 重试入口 / 网络断开重试）
+- ✅ 流式渲染抽出 `StreamRenderer`，错误事件统一带复制按钮
+- ✅ 会话侧栏重构为 DeepSeek 风格：今天 / 昨天 / 本周 / 本月 / 更早 时间桶 + 用户底部信息条
+- ✅ **通用上传 + Chat 三栏右栏持久展示**（2026-09-24）：
+  - 后端 `POST /api/v1/files/upload` 通用 multipart 上传（只落 MinIO，不触发业务逻辑）
+  - 后端 `POST /api/v1/chat/stream` 改为 JSON 体：客户端先 `/files/upload` 拿 `file_url`/`file_hash`，再把它们随消息一起进 SSE 流，chat_service 由 LLM 决定是 OCR / 文档解析 / 直接问答
+  - **输入框选文件即触发上传**（不阻塞文本输入，显示"上传中 / 已上传 / 失败"状态；失败可点 × 重选；切换文件 abort 进行中的上传）
+  - Chat 页改为两栏 / 三栏自适应：有发票 / 合同结构化数据时右栏持久出现，否则保持两栏
+  - InvoicePanel / ContractPanel 容器从 shadcn `Sheet` 抽屉改为持久 `<aside>`，所有表单 / 轮询 / 确认逻辑 1:1 保留
+  - 输入框选文件 → "上传 → 发送"两步走（不再有独立的 sidebar 上传按钮）
+
+详细改动清单见 [docs/PRD.md §Phase A+ 增量](docs/PRD.md)。
+

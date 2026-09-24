@@ -48,8 +48,10 @@ class LlmConfigUpsert(BaseModel):
 class LlmConfigTest(BaseModel):
     provider: str
     model: str
-    api_key: str
+    # api_key 留空时，配合 scene 字段从已存配置里取（用于「编辑态试调」场景）
+    api_key: str | None = None
     base_url: str | None = None
+    scene: str | None = None
 
 
 # ================ Helpers ================
@@ -169,11 +171,34 @@ async def test_saved_config(
 
 
 @router.post("/test")
-async def test_payload(payload: LlmConfigTest, _: Annotated[User, Depends(get_current_user)]):
-    """用入参配置测试连通性（保存前试调）。"""
+async def test_payload(
+    payload: LlmConfigTest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """用入参配置测试连通性（保存前试调）。
+
+    - api_key 缺省但传了 scene：从已存配置解密 key（编辑态试调）
+    - 都没有：报错
+    """
+    _require_admin(user)
+
+    api_key = payload.api_key
+    if not api_key and payload.scene:
+        _scene_or_400(payload.scene)
+        cfg = await llm_config_service.get(db, user.tenant_id, payload.scene)
+        if cfg and cfg.api_key_encrypted:
+            api_key = decrypt_field(cfg.api_key_encrypted)
+
+    if not api_key:
+        raise BusinessError(
+            "需要提供 API Key，或传入已保存配置的场景 key",
+            code="NO_API_KEY",
+        )
+
     return await llm_service.test_connectivity(
         provider=payload.provider,
         model=payload.model,
-        api_key=payload.api_key,
+        api_key=api_key,
         base_url=payload.base_url,
     )

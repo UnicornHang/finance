@@ -7,7 +7,9 @@
 """
 
 import asyncio
+import json
 import logging
+import re
 from typing import AsyncGenerator, TYPE_CHECKING
 
 from app.config import settings
@@ -26,6 +28,135 @@ SCENE_CONFIG_MAP = {
     "ocr_post": ("llm_ocr_model", "llm_ocr_api_key", "llm_ocr_base_url"),
     "contract_review": ("llm_contract_model", "llm_contract_api_key", "llm_contract_base_url"),
 }
+
+
+# provider key -> litellm 前缀
+# 大多数国产 provider 走 OpenAI 兼容协议 + 自定义 base_url，所以统一映射到 openai/
+# deepseek/anthropic 是 litellm 原生支持的 provider
+# ollama 需要用 ollama_chat/ 才能走对话端点
+_PROVIDER_LITELLM_PREFIX = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "deepseek": "deepseek",
+    "dashscope": "openai",     # 通义千问：OpenAI 兼容协议
+    "wenxin": "openai",        # 文心一言：OpenAI 兼容协议
+    "zhipu": "openai",         # 智谱 GLM：OpenAI 兼容协议
+    "doubao": "openai",        # 豆包：OpenAI 兼容协议
+    "moonshot": "openai",      # 月之暗面：OpenAI 兼容协议
+    "ollama": "ollama_chat",   # Ollama 对话端点
+    "custom": "openai",        # 自定义：按 OpenAI 兼容处理
+}
+
+
+def _resolve_model_name(provider: str, model: str) -> str:
+    """根据 provider 给模型名补 litellm 厂商前缀。
+
+    - 模型名本身已含 "/"（如 "deepseek/deepseek-chat"）→ 按用户原样透传
+    - 已知 provider → 自动加前缀
+    - 未知 provider → 不动，让 litellm 自己判断
+    """
+    if not model:
+        return model
+    if "/" in model:
+        return model
+    prefix = _PROVIDER_LITELLM_PREFIX.get(provider)
+    if not prefix:
+        return model
+    return f"{prefix}/{model}"
+
+
+def _extract_message_from_json(text: str) -> str | None:
+    """从含 {"error":{...}} 的字符串里抽 error.message 字段。
+
+    示例输入：
+        'DeepseekException - {"error":{"message":"Authentication Fails ...","type":"..."}}'
+    返回：
+        'Authentication Fails ...'
+    """
+    # 1. 先尝试从 {} 内整体 parse
+    brace_start = text.find("{")
+    if brace_start != -1:
+        # 截到最后一个 }（避免 vendor 字符串里有 } 干扰）
+        brace_end = text.rfind("}")
+        if brace_end > brace_start:
+            try:
+                obj = json.loads(text[brace_start:brace_end + 1])
+            except (json.JSONDecodeError, ValueError):
+                obj = None
+            if isinstance(obj, dict):
+                # OpenAI/DeepSeek/Anthropic 风格
+                err = obj.get("error")
+                if isinstance(err, dict):
+                    msg = err.get("message")
+                    if isinstance(msg, str) and msg.strip():
+                        return msg.strip()
+                # 一些 provider 把 message 放顶层
+                msg = obj.get("message")
+                if isinstance(msg, str) and msg.strip():
+                    return msg.strip()
+    # 2. 兜底：正则抽 "message":"..."
+    m = re.search(r'"message"\s*:\s*"((?:\\.|[^"\\])*)"', text)
+    if m:
+        try:
+            return json.loads(f'"{m.group(1)}"')
+        except (json.JSONDecodeError, ValueError):
+            return m.group(1)
+    return None
+
+
+def _format_llm_error(exc: BaseException, provider: str, model: str) -> str:
+    """从 litellm 异常里尽可能抽可读的错误信息。
+
+    处理顺序：
+    1. raw 含 JSON → 抽 error.message（最常见，OpenAI 风格 body）
+    2. 去掉 litellm / vendor exception 前缀（如 "litellm.BadRequestError:" / "DeepseekException - "）
+    3. 占位符/空消息 → 按异常类名给排查建议
+    """
+    raw = str(exc).strip()
+    cls_name = type(exc).__name__
+
+    # 1. JSON 优先
+    if "{" in raw:
+        msg = _extract_message_from_json(raw)
+        if msg:
+            return f"{cls_name}：{msg}"
+
+    # 2. 反复剥前缀（litellm.XxxError: / XxxError: / XxxException - 这几层）
+    cleaned = raw
+    prev = None
+    while prev != cleaned:
+        prev = cleaned
+        cleaned = re.sub(
+            r"^(?:litellm\.\w+|\w+(?:Error|Exception))\s*[:\-]\s*",
+            "",
+            cleaned,
+        ).strip()
+
+    # 3. 占位符 / 空
+    placeholder = not cleaned or cleaned in {"-", ":"}
+    if placeholder:
+        hint = _class_hint(cls_name, provider, model)
+        return f"{cls_name}：{hint}"
+
+    return f"{cls_name}：{cleaned}"
+
+
+def _class_hint(cls_name: str, provider: str, model: str) -> str:
+    if cls_name == "AuthenticationError":
+        return "API Key 无效或过期，请检查密钥与对应账号权限"
+    if cls_name == "NotFoundError":
+        return (
+            f"请求 URL 返回 404。常见原因：① 模型名 '{model}' 在 {provider} 上拼写错误；"
+            f"② base_url 配置错误（当前 base_url 路径下没有 chat/completions 端点）。"
+            f"请检查 base_url 是否需要去掉 '/anthropic'、'/v1' 等后缀，或到 {provider} 控制台确认模型标识"
+        )
+    if cls_name == "PermissionDeniedError":
+        return f"{provider} 账号无权限访问 '{model}'，请检查套餐/权限"
+    if cls_name in {"Timeout", "TimeoutError"}:
+        return f"请求 {provider} 超时，请稍后重试或检查网络"
+    if cls_name == "RateLimitError":
+        return f"{provider} 触发限流，请稍后重试"
+    return f"调用 {provider}/{model} 失败，请查看后端日志获取详细堆栈"
 
 
 class LLMService:
@@ -82,7 +213,7 @@ class LLMService:
             return self._mock_response(messages)
 
         response = await acompletion(
-            model=cfg["model"],
+            model=_resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
             messages=messages,
             api_key=cfg["api_key"],
             api_base=cfg["base_url"] or None,
@@ -113,7 +244,7 @@ class LLMService:
 
         try:
             response = await acompletion(
-                model=cfg["model"],
+                model=_resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
                 messages=messages,
                 api_key=cfg["api_key"],
                 api_base=cfg["base_url"] or None,
@@ -153,7 +284,7 @@ class LLMService:
         try:
             start = asyncio.get_event_loop().time()
             response = await acompletion(
-                model=model,
+                model=_resolve_model_name(provider, model),
                 messages=[{"role": "user", "content": "ping"}],
                 api_key=api_key,
                 api_base=resolved_base_url or None,
@@ -168,8 +299,14 @@ class LLMService:
                 "latency_ms": elapsed_ms,
             }
         except Exception as exc:
-            logger.warning("LLM 连通性测试失败: %s", exc)
-            return {"ok": False, "message": f"连通失败：{exc}", "latency_ms": 0}
+            logger.warning(
+                "LLM 连通性测试失败 provider=%s model=%s", provider, model, exc_info=True
+            )
+            return {
+                "ok": False,
+                "message": f"连通失败：{_format_llm_error(exc, provider, model)}",
+                "latency_ms": 0,
+            }
 
     # ================ Mock Fallback ================
 
