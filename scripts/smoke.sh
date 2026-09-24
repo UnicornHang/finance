@@ -18,7 +18,8 @@ ok() { echo "✅ $*"; PASS=$((PASS+1)); }
 fail() { echo "❌ $*"; FAIL=$((FAIL+1)); }
 warn() { echo "⚠️  $*"; WARN=$((WARN+1)); }
 
-PY="${PYTHON:-python}"
+# Ubuntu / Debian 默认只有 python3，这里做兜底
+PY="${PYTHON:-$(command -v python || command -v python3)}"
 extract() { "$PY" -c "import sys, json
 d = json.load(sys.stdin)
 v = d

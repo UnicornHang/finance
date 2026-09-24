@@ -1,0 +1,70 @@
+# 本机有docker优先使用docker，没有则使用docker-compose
+# 仅基础设施：PostgreSQL(pgvector) + Redis + MinIO
+#
+# 用途：Windows 本机开发时把重依赖放进 VMware 里的 Ubuntu 虚拟机，
+#       后端 / Celery / 前端仍在 Windows 本机运行，通过 VM IP 连接。
+#
+# 用法（在虚拟机内）：
+#   docker compose -f docker-compose.infra.yml up -d
+#
+# 注意：init.sql 需与本文件同目录，首次初始化数据库时自动创建扩展。
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: finance-infra-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finance
+      POSTGRES_PASSWORD: finance_pass_change_me
+      POSTGRES_DB: finance
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finance"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: finance-infra-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    # docker.io/minio/minio 对匿名拉取返回 denied（2026 年起 Docker Hub 限流），
+    # MinIO 官方在 quay.io 发布了同名镜像，实测可正常拉取。
+    image: quay.io/minio/minio:latest
+    container_name: finance-infra-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minio_admin
+      MINIO_ROOT_PASSWORD: minio_pass_change_me
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

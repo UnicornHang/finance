@@ -19,7 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         && rm -rf /var/lib/apt/lists/*
 
 # 依赖文件先行（利用缓存）
-COPY pyproject.toml ./
+# 注意：pyproject.toml 中 readme = "README.md"，构建元数据时该文件必须存在
+COPY pyproject.toml README.md ./
 RUN pip install --upgrade pip && \
     pip install -e ".[dev]"
 

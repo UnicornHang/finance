@@ -137,7 +137,3 @@ npm run dev
 - ✅ LLM 场景配置新增 `system_prompt` 字段持久化
 
 详细验收清单见 [docs/PRD.md §Phase A 验收](docs/PRD.md)。
-
-## License
-
-Proprietary - 私有化部署版本
