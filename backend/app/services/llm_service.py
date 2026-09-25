@@ -225,22 +225,51 @@ class LLMService:
         max_tokens: int | None = None,
     ) -> str:
         """同步调用 LLM。"""
-        from litellm import acompletion
-
         cfg = await self._resolve_config(scene, db, tenant_id)
-        if not cfg:
+        if not cfg or not (cfg.get("api_key") or "").strip():
             return self._mock_response(messages)
 
-        outgoing = apply_system_prompt(messages, cfg.get("system_prompt"))
+        return await self.complete_with_config(
+            messages,
+            cfg,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            apply_scene_prompt=True,
+        )
+
+    async def complete_with_config(
+        self,
+        messages: list[dict],
+        cfg: dict,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        apply_scene_prompt: bool = False,
+    ) -> str:
+        """用指定配置调用模型。识别场景不要套用闲聊人设。"""
+        from litellm import acompletion
+
+        outgoing = (
+            apply_system_prompt(messages, cfg.get("system_prompt"))
+            if apply_scene_prompt
+            else messages
+        )
+        extra: dict = {}
+        # Qwen3.5+ 默认思考，正文会空，结构化抽取需要关掉
+        if cfg.get("provider") == "dashscope":
+            extra["extra_body"] = {"enable_thinking": False}
+
         response = await acompletion(
             model=_resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
             messages=outgoing,
             api_key=cfg["api_key"],
             api_base=cfg["base_url"] or None,
-            temperature=temperature if temperature is not None else cfg["temperature"],
-            max_tokens=max_tokens or cfg["max_tokens"],
+            temperature=temperature if temperature is not None else cfg.get("temperature", 0.1),
+            max_tokens=max_tokens or cfg.get("max_tokens") or 1500,
+            **extra,
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        return content or ""
 
     async def stream(
         self,
@@ -272,6 +301,11 @@ class LLMService:
                 temperature=temperature if temperature is not None else cfg["temperature"],
                 stream=True,
                 timeout=cfg["timeout"],
+                **(
+                    {"extra_body": {"enable_thinking": False}}
+                    if cfg.get("provider") == "dashscope"
+                    else {}
+                ),
             )
             async for chunk in response:
                 content = chunk.choices[0].delta.content

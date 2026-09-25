@@ -2,15 +2,13 @@
 
 from langchain_core.tools import tool
 
-from app.services.ocr_service import get_ocr_service
+from app.services.invoice_vision_service import invoice_vision_service
 
 
 @tool
 async def ocr_invoice(file_url: str) -> dict:
-    """识别发票图片，返回结构化字段。"""
-    ocr = get_ocr_service()
-    # 实际：从 file_url 下载文件再识别
-    result = await ocr.recognize_invoice(b"")
+    """用通用大模型识别发票图片/文件，返回结构化字段。不调用 OCR 引擎。"""
+    result, _source = await invoice_vision_service.recognize(b"", filename=file_url)
     return {
         "invoice_title": result.invoice_title,
         "company": result.company,

@@ -152,9 +152,13 @@ class LlmConfigService:
             decrypt_field(cfg.api_key_encrypted) if cfg.api_key_encrypted else ""
         )
 
-        # base_url 缺省时取 provider 默认
+        # base_url 缺省或不是 http(s) 地址时，用该服务商的默认接口
         provider_cfg = PROVIDERS.get(cfg.provider, {})
-        base_url = cfg.base_url or provider_cfg.get("base_url", "")
+        raw_base = (cfg.base_url or "").strip()
+        if raw_base.startswith("http://") or raw_base.startswith("https://"):
+            base_url = raw_base
+        else:
+            base_url = provider_cfg.get("base_url", "")
 
         result = {
             "provider": cfg.provider,

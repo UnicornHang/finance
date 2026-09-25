@@ -150,7 +150,7 @@ SCENES: dict[str, dict] = {
     },
     "ocr_post": {
         "label": "单据识别（Vision / 后处理）",
-        "description": "方案B：多模态识票主路径；失败回落 OCR。请配置支持视觉的模型（如 gpt-4o）",
+        "description": "通用大模型识别发票图片与文件（PDF 等），不使用 OCR 引擎。请配置支持视觉/文件的模型",
         "default_temperature": 0.1,
         "default_max_tokens": 1500,
     },

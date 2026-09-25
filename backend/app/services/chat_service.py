@@ -1,7 +1,7 @@
 """Chat 编排服务。
 
 负责消息持久化、上下文组装、LLM 流式输出。
-方案 B 验证：上传发票时 Vision 主识别 → OCR 兜底 → 入库侧栏 → 模型带着结果回复。
+上传发票时由通用多模态大模型识别图片/文件 → 入库侧栏 → 模型带着结果回复。不使用 OCR。
 """
 
 import logging
@@ -108,7 +108,7 @@ def _serialize_invoice(inv) -> dict[str, Any]:
 def _format_result_for_prompt(fields: dict[str, Any], source: str) -> str:
     """把结构化结果写成模型可读摘要。"""
     lines = [
-        f"识别来源：{'多模态模型(Vision)' if source == 'vision' else 'OCR 引擎'}",
+        f"识别来源：通用大模型",
         f"发票号码：{fields.get('invoice_number') or '—'}",
         f"发票代码：{fields.get('invoice_code') or '—'}",
         f"开票日期：{fields.get('invoice_date') or '—'}",
@@ -211,9 +211,9 @@ class ChatService:
     ) -> AsyncGenerator[dict, None]:
         """流式处理用户输入，yield SSE 事件字典。
 
-        文件上传（方案 B 验证）：
+        文件上传：
         1. 推 sidepanel processing
-        2. Vision 识别 → 失败则 OCR
+        2. 通用大模型识别图片/文件（不使用 OCR）
         3. 写 pending_review，推 sidepanel ready
         4. 带着结构化结果流式回复用户
         """
@@ -227,7 +227,7 @@ class ChatService:
             return
 
         # 2. 持久化用户消息（有附件时写入 tool_calls.attachments，供聊天气泡回显）
-        display_msg = user_message or "（上传了发票文件）"
+        display_msg = user_message or ("（上传了文件）" if file_url else "")
         attachment_meta: dict[str, Any] | None = None
         if file_url and file_hash:
             meta = file_meta or {}
@@ -251,9 +251,9 @@ class ChatService:
             tool_calls=attachment_meta,
         )
 
-        # ========== 方案 B：发票文件分支 ==========
+        # 有附件时先语义判断，再进入对应业务，不默认当发票
         if file_url and file_hash:
-            async for event in self._stream_invoice_recognize(
+            async for event in self._dispatch_upload(
                 db,
                 user,
                 session,
@@ -309,6 +309,174 @@ class ChatService:
 
         yield {"type": "done"}
 
+    async def _dispatch_upload(
+        self,
+        db: AsyncSession,
+        user: "User",
+        session: "Session",
+        session_id: UUID,
+        *,
+        user_message: str,
+        file_url: str,
+        file_hash: str,
+        file_meta: dict,
+    ) -> AsyncGenerator[dict, None]:
+        """先判断附件是什么，再进入发票识别、合同审查或普通对话。"""
+        from app.services.invoice_vision_service import invoice_vision_service
+
+        yield {"type": "text", "content": "正在判断这份文件…\n\n"}
+        try:
+            file_bytes = _download_bytes(file_url)
+        except Exception as exc:
+            logger.exception("download upload failed")
+            yield {"type": "error", "message": f"下载文件失败：{exc}"}
+            yield {"type": "done"}
+            return
+
+        try:
+            intent = await invoice_vision_service.classify(
+                file_bytes,
+                content_type=file_meta.get("content_type"),
+                filename=file_meta.get("original_filename"),
+                user_message=user_message,
+                db=db,
+                tenant_id=str(user.tenant_id),
+            )
+        except Exception as exc:
+            logger.exception("classify upload failed")
+            yield {"type": "error", "message": f"无法判断文件类型：{exc}"}
+            yield {"type": "done"}
+            return
+
+        if intent == "invoice":
+            async for event in self._stream_invoice_recognize(
+                db,
+                user,
+                session,
+                session_id,
+                user_message=user_message,
+                file_url=file_url,
+                file_hash=file_hash,
+                file_meta=file_meta,
+            ):
+                yield event
+            return
+
+        if intent == "contract":
+            async for event in self._stream_contract_review(
+                db,
+                user,
+                session_id,
+                user_message=user_message,
+                file_bytes=file_bytes,
+                filename=file_meta.get("original_filename"),
+                content_type=file_meta.get("content_type"),
+            ):
+                yield event
+            return
+
+        async for event in self._stream_file_chat(
+            db,
+            user,
+            session_id,
+            user_message=user_message,
+            file_bytes=file_bytes,
+            filename=file_meta.get("original_filename"),
+            content_type=file_meta.get("content_type"),
+        ):
+            yield event
+
+    async def _stream_contract_review(
+        self,
+        db: AsyncSession,
+        user: "User",
+        session_id: UUID,
+        *,
+        user_message: str,
+        file_bytes: bytes,
+        filename: str | None,
+        content_type: str | None,
+    ) -> AsyncGenerator[dict, None]:
+        """合同：交给合同审查场景的模型，不走发票识别。"""
+        from app.services.invoice_vision_service import _guess_mime, _media_content
+
+        yield {"type": "text", "content": "这是合同，正在审查…\n\n"}
+        mime = _guess_mime(file_bytes, content_type, filename)
+        content = _media_content(
+            file_bytes,
+            mime,
+            filename,
+            "请审查这份合同，用中文指出主要风险和需要关注的条款。"
+            + (f"\n用户补充：{user_message}" if user_message else ""),
+        )
+        assistant_content = ""
+        try:
+            async for chunk in llm_service.stream(
+                [{"role": "user", "content": content}],
+                scene="contract_review",
+                db=db,
+                tenant_id=str(user.tenant_id),
+                temperature=0.2,
+            ):
+                assistant_content += chunk
+                yield {"type": "text", "content": chunk}
+        except Exception as exc:
+            logger.exception("contract review failed")
+            yield {"type": "error", "message": f"合同审查失败：{exc}"}
+        if assistant_content.strip():
+            await self.save_message(
+                db, session_id, user.tenant_id, "assistant", assistant_content
+            )
+        yield {"type": "done"}
+
+    async def _stream_file_chat(
+        self,
+        db: AsyncSession,
+        user: "User",
+        session_id: UUID,
+        *,
+        user_message: str,
+        file_bytes: bytes,
+        filename: str | None,
+        content_type: str | None,
+    ) -> AsyncGenerator[dict, None]:
+        """既不是发票也不是合同：把文件交给日常对话模型。"""
+        from app.services.invoice_vision_service import _guess_mime, _media_content
+
+        yield {"type": "text", "content": "按普通问题处理这份文件…\n\n"}
+        mime = _guess_mime(file_bytes, content_type, filename)
+        content = _media_content(
+            file_bytes,
+            mime,
+            filename,
+            user_message or "请说明这份文件是什么，并回答用户可能关心的内容。",
+        )
+        system_prompt = await self._effective_system_prompt(
+            db, user.tenant_id, "chitchat"
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content},
+        ]
+        assistant_content = ""
+        try:
+            async for chunk in llm_service.stream(
+                messages,
+                scene="chitchat",
+                db=db,
+                tenant_id=str(user.tenant_id),
+            ):
+                assistant_content += chunk
+                yield {"type": "text", "content": chunk}
+        except Exception as exc:
+            logger.exception("file chat failed")
+            yield {"type": "error", "message": f"回复失败：{exc}"}
+        if assistant_content.strip():
+            await self.save_message(
+                db, session_id, user.tenant_id, "assistant", assistant_content
+            )
+        yield {"type": "done"}
+
     async def _stream_invoice_recognize(
         self,
         db: AsyncSession,
@@ -321,7 +489,7 @@ class ChatService:
         file_hash: str,
         file_meta: dict,
     ) -> AsyncGenerator[dict, None]:
-        """Vision 主路径 + OCR 兜底 + 侧栏 + 带结果回复。"""
+        """通用大模型识别图片/文件 + 侧栏 + 带结果回复。"""
         from app.services.invoice_service import invoice_service
         from app.services.invoice_vision_service import invoice_vision_service
 
@@ -337,7 +505,7 @@ class ChatService:
                 },
             },
         }
-        yield {"type": "text", "content": "正在识别发票（优先多模态模型，失败将回落 OCR）…\n\n"}
+        yield {"type": "text", "content": "正在用大模型识别发票…\n\n"}
 
         try:
             file_bytes = _download_bytes(file_url)
@@ -406,6 +574,7 @@ class ChatService:
             f"系统已完成识别，结果如下：\n{summary}\n\n"
             f"请用简洁中文向用户汇报关键字段，提醒右侧可核对后确认归档；"
             f"对明显可疑或缺字段给出简短提示。不要编造未识别出的数字。"
+            f"回复里不要出现 OCR、光学字符识别、回落 OCR 这类字样，识别来源只说大模型。"
         )
         system_prompt = await self._effective_system_prompt(
             db, user.tenant_id, "chitchat"
@@ -429,7 +598,7 @@ class ChatService:
             logger.exception("LLM reply after invoice failed")
             # 至少给一段确定性摘要，避免空白
             fallback = (
-                f"识别完成（来源：{'Vision' if source == 'vision' else 'OCR'}）。\n"
+                f"识别完成（来源：通用大模型）。\n"
                 f"{summary}\n\n请在右侧核对后确认归档。"
             )
             assistant_content = fallback

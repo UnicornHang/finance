@@ -20,9 +20,8 @@ from app.config import settings
 from app.core.database import async_session_factory
 from app.core.exceptions import ConflictError
 from app.services.invoice_service import invoice_service
-from app.services.ocr_service import get_ocr_service
+from app.services.invoice_vision_service import invoice_vision_service
 from app.services.storage_service import storage_service
-from app.services.llm_service import llm_service
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -80,15 +79,20 @@ async def _run_ocr_pipeline(
     file_hash: str,
     user_message: str | None,
 ) -> None:
-    """实际执行：下载 → OCR → 归一 → 写 Invoice。"""
+    """实际执行：下载 → 通用大模型识别 → 归一 → 写 Invoice。"""
     bucket, obj_key = _parse_s3_url(file_url)
     file_bytes = _download_from_minio(bucket, obj_key)
-    logger.info("OCR task: downloaded %d bytes from s3://%s/%s", len(file_bytes), bucket, obj_key)
+    logger.info("recognize task: downloaded %d bytes from s3://%s/%s", len(file_bytes), bucket, obj_key)
 
-    ocr = get_ocr_service()
-    ocr_result = await ocr.recognize_invoice(file_bytes)
+    async with async_session_factory() as db:
+        ocr_result, _source = await invoice_vision_service.recognize(
+            file_bytes,
+            filename=obj_key.rsplit("/", 1)[-1],
+            db=db,
+            tenant_id=str(tenant_id),
+        )
     logger.info(
-        "OCR result: invoice_number=%s amount=%s confidence=%s",
+        "LLM result: invoice_number=%s amount=%s confidence=%s",
         ocr_result.invoice_number, ocr_result.amount_incl_tax, ocr_result.confidence,
     )
 

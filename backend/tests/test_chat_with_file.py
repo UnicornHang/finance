@@ -151,12 +151,11 @@ async def test_ocr_pipeline_writes_pending_invoice(db_session):
         confidence={"invoice_number": 0.99, "amount": 0.99},
     )
 
-    async def fake_recognize(_bytes):
-        return mock_result
+    async def fake_recognize(_bytes, **_kwargs):
+        return mock_result, "llm"
 
     with patch("app.tasks.ocr_task._download_from_minio", return_value=fake_bytes), \
-         patch("app.tasks.ocr_task.get_ocr_service") as mock_svc:
-        mock_svc.return_value.recognize_invoice = fake_recognize
+         patch("app.tasks.ocr_task.invoice_vision_service.recognize", fake_recognize):
         # file_url 必须能被 _parse_s3_url 解析
         file_url = "s3://invoices/test/mock.pdf"
         await _run_ocr_pipeline(
@@ -221,12 +220,11 @@ async def test_ocr_pipeline_dedup_blocks_duplicate(db_session):
         confidence={},
     )
 
-    async def fake_recognize(_bytes):
-        return mock_result
+    async def fake_recognize(_bytes, **_kwargs):
+        return mock_result, "llm"
 
     with patch("app.tasks.ocr_task._download_from_minio", return_value=fake_bytes), \
-         patch("app.tasks.ocr_task.get_ocr_service") as mock_svc:
-        mock_svc.return_value.recognize_invoice = fake_recognize
+         patch("app.tasks.ocr_task.invoice_vision_service.recognize", fake_recognize):
         file_url = "s3://invoices/test/dedup.pdf"
 
         # 第一次：成功

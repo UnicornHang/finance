@@ -41,7 +41,7 @@ const SCENE_LABEL: Record<string, string> = {
 const SCENE_DESC: Record<string, string> = {
   chitchat: '通用对话场景，处理问候与闲聊',
   policy_query: '结合 RAG 检索企业制度文档',
-  ocr_post: '发票/单据 OCR 后的结构化提取',
+  ocr_post: '通用大模型识别发票图片与文件',
   contract_review: '解析合同并匹配合规规则',
 }
 
