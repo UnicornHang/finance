@@ -411,7 +411,7 @@ function EditConfigDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>编辑配置 — {SCENE_LABEL[cfg.scene] || cfg.scene}</DialogTitle>
           <DialogDescription>
@@ -511,8 +511,8 @@ function EditConfigDialog({
                 setState((s) => ({ ...s, system_prompt: e.target.value }))
               }
               placeholder="例如：你是财务助手，回答需简洁严谨..."
-              rows={4}
-              className="font-mono text-body-sm"
+              rows={14}
+              className="min-h-[320px] font-mono text-body-sm"
             />
           </FieldInline>
         </div>
