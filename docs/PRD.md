@@ -991,6 +991,7 @@ async def get_invoice(
 | V1.0 | 2026-09-20 | 初版，覆盖产品定位、功能模块、用户旅程、数据模型 |
 | V1.1 | 2026-09-21 | **Phase A 完成**：发票 OCR 归档全链路验收（详见 §20） |
 | V1.2 | 2026-09-23 | **Phase A+ UI/UX 增量**：shadcn/ui 全面替换手搓控件、LLM 设置编辑体验优化、错误提示与消息渲染重构、DeepSeek 风格会话侧栏（详见 §21） |
+| V1.3 | 2026-09-25 | **识别主路径切换**：大模型同步识别发票并按附件分流；附件回显；场景级 system_prompt；虚拟机 Docker 部署与运行手册（详见 §22） |
 
 ---
 
@@ -1138,5 +1139,59 @@ a8ea2b7 会话侧栏重构为 DeepSeek 风格：时间桶分组 + 用户底部�
 - 数据模型扩展（除 `llm_configs.system_prompt` 列外无新表 / 新字段）
 - 移动端适配（仍沿用桌面端 `≥ 768px` 布局约束）
 
+---
+
+## 22. 当前进度（2026-09-25）
+
+**定位**：Phase A 发票归档链路保留。识别从「腾讯云 OCR + Celery 异步 + 前端轮询」改为「大模型同步识别，SSE 直接推侧栏」。§20 记录的是当时的验收事实；下面是现在的主路径。
+
+### 22.1 端到端流程（现行）
+
+```
+选文件 → POST /files/upload 落 MinIO（选完即传）
+  → 发送 POST /chat/stream（JSON：message + file_url + file_hash）
+  → 大模型 classify：invoice | contract | chat
+  → invoice：多模态/抽文本识别 → 入库 pending_review → SSE sidepanel + 带字段回复
+  → contract：合同审查场景模型文本审查（未归档、无 RAG）
+  → chat：日常对话场景带着文件内容回答
+  → 用户确认发票 → status=active
+```
+
+图片走 `image_url`；PDF/Word 先抽文本再交给同一模型。单据识别场景没有密钥时，改用日常对话里已配置的模型。两条都没有密钥则直接报错，不再回落 OCR 或 Mock。
+
+### 22.2 已完成
+
+| # | 事项 | 说明 | 状态 |
+|---|---|---|---|
+| 1 | 大模型同步识别发票 | `invoice_vision_service.recognize()`，source 固定 `llm`；至少要有发票号码或价税合计 | ✅ |
+| 2 | 上传分流 | `classify()` 返回 invoice / contract / chat | ✅ |
+| 3 | 附件回显 | `POST /files/presign`；消息 `attachments`；气泡预览；可只发附件 | ✅ |
+| 4 | 场景级 system_prompt | 有配置则替换默认人设，读取失败回落默认 | ✅ |
+| 5 | LLM 设置编辑区 | 对话框 `max-w-3xl`，提示词输入约 14 行 | ✅ |
+| 6 | 虚拟机部署 | Ubuntu Docker，`scripts/deploy-vm.sh`；手册 `docs/backend-runbook.md` | ✅ |
+| 7 | 本机前端代理 | `vite.config.ts` 用 `loadEnv` 读取 `VITE_API_PROXY_TARGET` | ✅ |
+| 8 | 缺陷修复 | 审计日志 `before`/`after`；422 用 `jsonable_encoder`；smoke.sh 与 JSON 上传对齐 | ✅ |
+| 9 | 烟测 | `scripts/smoke.sh`：14 通过 / 0 失败 / 0 警告 | ✅ |
+
+相关提交：`67fa1e7`、`2753687`、`2c2655a`、`8fdb8d9`、`3e81369`、`1c51e93`。
+
+### 22.3 未完成
+
+| 项 | 说明 |
+|---|---|
+| LLM 凭证 | 虚拟机根 `.env` 的各场景 API Key 仍需自行填写，否则对话与识别返回缺凭证 |
+| 合同归档与合规 RAG | 当前只是审查场景的一次文本回复，没有风险等级入库和规则检索 |
+| 知识库 / 制度问答 | Phase 2 / Phase 3，未开始交付 |
+| 会话摘要与结构化记忆 | Phase 2，未开始交付 |
+| Celery OCR 任务 | 代码仍在，主链路不再 `.delay()`，后续可删或改作补偿任务 |
+
+### 22.4 与 §20 的差异
+
+| §20 当时 | 现在 |
+|---|---|
+| Celery `process_invoice_ocr` 异步识别 | 请求内同步识别并推 SSE |
+| 腾讯云 OCR，无密钥走 Mock | 只用已配置的大模型，无密钥即失败 |
+| 前端轮询 `/invoices/preview/by-hash/{hash}` 等结果 | 识别完成即推 `sidepanel`；轮询接口仍可用 |
+| 合同审查不在范围 | 分流已接到审查场景，归档与 RAG 仍未做 |
 
 ---

@@ -114,6 +114,8 @@ npm run dev
 
 - [PRD 产品需求文档](docs/prd.md)
 - [TD 技术选型与架构设计](docs/TD.md)
+- [后端运行手册](docs/backend-runbook.md)
+- [Ubuntu 虚拟机 Docker 配置](docs/ubuntu-docker-setup.md)
 
 ## 路线图
 
@@ -128,8 +130,8 @@ npm run dev
 - ✅ 通用上传接口 `POST /api/v1/files/upload`（multipart）落 MinIO（与具体业务解耦）
 - ✅ **选完即传**：Chat 输入框选中文件立刻调 `/files/upload`（显示"上传中→已上传"状态），不阻塞用户继续输入
 - ✅ 用户点击发送时只携带 `file_url` + `file_hash` 进 `POST /api/v1/chat/stream`（JSON 体）；chat_service 根据 LLM 语义决定调用 OCR / 文档解析 / 直接问答
-- ✅ 腾讯云 OCR Provider + Mock 降级（无密钥时不崩）
-- ✅ 右栏持久轮询 `/invoices/preview/by-hash/{hash}` 实时刷新识别进度
+- ✅ 腾讯云 OCR Provider + Mock 降级（无密钥时不崩）——**2026-09-25 起主路径已改为大模型识别，见下方「当前进度」**
+- ✅ 右栏持久轮询 `/invoices/preview/by-hash/{hash}` 实时刷新识别进度——主路径改为同步推送侧栏，轮询接口仍保留
 - ✅ 用户确认 → `status: pending_review → active` 归档
 - ✅ 唯一约束 `(tenant_id, invoice_code, invoice_number)` 硬去重（409）
 - ✅ 行级权限：员工仅看自己的发票；财务/管理员看全部
@@ -158,4 +160,26 @@ Phase A 验收之后、Phase B 启动之前的打磨批次，仅改管理后台�
   - 输入框选文件 → "上传 → 发送"两步走（不再有独立的 sidebar 上传按钮）
 
 详细改动清单见 [docs/PRD.md §Phase A+ 增量](docs/PRD.md)。
+
+### 当前进度（2026-09-25）
+
+Phase A 发票归档仍可用。识别与对话主路径已从「腾讯 OCR + Celery 轮询」切到「大模型同步识别 + 按文件分流」。合同审查、知识库 RAG、制度问答仍未进入正式交付。
+
+**已落地**
+
+- ✅ 发票识别主路径：上传后由多模态模型同步抽取字段，结果直接入库（`pending_review`）并经 SSE 推到右栏；回复里带上结构化字段。Celery `process_invoice_ocr` 仍在注册，主链路不再调用。
+- ✅ 上传分流：模型先判断附件是发票、合同还是普通文件，再进入识别、合同审查或日常对话。合同目前是场景模型的文本审查，没有归档和 RAG。
+- ✅ 识别不再回落 OCR 引擎。未配置可用密钥时直接提示去系统设置填写「日常对话」或「单据识别」的 API Key。图片走多模态；PDF/Word 先抽文本再交给同一模型。
+- ✅ 聊天气泡回显附件：`POST /api/v1/files/presign` 按租户和白名单桶签发临时链接；消息持久化 `attachments`；支持图片大图、文件卡，以及只发附件不写文字。
+- ✅ 场景级 `system_prompt`：管理后台配置后替换该场景默认人设；读取失败回落默认提示词。LLM 设置对话框加宽，提示词输入区加大。
+- ✅ 部署：后端跑在 Ubuntu 虚拟机 Docker（`192.168.8.128:8000`）。`scripts/deploy-vm.sh` 幂等拉起 backend + celery（自动带起 postgres / redis / minio）。本机 Vite 通过 `VITE_API_PROXY_TARGET` 代理到该地址。
+- ✅ 修复：发票审计日志参数名、422 响应里 bytes 无法 JSON 序列化、`vite.config.ts` 未加载 `.env.local` 导致会话接口 500、`scripts/smoke.sh` 与现网 JSON 上传流程对齐。烟测 **14 通过 / 0 失败 / 0 警告**。
+
+**尚未完成**
+
+- 对话和识别依赖已配置的 LLM API Key。虚拟机根目录 `.env` 里相关密钥仍为空时，接口能通，内容会报缺凭证。
+- Phase 2：合同正式归档、合规规则 RAG、会话摘要与结构化记忆。
+- Phase 3：制度问答、看板、权限细化、RAG 历史检索。
+
+手册见 [docs/backend-runbook.md](docs/backend-runbook.md)。验收对照见 [docs/PRD.md §当前进度](docs/PRD.md)。
 
