@@ -78,20 +78,22 @@ async def test_stream_response_yields_events(mock_db, mock_user, mock_session):
         for chunk in ["你", "好", "，", "我是", "AI"]:
             yield chunk
 
-    with patch("app.services.chat_service.llm_service") as mock_llm:
-        mock_llm.stream = mock_llm_stream
+    with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
+        mock_cfg_svc.resolve = AsyncMock(return_value=None)
+        with patch("app.services.chat_service.llm_service") as mock_llm:
+            mock_llm.stream = mock_llm_stream
 
-        with patch("app.services.chat_service.session_service") as mock_session_svc:
-            mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
+            with patch("app.services.chat_service.session_service") as mock_session_svc:
+                mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
 
-            service = ChatService()
-            service.save_message = AsyncMock()
+                service = ChatService()
+                service.save_message = AsyncMock()
 
-            events = []
-            async for event in service.stream_response(
-                mock_db, mock_user, mock_session.id, "hello"
-            ):
-                events.append(event)
+                events = []
+                async for event in service.stream_response(
+                    mock_db, mock_user, mock_session.id, "hello"
+                ):
+                    events.append(event)
 
     # 验证事件类型序列
     event_types = [e["type"] for e in events]
@@ -115,20 +117,22 @@ async def test_stream_response_handles_llm_error(mock_db, mock_user, mock_sessio
         raise RuntimeError("API rate limit")
         yield  # noqa: 让生成器标记为 async generator
 
-    with patch("app.services.chat_service.llm_service") as mock_llm:
-        mock_llm.stream = failing_llm_stream
+    with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
+        mock_cfg_svc.resolve = AsyncMock(return_value=None)
+        with patch("app.services.chat_service.llm_service") as mock_llm:
+            mock_llm.stream = failing_llm_stream
 
-        with patch("app.services.chat_service.session_service") as mock_session_svc:
-            mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
+            with patch("app.services.chat_service.session_service") as mock_session_svc:
+                mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
 
-            service = ChatService()
-            service.save_message = AsyncMock()
+                service = ChatService()
+                service.save_message = AsyncMock()
 
-            events = []
-            async for event in service.stream_response(
-                mock_db, mock_user, mock_session.id, "hello"
-            ):
-                events.append(event)
+                events = []
+                async for event in service.stream_response(
+                    mock_db, mock_user, mock_session.id, "hello"
+                ):
+                    events.append(event)
 
     error_events = [e for e in events if e["type"] == "error"]
     assert len(error_events) == 1
@@ -157,3 +161,32 @@ def test_system_prompt_contains_brand():
     """系统提示词包含品牌标识。"""
     assert "小财" in SYSTEM_PROMPT
     assert "财务" in SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_stream_uses_custom_system_prompt(mock_db, mock_user, mock_session):
+    """用户配置了场景提示词时，发给模型的 system 必须是用户原文。"""
+    captured: dict = {}
+
+    async def mock_llm_stream(messages, scene, **kwargs):
+        captured["messages"] = messages
+        yield "ok"
+
+    with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
+        mock_cfg_svc.resolve = AsyncMock(
+            return_value={"system_prompt": "你叫MoFan，是魔方财务科技顾问。"}
+        )
+        with patch("app.services.chat_service.llm_service") as mock_llm:
+            mock_llm.stream = mock_llm_stream
+            with patch("app.services.chat_service.session_service") as mock_session_svc:
+                mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
+                service = ChatService()
+                service.save_message = AsyncMock()
+                async for _ in service.stream_response(
+                    mock_db, mock_user, mock_session.id, "你是谁？"
+                ):
+                    pass
+
+    assert captured["messages"][0]["role"] == "system"
+    assert captured["messages"][0]["content"] == "你叫MoFan，是魔方财务科技顾问。"
+    assert "小财" not in captured["messages"][0]["content"]

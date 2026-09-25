@@ -1,6 +1,7 @@
 """统一异常处理。"""
 
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -66,7 +67,8 @@ def register_exception_handlers(app: FastAPI) -> None:
             content={
                 "code": "VALIDATION_ERROR",
                 "message": "请求参数校验失败",
-                "errors": exc.errors(),
+                # exc.errors() 里可能含 bytes（如 multipart 上传体），必须过 jsonable_encoder
+                "errors": jsonable_encoder(exc.errors()),
                 "path": str(request.url.path),
             },
         )

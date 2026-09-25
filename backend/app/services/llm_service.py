@@ -159,6 +159,25 @@ def _class_hint(cls_name: str, provider: str, model: str) -> str:
     return f"调用 {provider}/{model} 失败，请查看后端日志获取详细堆栈"
 
 
+def apply_system_prompt(messages: list[dict], system_prompt: str | None) -> list[dict]:
+    """用户配置了场景级提示词时优先使用；未配置则保持调用方原样。
+
+    - 已有 system 消息：替换其 content（不叠加默认人设）
+    - 没有 system 消息：前置一条 system
+    - None / 空白：原样返回，不复制列表
+    """
+    prompt = (system_prompt or "").strip()
+    if not prompt:
+        return messages
+
+    applied = [dict(msg) for msg in messages]
+    for index, msg in enumerate(applied):
+        if msg.get("role") == "system":
+            applied[index] = {**msg, "content": prompt}
+            return applied
+    return [{"role": "system", "content": prompt}, *applied]
+
+
 class LLMService:
     """LLM 统一调度，支持 DB 配置 + 流式 + 多场景。"""
 
@@ -167,8 +186,8 @@ class LLMService:
     ) -> dict | None:
         """合并配置：DB > env。
 
-        返回 {provider, model, api_key, base_url, temperature, max_tokens, timeout}
-        若全部没有则返回 None（上层走 mock）。
+        返回 {provider, model, api_key, base_url, temperature, max_tokens, timeout, system_prompt?}
+        若全部没有则返回 None（上层走 mock）。env 兜底不含 system_prompt。
         """
         # 1. DB 优先
         if db is not None and tenant_id:
@@ -212,9 +231,10 @@ class LLMService:
         if not cfg:
             return self._mock_response(messages)
 
+        outgoing = apply_system_prompt(messages, cfg.get("system_prompt"))
         response = await acompletion(
             model=_resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
-            messages=messages,
+            messages=outgoing,
             api_key=cfg["api_key"],
             api_base=cfg["base_url"] or None,
             temperature=temperature if temperature is not None else cfg["temperature"],
@@ -242,10 +262,11 @@ class LLMService:
 
         from litellm import acompletion
 
+        outgoing = apply_system_prompt(messages, cfg.get("system_prompt"))
         try:
             response = await acompletion(
                 model=_resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
-                messages=messages,
+                messages=outgoing,
                 api_key=cfg["api_key"],
                 api_base=cfg["base_url"] or None,
                 temperature=temperature if temperature is not None else cfg["temperature"],

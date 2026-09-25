@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError
+from app.services.llm_config_service import llm_config_service
 from app.services.llm_service import llm_service
 from app.services.session_service import session_service
 
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# 场景未配置 system_prompt 时的默认人设。
 SYSTEM_PROMPT = """你是企业财务 AI 助手，名叫「¥ 小财」。
 
 你可以帮助用户：
@@ -167,6 +169,25 @@ class ChatService:
             if m.content
         ]
 
+    async def _effective_system_prompt(
+        self, db: AsyncSession, tenant_id: UUID | str, scene: str
+    ) -> str:
+        """优先用该场景用户配置的提示词；未配置或读取失败则回落默认人设。"""
+        try:
+            cfg = await llm_config_service.resolve(db, tenant_id, scene)
+        except Exception:
+            logger.exception("读取场景 %s 的 system_prompt 失败，使用默认人设", scene)
+            return SYSTEM_PROMPT
+
+        custom = (cfg or {}).get("system_prompt") if isinstance(cfg, dict) else None
+        if not isinstance(custom, str):
+            return SYSTEM_PROMPT
+        prompt = custom.strip()
+        if prompt:
+            logger.info("scene=%s 使用用户配置的 system_prompt（%s 字）", scene, len(prompt))
+            return prompt
+        return SYSTEM_PROMPT
+
     async def auto_title(self, db: AsyncSession, session: "Session", first_message: str) -> None:
         """根据首条用户消息自动生成会话标题。"""
         if session.title:
@@ -232,8 +253,11 @@ class ChatService:
         if history and history[-1]["content"] == display_msg:
             history = history[:-1]
 
+        system_prompt = await self._effective_system_prompt(
+            db, user.tenant_id, "chitchat"
+        )
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             *history[-20:],
             {"role": "user", "content": display_msg},
         ]
@@ -364,8 +388,11 @@ class ChatService:
             f"请用简洁中文向用户汇报关键字段，提醒右侧可核对后确认归档；"
             f"对明显可疑或缺字段给出简短提示。不要编造未识别出的数字。"
         )
+        system_prompt = await self._effective_system_prompt(
+            db, user.tenant_id, "chitchat"
+        )
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": reply_user},
         ]
 

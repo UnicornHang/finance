@@ -294,8 +294,8 @@ class InvoiceService:
             operation_type="update_invoice",
             target_type="invoice",
             target_id=inv.id,
-            before_value=before,
-            after_value=_serialize_snapshot(inv),
+            before=before,
+            after=_serialize_snapshot(inv),
         )
         await db.commit()
         return inv
@@ -342,8 +342,8 @@ class InvoiceService:
             operation_type="confirm_invoice",
             target_type="invoice",
             target_id=inv.id,
-            before_value=before,
-            after_value=_serialize_snapshot(inv),
+            before=before,
+            after=_serialize_snapshot(inv),
         )
         await db.commit()
         return inv
@@ -374,8 +374,8 @@ class InvoiceService:
             operation_type="delete_invoice",
             target_type="invoice",
             target_id=inv.id,
-            before_value=before,
-            after_value={"status": "deleted"},
+            before=before,
+            after={"status": "deleted"},
         )
         await db.commit()
 
