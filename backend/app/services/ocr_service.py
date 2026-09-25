@@ -1,7 +1,7 @@
 """OCR 服务 - 抽象 + 多 Provider 实现 + 工厂。
 
 Phase A 实现：
-- TencentOCRProvider: 调用腾讯云 MixedInvoiceOCR（增值税发票识别）
+- TencentOCRProvider: 调用腾讯云通用票据识别 RecognizeGeneralInvoice
 - get_ocr_service: 根据 settings 决定降级到 Mock 还是真实 SDK
 """
 
@@ -75,18 +75,43 @@ class MockOCRProvider(OCRProvider):
         )
 
 
-# ================ 腾讯云 OCR ================
+# 通用票据识别 SingleInvoiceInfos 上优先采用的增值税票种（其余票种作兜底）。
+_VAT_SUBTYPES: tuple[str, ...] = (
+    "VatSpecialInvoice",
+    "VatElectronicSpecialInvoice",
+    "VatElectronicSpecialInvoiceFull",
+    "VatCommonInvoice",
+    "VatElectronicCommonInvoice",
+    "VatElectronicInvoiceFull",
+    "VatElectronicInvoiceBlockchain",
+    "VatElectronicInvoiceToll",
+    "VatInvoiceRoll",
+)
+
+_SPECIAL_SUBTYPES = frozenset({
+    "VatSpecialInvoice",
+    "VatElectronicSpecialInvoice",
+    "VatElectronicSpecialInvoiceFull",
+})
+_GENERAL_SUBTYPES = frozenset({
+    "VatCommonInvoice",
+    "VatElectronicCommonInvoice",
+    "VatInvoiceRoll",
+    "VatElectronicInvoiceToll",
+    "MachinePrintedInvoice",
+})
+
 
 class TencentOCRProvider(OCRProvider):
-    """腾讯云 OCR：调用 MixedInvoiceOCR API。
+    """腾讯云通用票据识别 RecognizeGeneralInvoice。
 
-    文档：https://cloud.tencent.com/document/api/866/49500
+    文档：https://cloud.tencent.com/document/product/866/90802
     需要：TENCENT_OCR_SECRET_ID + TENCENT_OCR_SECRET_KEY + Region
     """
 
     async def recognize_invoice(self, file_bytes: bytes) -> InvoiceOCRResult:
+        """把发票图片或 PDF 交给腾讯云通用票据识别，并映射成标准字段。"""
         if not settings.tencent_ocr_secret_id or not settings.tencent_ocr_secret_key:
-            # 双保险：factory 已降级，这里再兜底
             logger.warning("Tencent OCR credentials missing, falling back to Mock")
             return await MockOCRProvider().recognize_invoice(file_bytes)
 
@@ -101,12 +126,18 @@ class TencentOCRProvider(OCRProvider):
             )
             client = ocr_client.OcrClient(cred, settings.tencent_ocr_region)
 
-            req = models.MixedInvoiceOCRRequest()
+            req = models.RecognizeGeneralInvoiceRequest()
             req.ImageBase64 = base64.b64encode(file_bytes).decode("utf-8")
+            # PDF 发票同样走该接口；多页时取全部页
+            req.EnablePdf = True
+            req.EnableMultiplePage = True
 
-            logger.info("Tencent OCR request: %d bytes, region=%s", len(file_bytes), settings.tencent_ocr_region)
-            resp = client.MixedInvoiceOCR(req)
-
+            logger.info(
+                "Tencent RecognizeGeneralInvoice: %d bytes, region=%s",
+                len(file_bytes),
+                settings.tencent_ocr_region,
+            )
+            resp = client.RecognizeGeneralInvoice(req)
             return _map_tencent_response(resp)
 
         except Exception as exc:
@@ -115,83 +146,101 @@ class TencentOCRProvider(OCRProvider):
 
 
 def _map_tencent_response(resp) -> InvoiceOCRResult:
-    """把腾讯云 MixedInvoiceOCR 响应映射成 InvoiceOCRResult。
-
-    腾讯云返回 MixedInvoiceItems 数组，每项含 VatInvoiceInfo / ElectronicInvoiceInfo 等子结构。
-    这里只取第一张增值税发票的字段作为代表（多数场景是单张）。
-    """
-    items = getattr(resp, "MixedInvoiceItems", []) or []
+    """把 RecognizeGeneralInvoice 的 MixedInvoiceItems 映射成 InvoiceOCRResult。"""
+    items = getattr(resp, "MixedInvoiceItems", None) or []
     if not items:
         logger.warning("Tencent OCR returned no MixedInvoiceItems")
         return InvoiceOCRResult()
 
-    item = items[0]
-    # 不同发票类型字段位置不同：优先 VatInvoiceInfo（增值税发票）
-    vat = getattr(item, "VatInvoiceInfo", None)
-    if vat is None:
-        # 电子发票 fallback
-        vat = getattr(item, "ElectronicInvoiceInfo", None)
-
-    if vat is None:
-        # 最后兜底：直接用 item 自身（保守取字段）
-        vat = item
-
-    # 字段提取（容错：可能为 None 或 str/Decimal）
-    def _s(obj, *names):
-        for n in names:
-            v = getattr(obj, n, None)
-            if v:
-                return v
-        return None
-
-    def _f(obj, *names):
-        v = _s(obj, *names)
-        if v is None:
-            return None
-        try:
-            return float(v)
-        except (ValueError, TypeError):
-            return None
-
-    def _date(obj, *names):
-        v = _s(obj, *names)
-        if v is None:
-            return None
-        try:
-            # 腾讯云常见格式 "2024-01-15" 或 "20240115"
-            if isinstance(v, datetime):
-                return v.date()
-            if isinstance(v, date):
-                return v
-            s = str(v)
-            if len(s) == 8 and s.isdigit():
-                return datetime.strptime(s, "%Y%m%d").date()
-            return datetime.strptime(s[:10], "%Y-%m-%d").date()
-        except (ValueError, TypeError):
-            return None
-
-    confidence = {}
-    if hasattr(item, "Confidence") and item.Confidence is not None:
-        try:
-            confidence = dict(item.Confidence) if hasattr(item.Confidence, "items") else {}
-        except Exception:
-            confidence = {}
+    subtype, info, type_desc = _pick_invoice_payload(items)
+    if info is None:
+        logger.warning("Tencent OCR item has empty SingleInvoiceInfos")
+        return InvoiceOCRResult(invoice_title=type_desc)
 
     return InvoiceOCRResult(
-        invoice_title=_s(vat, "Title", "InvoiceTitle"),
-        company=_s(vat, "Seller", "SellerName", "CompanyName"),
-        tax_id=_s(vat, "SellerTaxID", "TaxId"),
-        invoice_code=_s(vat, "Code", "InvoiceCode"),
-        invoice_number=_s(vat, "Number", "InvoiceNumber"),
-        invoice_date=_date(vat, "Date", "InvoiceDate", "IssueDate"),
-        amount_excl_tax=_f(vat, "AmountWithoutTax", "Price", "PretaxAmount"),
-        tax_amount=_f(vat, "TaxAmount", "Tax"),
-        amount_incl_tax=_f(vat, "AmountWithTax", "Total", "Amount"),
-        invoice_type="special" if getattr(item, "VatInvoiceInfo", None) else "electronic",
-        seller=_s(vat, "Seller", "SellerName"),
-        buyer=_s(vat, "Buyer", "BuyerName"),
-        confidence=confidence or None,
+        invoice_title=_text(info, "Title") or type_desc,
+        company=_text(info, "Seller", "SellerName"),
+        tax_id=_text(info, "SellerTaxID"),
+        invoice_code=_text(info, "Code"),
+        invoice_number=_text(info, "Number", "ElectronicFullNumber", "ElectronicTicketNum"),
+        invoice_date=_parse_date(_text(info, "Date", "DateGetOn")),
+        amount_excl_tax=_amount(info, "PretaxAmount", "Fare"),
+        tax_amount=_amount(info, "Tax"),
+        amount_incl_tax=_amount(info, "Total"),
+        invoice_type=_invoice_type(subtype),
+        seller=_text(info, "Seller", "SellerName"),
+        buyer=_text(info, "Buyer", "BuyerName"),
     )
+
+
+def _pick_invoice_payload(items) -> tuple[str | None, object | None, str | None]:
+    """多张票据时优先取增值税发票，否则取第一张有结构化字段的票据。"""
+    candidates: list[tuple[str | None, object, str | None]] = []
+    for item in items:
+        infos = getattr(item, "SingleInvoiceInfos", None)
+        if infos is None:
+            continue
+        type_desc = getattr(item, "TypeDescription", None) or getattr(item, "SubTypeDescription", None)
+        for name in _VAT_SUBTYPES:
+            payload = getattr(infos, name, None)
+            if payload is not None:
+                return name, payload, type_desc
+        for name in dir(infos):
+            if not name[:1].isupper() or name in {"RequestId"}:
+                continue
+            payload = getattr(infos, name, None)
+            if payload is not None:
+                candidates.append((name, payload, type_desc))
+                break
+    if candidates:
+        return candidates[0]
+    return None, None, None
+
+
+def _invoice_type(subtype: str | None) -> str:
+    """把腾讯云票种子类型收成 special / general / electronic。"""
+    if subtype in _SPECIAL_SUBTYPES:
+        return "special"
+    if subtype in _GENERAL_SUBTYPES:
+        return "general"
+    return "electronic"
+
+
+def _text(obj, *names: str) -> str | None:
+    """按候选字段名取第一个非空字符串。"""
+    for name in names:
+        value = getattr(obj, name, None)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _amount(obj, *names: str) -> float | None:
+    """解析金额字符串，去掉货币符号和千分位。"""
+    raw = _text(obj, *names)
+    if raw is None:
+        return None
+    cleaned = raw.replace(",", "").replace("，", "").replace("¥", "").replace("￥", "").strip()
+    try:
+        return float(Decimal(cleaned))
+    except Exception:
+        return None
+
+
+def _parse_date(raw: str | None) -> date | None:
+    """解析腾讯云日期：YYYY-MM-DD、YYYYMMDD、YYYY年MM月DD日。"""
+    if not raw:
+        return None
+    text = raw.strip().replace("年", "-").replace("月", "-").replace("日", "")
+    for fmt, width in (("%Y-%m-%d", 10), ("%Y%m%d", 8)):
+        try:
+            return datetime.strptime(text[:width], fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 # ================ 工厂 ================

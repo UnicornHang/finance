@@ -226,10 +226,29 @@ class ChatService:
             yield {"type": "error", "message": str(exc)}
             return
 
-        # 2. 持久化用户消息
+        # 2. 持久化用户消息（有附件时写入 tool_calls.attachments，供聊天气泡回显）
         display_msg = user_message or "（上传了发票文件）"
+        attachment_meta: dict[str, Any] | None = None
+        if file_url and file_hash:
+            meta = file_meta or {}
+            attachment_meta = {
+                "attachments": [
+                    {
+                        "file_url": file_url,
+                        "file_hash": file_hash,
+                        "original_filename": meta.get("original_filename"),
+                        "content_type": meta.get("content_type"),
+                        "size": meta.get("size"),
+                    }
+                ]
+            }
         await self.save_message(
-            db, session_id, user.tenant_id, "user", display_msg
+            db,
+            session_id,
+            user.tenant_id,
+            "user",
+            display_msg,
+            tool_calls=attachment_meta,
         )
 
         # ========== 方案 B：发票文件分支 ==========

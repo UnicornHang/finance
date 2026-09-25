@@ -75,6 +75,7 @@ class MessageOut(BaseSchema):
     role: str
     content: str | None
     tool_calls: dict | None
+    attachments: list[dict] | None = None
     created_at: datetime
 
 

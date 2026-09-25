@@ -10,17 +10,29 @@ import logging
 import uuid
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 from app.config import settings
-from app.core.exceptions import BusinessError
+from app.core.exceptions import BusinessError, ForbiddenError
 from app.deps import get_current_user
 from app.models import User
 from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _parse_s3_url(s3_url: str) -> tuple[str, str]:
+    """s3://bucket/key → (bucket, key)。"""
+    if not s3_url.startswith("s3://"):
+        raise BusinessError("无效的文件地址", code="INVALID_FILE_URL")
+    rest = s3_url[len("s3://") :]
+    bucket, _, key = rest.partition("/")
+    if not bucket or not key:
+        raise BusinessError("无效的文件地址", code="INVALID_FILE_URL")
+    return bucket, unquote(key)
 
 
 @router.post("/upload")
@@ -79,3 +91,32 @@ async def upload_file(
         "size": len(content),
         "status": "uploaded",
     }
+
+
+@router.get("/presign")
+async def presign_file(
+    user: Annotated[User, Depends(get_current_user)],
+    file_url: Annotated[str, Query(description="s3://bucket/key 形式的对象地址")],
+    expires: Annotated[int, Query(ge=60, le=86400)] = 3600,
+) -> dict[str, Any]:
+    """为已上传文件生成临时预览/下载 URL（仅允许访问本租户路径下的对象）。"""
+    bucket, key = _parse_s3_url(file_url)
+    tenant_prefix = f"{user.tenant_id}/"
+    if not key.startswith(tenant_prefix):
+        raise ForbiddenError("无权访问该文件", code="FILE_FORBIDDEN")
+
+    allowed_buckets = {
+        settings.minio_bucket_kb,
+        settings.minio_bucket_invoice,
+        settings.minio_bucket_contract,
+    }
+    if bucket not in allowed_buckets:
+        raise ForbiddenError("无权访问该文件", code="FILE_FORBIDDEN")
+
+    try:
+        url = storage_service.get_presigned_url(bucket, key, expires=expires)
+    except Exception as exc:
+        logger.exception("presign failed: %s", file_url)
+        raise BusinessError(f"生成预览链接失败：{exc}", code="PRESIGN_FAILED") from exc
+
+    return {"url": url, "expires_in": expires}

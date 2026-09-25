@@ -117,7 +117,9 @@ export function InputBox() {
   }, [])
 
   const handleSend = async () => {
-    if (!text.trim() || !currentSessionId || streaming) return
+    const hasText = !!text.trim()
+    const hasFile = !!file && uploadStatus === 'uploaded' && !!fileRef
+    if ((!hasText && !hasFile) || !currentSessionId || streaming) return
     if (file && uploadStatus !== 'uploaded') {
       // 上传未完成或失败，不发送（不让 chat_stream 拿到一个空的 file_url）
       return
@@ -130,11 +132,12 @@ export function InputBox() {
     await send(msg, ref ?? undefined)
   }
 
+  // 允许纯文字或「仅附件」发送（后端也支持 file-only）
   const canSend =
-    !!text.trim() &&
     !streaming &&
     !!currentSessionId &&
-    (!file || uploadStatus === 'uploaded')
+    ((!!text.trim() && (!file || uploadStatus === 'uploaded')) ||
+      (!!file && uploadStatus === 'uploaded' && !!fileRef))
 
   return (
     <div className="border-line px-6 py-4">

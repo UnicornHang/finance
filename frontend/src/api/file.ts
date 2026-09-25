@@ -15,6 +15,11 @@ export interface FileRef {
   file_meta: Record<string, unknown>
 }
 
+export interface FilePresignResponse {
+  url: string
+  expires_in: number
+}
+
 /** 通用文件上传（图片 / PDF / Word 等），落到 MinIO 后由 chat_service 决定后续动作。 */
 export const fileApi = {
   /** `signal` 可选：传入 AbortController.signal 用于取消进行中的上传。
@@ -30,4 +35,12 @@ export const fileApi = {
       .post<FileUploadResponse>('/files/upload', form, { signal })
       .then((r) => r.data)
   },
+
+  /** 根据 s3:// URL 换取临时预览/下载链接 */
+  presign: (fileUrl: string, expires = 3600) =>
+    apiClient
+      .get<FilePresignResponse>('/files/presign', {
+        params: { file_url: fileUrl, expires },
+      })
+      .then((r) => r.data),
 }

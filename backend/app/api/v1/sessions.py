@@ -106,6 +106,16 @@ async def delete_session(
     return {"message": "deleted", "session_id": str(session_id)}
 
 
+def _extract_attachments(tool_calls: dict | None) -> list[dict] | None:
+    """从 tool_calls.attachments 提取附件列表（用户上传文件回显用）。"""
+    if not isinstance(tool_calls, dict):
+        return None
+    atts = tool_calls.get("attachments")
+    if not isinstance(atts, list) or not atts:
+        return None
+    return [a for a in atts if isinstance(a, dict)]
+
+
 @router.get("/{session_id}/messages")
 async def list_messages(
     session_id: UUID,
@@ -133,6 +143,7 @@ async def list_messages(
             "role": m.role,
             "content": m.content,
             "tool_calls": m.tool_calls,
+            "attachments": _extract_attachments(m.tool_calls),
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in messages

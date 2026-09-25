@@ -4,7 +4,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { streamChat } from '@/api/chat'
 import type { FileRef } from '@/api/file'
-import type { Message } from '@/types'
+import type { Message, MessageAttachment } from '@/types'
 
 /**
  * 临时消息 ID 生成器 — 用 crypto.randomUUID 避免 Date.now()
@@ -16,6 +16,19 @@ function tmpId(prefix: 'user' | 'assistant'): string {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
   return `tmp-${prefix}-${uuid}`
+}
+
+/** 从 FileRef 组装气泡附件结构 */
+function toAttachment(fileRef: FileRef): MessageAttachment {
+  const meta = fileRef.file_meta || {}
+  return {
+    file_url: fileRef.file_url,
+    file_hash: fileRef.file_hash,
+    original_filename:
+      typeof meta.original_filename === 'string' ? meta.original_filename : null,
+    content_type: typeof meta.content_type === 'string' ? meta.content_type : null,
+    size: typeof meta.size === 'number' ? meta.size : null,
+  }
 }
 
 /**
@@ -36,12 +49,13 @@ export function useChat() {
       const sessionId = useSessionStore.getState().currentSessionId
       if (!sessionId) return
 
-      // 1. 追加用户消息
+      // 1. 追加用户消息（含附件，立刻在气泡中展示）
       const userMsg: Message = {
         id: tmpId('user'),
         role: 'user',
-        content: message,
+        content: message || (fileRef ? '（上传了文件）' : ''),
         tool_calls: null,
+        attachments: fileRef ? [toAttachment(fileRef)] : null,
         created_at: new Date().toISOString(),
       }
       appendMessage(sessionId, userMsg)
