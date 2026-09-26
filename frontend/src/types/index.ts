@@ -32,6 +32,8 @@ export interface MessageAttachment {
   intent?: string | null
   recognize_status?: string | null
   recognize_error?: string | null
+  invoice_id?: string | null
+  contract_id?: string | null
 }
 
 export interface Message {

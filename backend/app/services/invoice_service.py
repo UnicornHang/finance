@@ -4,8 +4,8 @@ Phase A 范围：
 - list_by_tenant: 列表（按角色过滤 + 分页 + 筛选）
 - get: 详情
 - get_by_hash: 前端轮询用
-- create_pending: OCR 完成后写入（status=pending_review），触发去重
-- confirm: 用户确认后 status=active，写审计
+- create_pending: 识别完成后写入待归档（status=pending_review），不去重
+- confirm: 用户确认后才归档；此时若档案已有相同代码+号码则失败
 - update_fields: 编辑字段（不改 status），写审计
 - soft_delete: 软删 + 审计
 - get_presigned_download_url: 预签名下载 URL
@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
@@ -161,19 +162,10 @@ class InvoiceService:
         buyer: str | None = None,
         confidence: dict[str, float] | None = None,
     ) -> "Invoice":
-        """OCR 任务写入：status=pending_review，触发去重（409）。"""
+        """识别完成后写入待归档。不在这里做归档去重。"""
         from app.models import Invoice
 
-        # 缺 code/number 时不参与去重（用户需手动补全）
-        if invoice_code and invoice_number:
-            dup = await self._find_duplicate(db, tenant_id, invoice_code, invoice_number)
-            if dup is not None:
-                raise ConflictError(
-                    f"发票 ({invoice_code}/{invoice_number}) 已归档，请勿重复上传",
-                    code="INVOICE_DUPLICATE",
-                )
-
-        inv = Invoice(
+        values = dict(
             tenant_id=tenant_id,
             user_id=user_id,
             invoice_title=invoice_title,
@@ -193,27 +185,73 @@ class InvoiceService:
             ocr_confidence=confidence,
             status="pending_review",
         )
-        db.add(inv)
-        await db.flush()  # 让 DB 校验唯一约束 + 拿到 id
-        await db.refresh(inv)
+        inv = Invoice(**values)
+        try:
+            db.add(inv)
+            await db.flush()
+            await db.refresh(inv)
+        except IntegrityError:
+            # 旧唯一约束会把「待归档」也算重复。未确认的记录更新识别结果，仍保持待归档。
+            await db.rollback()
+            if not invoice_code or not invoice_number:
+                raise
+            existing = await self._find_pending_duplicate(
+                db, tenant_id, invoice_code, invoice_number
+            )
+            if existing is None:
+                raise
+            for key, value in values.items():
+                if key in {"tenant_id", "user_id", "status"}:
+                    continue
+                setattr(existing, key, value)
+            existing.status = "pending_review"
+            await db.flush()
+            await db.refresh(existing)
+            logger.info(
+                "Invoice recognition refreshed (still pending): id=%s code=%s number=%s",
+                existing.id, invoice_code, invoice_number,
+            )
+            return existing
         logger.info(
-            "Invoice created: id=%s tenant=%s code=%s number=%s",
+            "Invoice created pending: id=%s tenant=%s code=%s number=%s",
             inv.id, tenant_id, invoice_code, invoice_number,
         )
         return inv
 
-    async def _find_duplicate(
+    async def _find_pending_duplicate(
         self, db: AsyncSession, tenant_id: UUID, code: str, number: str
     ) -> "Invoice | None":
-        """查重（包含 pending_review 和 active 状态，避免 pending 重复触发 OCR）。"""
+        """找同一代码+号码、尚未人工确认的发票。"""
         from app.models import Invoice
 
         stmt = select(Invoice).where(
             Invoice.tenant_id == tenant_id,
             Invoice.invoice_code == code,
             Invoice.invoice_number == number,
-            Invoice.status != "deleted",
+            Invoice.status == "pending_review",
         )
+        return (await db.execute(stmt)).scalars().first()
+
+    async def _find_archived_duplicate(
+        self,
+        db: AsyncSession,
+        tenant_id: UUID,
+        code: str,
+        number: str,
+        *,
+        exclude_id: UUID | None = None,
+    ) -> "Invoice | None":
+        """只在已归档（active）记录里查重。待归档不参与。"""
+        from app.models import Invoice
+
+        stmt = select(Invoice).where(
+            Invoice.tenant_id == tenant_id,
+            Invoice.invoice_code == code,
+            Invoice.invoice_number == number,
+            Invoice.status == "active",
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Invoice.id != exclude_id)
         return (await db.execute(stmt)).scalars().first()
 
     # ================ 兼容旧 /invoices/archive 接口（直接 JSON 入库） ================
@@ -260,19 +298,6 @@ class InvoiceService:
     ) -> "Invoice":
         inv = await self.get(db, tenant_id, invoice_id, user=user)
         before = _serialize_snapshot(inv)
-
-        # 校验：code+number 改了要再查重
-        new_code = fields.get("invoice_code", inv.invoice_code)
-        new_number = fields.get("invoice_number", inv.invoice_number)
-        if new_code and new_number and (
-            new_code != inv.invoice_code or new_number != inv.invoice_number
-        ):
-            dup = await self._find_duplicate(db, tenant_id, new_code, new_number)
-            if dup is not None and dup.id != inv.id:
-                raise ConflictError(
-                    f"发票 ({new_code}/{new_number}) 已存在",
-                    code="INVOICE_DUPLICATE",
-                )
 
         editable = {
             "invoice_title", "company", "tax_id",
@@ -330,6 +355,21 @@ class InvoiceService:
             for k, v in fields.items():
                 if k in editable:
                     setattr(inv, k, v)
+
+        # 归档去重只发生在确认这一步，识别成功与否不受影响
+        if inv.invoice_code and inv.invoice_number:
+            dup = await self._find_archived_duplicate(
+                db,
+                tenant_id,
+                inv.invoice_code,
+                inv.invoice_number,
+                exclude_id=inv.id,
+            )
+            if dup is not None:
+                raise ConflictError(
+                    f"归档失败：发票 ({inv.invoice_code}/{inv.invoice_number}) 已在档案中",
+                    code="INVOICE_DUPLICATE",
+                )
 
         inv.status = "active"
         await db.flush()

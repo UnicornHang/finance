@@ -2,8 +2,10 @@ import { useEffect, useRef } from 'react'
 import { Bot, Sparkles, Upload, FileText } from 'lucide-react'
 
 import { useSessionStore, useCurrentMessages } from '@/stores/sessionStore'
+import { useUIStore } from '@/stores/uiStore'
 import { sessionApi } from '@/api/chat'
 import { mergeMessages } from '@/lib/messages'
+import { restoreSidePanelFromHistory } from '@/lib/sidePanelHistory'
 import { MessageBubble } from './MessageBubble'
 
 const QUICK_PROMPTS = [
@@ -72,14 +74,22 @@ export function ChatWindow() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!currentSessionId) return
+    if (!currentSessionId) {
+      useUIStore.getState().closeSidePanel()
+      return
+    }
     let cancelled = false
+    const sessionId = currentSessionId
+    // 先收起上一会话的侧栏，避免发票表单留在普通对话上
+    useUIStore.getState().closeSidePanel()
     sessionApi
-      .messages(currentSessionId)
-      .then((msgs) => {
+      .messages(sessionId)
+      .then(async (msgs) => {
         if (cancelled) return
-        const local = useSessionStore.getState().messages[currentSessionId] ?? []
-        setMessages(currentSessionId, mergeMessages(msgs, local))
+        const local = useSessionStore.getState().messages[sessionId] ?? []
+        const merged = mergeMessages(msgs, local)
+        setMessages(sessionId, merged)
+        await restoreSidePanelFromHistory(merged, () => cancelled)
       })
       .catch(() => {})
     return () => {

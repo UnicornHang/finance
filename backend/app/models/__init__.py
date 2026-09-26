@@ -230,11 +230,14 @@ class Invoice(Base):
     __table_args__ = (
         Index("idx_invoices_tenant_user", "tenant_id", "user_id", "created_at"),
         Index("idx_invoices_status", "tenant_id", "status"),
-        UniqueConstraint(
+        # 只约束已归档记录。待归档可以重复识别，确认归档时再拒绝相同代码+号码
+        Index(
+            "uq_invoice_tenant_code_number_active",
             "tenant_id",
             "invoice_code",
             "invoice_number",
-            name="uq_invoice_tenant_code_number",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
         ),
     )
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
@@ -14,6 +14,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { DatePicker } from '@/components/ui/date-picker'
 import { Input, Textarea } from '@/components/ui/input'
 import {
   Select,
@@ -32,11 +33,25 @@ import { formatCurrency } from '@/lib/utils'
 const POLL_INTERVAL_MS = 2000
 const POLL_MAX_ATTEMPTS = 30 // ~60s
 
-/** 从 sidePanelData 中抽取 invoice 字段（排除 status/file_url/file_hash）。 */
+/** 从 sidePanelData 中抽取可填入表单的发票字段。 */
 function pickInvoiceFields(data: InvoiceSidePanelData): Partial<InvoiceInput> {
-  // @ts-expect-error 简化取值
-  const { status: _s, file_url: _u, file_hash: _h, invoice_id: _id, ...rest } = data
-  return rest as Partial<InvoiceInput>
+  const source = data as Partial<InvoiceInput> & Record<string, unknown>
+  const date = typeof source.invoice_date === 'string' ? source.invoice_date.slice(0, 10) : source.invoice_date
+  return {
+    invoice_title: source.invoice_title ?? '',
+    company: source.company ?? '',
+    tax_id: source.tax_id ?? '',
+    invoice_code: source.invoice_code ?? '',
+    invoice_number: source.invoice_number ?? '',
+    invoice_date: date ?? '',
+    amount_excl_tax: source.amount_excl_tax ?? undefined,
+    tax_amount: source.tax_amount ?? undefined,
+    amount_incl_tax: source.amount_incl_tax ?? undefined,
+    invoice_type: source.invoice_type ?? '',
+    seller: source.seller ?? '',
+    buyer: source.buyer ?? '',
+    remark: source.remark ?? '',
+  }
 }
 
 /** 处理中态平均置信度（按已有字段计算）。 */
@@ -84,11 +99,14 @@ export function InvoicePanel() {
 
   const form = useForm<InvoiceInput>({
     resolver: zodResolver(invoiceSchema),
-    defaultValues: useMemo(() => {
-      if (data && typeof data === 'object') return pickInvoiceFields(data)
-      return {}
-    }, [data]),
+    defaultValues: {},
   })
+
+  // 识别中先打开侧栏，结果后到。defaultValues 不会随数据更新，必须 reset 才能填进输入框。
+  useEffect(() => {
+    if (!data || isProcessing) return
+    form.reset(pickInvoiceFields(data))
+  }, [data, isProcessing, form])
 
   // OCR 完成 → 轮询发票入库状态
   useEffect(() => {
@@ -327,7 +345,13 @@ export function InvoicePanel() {
             </div>
 
             <Field label="开票日期">
-              <Input type="date" {...form.register('invoice_date')} />
+              <Controller
+                control={form.control}
+                name="invoice_date"
+                render={({ field }) => (
+                  <DatePicker value={field.value} onChange={field.onChange} />
+                )}
+              />
             </Field>
 
             {/* 金额三栏 */}

@@ -133,6 +133,8 @@ class ChatFileService:
             "intent": row.intent,
             "recognize_status": row.recognize_status,
             "recognize_error": row.recognize_error,
+            "invoice_id": str(row.invoice_id) if row.invoice_id else None,
+            "contract_id": str(row.contract_id) if row.contract_id else None,
         }
 
     def prompt_hint(self, rows: list[ChatFile]) -> str:

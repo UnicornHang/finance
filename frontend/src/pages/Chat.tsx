@@ -13,7 +13,7 @@ import { useUIStore } from '@/stores/uiStore'
  *
  * 顶栏已下沉到 SessionList 底部（用户信息 / 后台 / 登出）。
  * 默认布局：左 SessionList + 中对话区（双栏）。
- * 当用户通过"上传发票"按钮或 SSE sidepanel 事件产生 invoice/contract 数据时，
+ * 当用户上传发票/合同，或切回的会话最后一轮是发票/合同时，
  * 右侧持久化展示结构化面板（三栏）。用户点击面板"关闭"按钮回到两栏。
  *
  * SessionList 可整体收起 —— 收起后主区顶部展示一个浮动按钮用于展开。
@@ -51,7 +51,7 @@ export function Chat() {
       </main>
 
       {rightPaneOpen && (
-        <aside className="flex w-[360px] shrink-0 border-l border-line bg-surface animate-fade-in sm:w-[400px]">
+        <aside className="flex w-[440px] shrink-0 border-l border-line bg-surface animate-fade-in lg:w-[520px]">
           {sidePanelType === 'invoice' ? <InvoicePanel /> : <ContractPanel />}
         </aside>
       )}

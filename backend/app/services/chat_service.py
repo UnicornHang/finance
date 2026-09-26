@@ -11,7 +11,6 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError
 from app.services.chat_file_service import chat_file_service
 from app.services.llm_config_service import llm_config_service
 from app.services.llm_service import llm_service
@@ -103,6 +102,8 @@ def _serialize_invoice(inv) -> dict[str, Any]:
         "file_hash": inv.file_hash,
         "ocr_confidence": inv.ocr_confidence,
         "status": inv.status,
+        # 归档状态与附件识别状态分开：pending_review=待归档，active=已归档
+        "archive_status": "pending" if inv.status == "pending_review" else "archived" if inv.status == "active" else inv.status,
     }
 
 
@@ -430,6 +431,17 @@ class ChatService:
         """合同：交给合同审查场景的模型，不走发票识别。"""
         from app.services.invoice_vision_service import _guess_mime, _media_content
 
+        # 和发票一样先打开右侧栏，审查结束后再换成结果
+        yield {
+            "type": "sidepanel",
+            "payload": {
+                "type": "contract",
+                "data": {
+                    "status": "processing",
+                    "contract_name": filename,
+                },
+            },
+        }
         yield {"type": "text", "content": "这是合同，正在审查…\n\n"}
         mime = _guess_mime(file_bytes, content_type, filename)
         content = _media_content(
@@ -455,13 +467,47 @@ class ChatService:
             await chat_file_service.mark(
                 db, file_id, recognize_status="failed", recognize_error=str(exc)
             )
+            if assistant_content.strip():
+                await self.save_message(
+                    db, session_id, user.tenant_id, "assistant", assistant_content
+                )
+            yield {
+                "type": "sidepanel",
+                "payload": {
+                    "type": "contract",
+                    "data": {
+                        "status": "ready",
+                        "contract_name": filename,
+                        "review_result": {
+                            "summary": f"合同审查失败：{exc}",
+                            "violations": [],
+                        },
+                    },
+                },
+            }
             yield {"type": "error", "message": f"合同审查失败：{exc}"}
-        else:
-            await chat_file_service.mark(db, file_id, recognize_status="succeeded", recognize_error=None)
+            yield {"type": "done"}
+            return
+
+        await chat_file_service.mark(db, file_id, recognize_status="succeeded", recognize_error=None)
         if assistant_content.strip():
             await self.save_message(
                 db, session_id, user.tenant_id, "assistant", assistant_content
             )
+            yield {
+                "type": "sidepanel",
+                "payload": {
+                    "type": "contract",
+                    "data": {
+                        "status": "ready",
+                        "contract_name": filename,
+                        "review_result": {
+                            "summary": assistant_content,
+                            "violations": [],
+                        },
+                    },
+                },
+            }
         yield {"type": "done"}
 
     async def _stream_file_chat(
@@ -597,17 +643,6 @@ class ChatService:
             await chat_file_service.mark(
                 db, file_id, recognize_status="succeeded", invoice_id=inv.id, recognize_error=None
             )
-        except ConflictError as exc:
-            await db.rollback()
-            await chat_file_service.mark(
-                db, file_id, recognize_status="succeeded", recognize_error=exc.message
-            )
-            yield {
-                "type": "text",
-                "content": f"⚠️ {exc.message}\n\n请到档案页查看已有记录，或修改号码后再试。",
-            }
-            yield {"type": "done"}
-            return
         except Exception as exc:
             logger.exception("create_pending failed")
             await db.rollback()
@@ -622,6 +657,8 @@ class ChatService:
         payload = {
             **_serialize_invoice(inv),
             "status": "ready",
+            "recognize_status": "succeeded",
+            "archive_status": "pending",
             "invoice_id": str(inv.id),
             "recognition_source": source,
         }
