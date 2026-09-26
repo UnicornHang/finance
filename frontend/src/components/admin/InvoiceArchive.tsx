@@ -66,6 +66,14 @@ const STATUS_LABEL: Record<string, string> = {
   deleted: '已删除',
 }
 
+/** 状态下拉。全部状态在请求里会拆成三个真实状态，不能把 all 发给接口。 */
+const STATUS_OPTIONS = [
+  { value: 'all', label: '全部状态' },
+  { value: 'pending_review', label: '待确认' },
+  { value: 'active', label: '已归档' },
+  { value: 'deleted', label: '已删除' },
+] as const
+
 const STATUS_TONE: Record<string, 'primary' | 'success' | 'neutral' | 'warning'> = {
   pending_review: 'warning',
   active: 'success',
@@ -127,7 +135,7 @@ function downloadBlob(blob: Blob, filename: string) {
 export function InvoiceArchive() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('active')
   const [page, setPage] = useState(1)
   const pageSize = 20
@@ -136,13 +144,22 @@ export function InvoiceArchive() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['invoices', page, pageSize, typeFilter, statusFilter],
-    queryFn: () =>
-      invoiceApi.list({
+    queryFn: () => {
+      const invoiceType = typeFilter === 'all' ? undefined : typeFilter
+      if (statusFilter === 'all') {
+        return invoiceApi.listAllStatuses({
+          page,
+          page_size: pageSize,
+          invoice_type: invoiceType,
+        })
+      }
+      return invoiceApi.list({
         page,
         page_size: pageSize,
-        invoice_type: typeFilter || undefined,
-        status_filter: statusFilter || undefined,
-      }),
+        invoice_type: invoiceType,
+        status_filter: statusFilter,
+      })
+    },
   })
 
   const detailQuery = useQuery({
@@ -236,7 +253,7 @@ export function InvoiceArchive() {
               <SelectValue placeholder="全部类型" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">全部类型</SelectItem>
+              <SelectItem value="all">全部类型</SelectItem>
               <SelectItem value="special">专票</SelectItem>
               <SelectItem value="general">普票</SelectItem>
               <SelectItem value="electronic">电子发票</SelectItem>
@@ -253,9 +270,11 @@ export function InvoiceArchive() {
               <SelectValue placeholder="全部状态" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="active">已归档</SelectItem>
-              <SelectItem value="pending_review">待确认</SelectItem>
-              <SelectItem value="">全部状态</SelectItem>
+              {STATUS_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <span className="ml-auto text-body-sm text-ink-tertiary tabular-nums">
@@ -488,6 +507,7 @@ export function InvoiceArchive() {
                 </a>
               </Button>
             )}
+            {detailQuery.data?.status !== 'deleted' && (
             <Button
               variant="danger"
               onClick={() => setConfirmDelete(true)}
@@ -496,6 +516,7 @@ export function InvoiceArchive() {
               <Trash2 className="h-4 w-4" />
               删除
             </Button>
+            )}
             <Button variant="secondary" onClick={() => setDetail(null)}>
               关闭
             </Button>

@@ -183,8 +183,10 @@ async def get_invoice(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """发票详情。"""
-    inv = await invoice_service.get(db, user.tenant_id, invoice_id, user=user)
+    """发票详情。已删除记录也可查看，方便从状态筛选进入。"""
+    inv = await invoice_service.get(
+        db, user.tenant_id, invoice_id, user=user, include_deleted=True
+    )
     return _serialize(inv)
 
 

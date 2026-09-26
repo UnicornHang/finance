@@ -57,7 +57,10 @@ class InvoiceService:
         page_size = min(100, max(1, page_size))
 
         conditions = [Invoice.tenant_id == tenant_id]
-        if status_filter:
+        # all：待确认、已归档、已删除都返回。空值仍排除已删除，兼容旧调用。
+        if status_filter == "all":
+            pass
+        elif status_filter:
             conditions.append(Invoice.status == status_filter)
         else:
             conditions.append(Invoice.status != "deleted")
@@ -106,13 +109,25 @@ class InvoiceService:
     # ================ 详情 ================
 
     async def get(
-        self, db: AsyncSession, tenant_id: UUID, invoice_id: UUID, *, user: "User | None" = None
+        self,
+        db: AsyncSession,
+        tenant_id: UUID,
+        invoice_id: UUID,
+        *,
+        user: "User | None" = None,
+        include_deleted: bool = False,
     ) -> "Invoice":
-        """获取发票详情；权限不足或不存在抛 NotFound/Forbidden。"""
+        """获取发票详情；权限不足或不存在抛 NotFound/Forbidden。
+
+        列表按「已删除」筛选时，详情和原件下载需要能读到软删记录。
+        确认、改字段等写操作仍不传 include_deleted，避免改已删除发票。
+        """
         from app.models import Invoice
 
         inv = await db.get(Invoice, invoice_id)
-        if not inv or inv.tenant_id != tenant_id or inv.status == "deleted":
+        if not inv or inv.tenant_id != tenant_id:
+            raise NotFoundError("发票不存在")
+        if inv.status == "deleted" and not include_deleted:
             raise NotFoundError("发票不存在")
         if user and user.role == "employee" and inv.user_id != user.id:
             raise ForbiddenError("无权查看该发票")
@@ -432,7 +447,9 @@ class InvoiceService:
     ) -> str:
         from app.config import settings
 
-        inv = await self.get(db, tenant_id, invoice_id, user=user)
+        inv = await self.get(
+            db, tenant_id, invoice_id, user=user, include_deleted=True
+        )
         if not inv.file_url:
             raise NotFoundError("发票原件未上传")
 
