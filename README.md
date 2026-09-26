@@ -183,3 +183,12 @@ Phase A 发票归档仍可用。识别与对话主路径已从「腾讯 OCR + Ce
 
 手册见 [docs/backend-runbook.md](docs/backend-runbook.md)。验收对照见 [docs/PRD.md §当前进度](docs/PRD.md)。
 
+### 2026-09-26 聊天附件
+
+- ✅ 图片和文件进入独立表 `chat_files`，不写入 `tool_calls`。任何类型都落表，发票只是可选的 `invoice_id` 关联。
+- ✅ 上传成功写会话；发送后把 `message_id` 绑到同一条用户消息。识别状态：`pending` / `running` / `succeeded` / `failed`。
+- ✅ 后续对话把附件摘要（文件名、意图、识别状态）一并送给模型。
+- ✅ 修复历史刷新冲掉附件，以及同一段模型回复被渲染两次。
+
+迁移 `003`（消息附件列）和 `004`（`chat_files`）在后端下次启动时执行。详见 [docs/PRD.md §23](docs/PRD.md)。
+
