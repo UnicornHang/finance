@@ -32,6 +32,7 @@ class ChatStreamRequest(BaseModel):
 
     session_id: str | None = None
     message: str = ""
+    file_id: str | None = None
     file_url: str | None = None
     file_hash: str | None = None
     file_meta: dict | None = None  # {original_filename, content_type, size}
@@ -57,7 +58,7 @@ async def chat_stream(
     - {type: "done"}                      流结束
     - {type: "error", message}            错误
     """
-    if not (body.message or "").strip() and not body.file_url:
+    if not (body.message or "").strip() and not body.file_url and not body.file_id:
         raise BusinessError("消息或文件不能同时为空", code="EMPTY_INPUT")
 
     # 1. 解析 session_id（空则自动创建）
@@ -72,9 +73,13 @@ async def chat_stream(
         except (ValueError, TypeError):
             raise BusinessError("无效的会话 ID", code="INVALID_SESSION_ID")
 
-    # 2. 文件已在 /files/upload 阶段落到 MinIO；这里只携带引用
-    file_url = body.file_url
-    file_hash = body.file_hash
+    # 2. 文件已在 /files/upload 阶段落到 MinIO 和 chat_files；这里携带 file_id
+    file_id: UUID | None = None
+    if body.file_id:
+        try:
+            file_id = UUID(body.file_id)
+        except (ValueError, TypeError):
+            raise BusinessError("无效的附件 ID", code="INVALID_FILE_ID")
 
     async def event_generator():
         try:
@@ -83,8 +88,9 @@ async def chat_stream(
                 user,
                 actual_session_id,
                 body.message or "",
-                file_url=file_url,
-                file_hash=file_hash,
+                file_id=file_id,
+                file_url=body.file_url,
+                file_hash=body.file_hash,
                 file_meta=body.file_meta,
             ):
                 # 首条事件带上 session_id 方便前端确认

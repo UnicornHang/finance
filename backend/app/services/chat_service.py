@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError
+from app.services.chat_file_service import chat_file_service
 from app.services.llm_config_service import llm_config_service
 from app.services.llm_service import llm_service
 from app.services.session_service import session_service
@@ -134,8 +135,9 @@ class ChatService:
         role: str,
         content: str,
         tool_calls: dict | None = None,
+        attachments: list | None = None,
     ) -> "Message":
-        """持久化单条消息。"""
+        """持久化单条消息。attachments 与 content 同属这一条，表示一起发送的文件。"""
         from app.models import Message
 
         msg = Message(
@@ -144,6 +146,7 @@ class ChatService:
             role=role,
             content=content,
             tool_calls=tool_calls,
+            attachments=attachments,
         )
         db.add(msg)
         await db.commit()
@@ -163,11 +166,18 @@ class ChatService:
             .limit(limit)
         )
         messages = list(reversed(result.scalars().all()))
-        return [
-            {"role": m.role, "content": m.content or ""}
-            for m in messages
-            if m.content
-        ]
+        files_by_message = await chat_file_service.list_by_message_ids(
+            db, [m.id for m in messages]
+        )
+        history: list[dict] = []
+        for m in messages:
+            hint = chat_file_service.prompt_hint(files_by_message.get(m.id, []))
+            content = (m.content or "").strip()
+            if hint:
+                content = f"{content}\n{hint}".strip() if content else hint
+            if content:
+                history.append({"role": m.role, "content": content})
+        return history
 
     async def _effective_system_prompt(
         self, db: AsyncSession, tenant_id: UUID | str, scene: str
@@ -205,6 +215,7 @@ class ChatService:
         session_id: UUID,
         user_message: str,
         *,
+        file_id: UUID | None = None,
         file_url: str | None = None,
         file_hash: str | None = None,
         file_meta: dict | None = None,
@@ -226,39 +237,45 @@ class ChatService:
             yield {"type": "error", "message": str(exc)}
             return
 
-        # 2. 持久化用户消息（有附件时写入 tool_calls.attachments，供聊天气泡回显）
-        display_msg = user_message or ("（上传了文件）" if file_url else "")
-        attachment_meta: dict[str, Any] | None = None
-        if file_url and file_hash:
-            meta = file_meta or {}
-            attachment_meta = {
-                "attachments": [
-                    {
-                        "file_url": file_url,
-                        "file_hash": file_hash,
-                        "original_filename": meta.get("original_filename"),
-                        "content_type": meta.get("content_type"),
-                        "size": meta.get("size"),
-                    }
-                ]
+        # 2. 解析附件行，再把文字和这条附件绑到同一条用户消息
+        chat_file = await chat_file_service.resolve_for_send(
+            db,
+            user,
+            session_id,
+            file_id=file_id,
+            file_url=file_url,
+            file_hash=file_hash,
+            file_meta=file_meta,
+        )
+        if chat_file is not None:
+            file_url = chat_file.file_url
+            file_hash = chat_file.file_hash
+            file_meta = {
+                "original_filename": chat_file.original_filename,
+                "content_type": chat_file.content_type,
+                "size": chat_file.size,
             }
-        await self.save_message(
+        display_msg = user_message or ("（上传了文件）" if chat_file else "")
+        saved = await self.save_message(
             db,
             session_id,
             user.tenant_id,
             "user",
             display_msg,
-            tool_calls=attachment_meta,
         )
+        if chat_file is not None:
+            await chat_file_service.bind_message(db, chat_file, saved.id)
+            await chat_file_service.mark(db, chat_file.id, recognize_status="running")
 
         # 有附件时先语义判断，再进入对应业务，不默认当发票
-        if file_url and file_hash:
+        if chat_file is not None and file_url and file_hash:
             async for event in self._dispatch_upload(
                 db,
                 user,
                 session,
                 session_id,
                 user_message=user_message,
+                file_id=chat_file.id,
                 file_url=file_url,
                 file_hash=file_hash,
                 file_meta=file_meta or {},
@@ -317,6 +334,7 @@ class ChatService:
         session_id: UUID,
         *,
         user_message: str,
+        file_id: UUID,
         file_url: str,
         file_hash: str,
         file_meta: dict,
@@ -329,6 +347,9 @@ class ChatService:
             file_bytes = _download_bytes(file_url)
         except Exception as exc:
             logger.exception("download upload failed")
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
             yield {"type": "error", "message": f"下载文件失败：{exc}"}
             yield {"type": "done"}
             return
@@ -344,9 +365,14 @@ class ChatService:
             )
         except Exception as exc:
             logger.exception("classify upload failed")
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
             yield {"type": "error", "message": f"无法判断文件类型：{exc}"}
             yield {"type": "done"}
             return
+
+        await chat_file_service.mark(db, file_id, intent=intent)
 
         if intent == "invoice":
             async for event in self._stream_invoice_recognize(
@@ -355,6 +381,7 @@ class ChatService:
                 session,
                 session_id,
                 user_message=user_message,
+                file_id=file_id,
                 file_url=file_url,
                 file_hash=file_hash,
                 file_meta=file_meta,
@@ -368,6 +395,7 @@ class ChatService:
                 user,
                 session_id,
                 user_message=user_message,
+                file_id=file_id,
                 file_bytes=file_bytes,
                 filename=file_meta.get("original_filename"),
                 content_type=file_meta.get("content_type"),
@@ -380,6 +408,7 @@ class ChatService:
             user,
             session_id,
             user_message=user_message,
+            file_id=file_id,
             file_bytes=file_bytes,
             filename=file_meta.get("original_filename"),
             content_type=file_meta.get("content_type"),
@@ -393,6 +422,7 @@ class ChatService:
         session_id: UUID,
         *,
         user_message: str,
+        file_id: UUID,
         file_bytes: bytes,
         filename: str | None,
         content_type: str | None,
@@ -422,7 +452,12 @@ class ChatService:
                 yield {"type": "text", "content": chunk}
         except Exception as exc:
             logger.exception("contract review failed")
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
             yield {"type": "error", "message": f"合同审查失败：{exc}"}
+        else:
+            await chat_file_service.mark(db, file_id, recognize_status="succeeded", recognize_error=None)
         if assistant_content.strip():
             await self.save_message(
                 db, session_id, user.tenant_id, "assistant", assistant_content
@@ -436,11 +471,12 @@ class ChatService:
         session_id: UUID,
         *,
         user_message: str,
+        file_id: UUID,
         file_bytes: bytes,
         filename: str | None,
         content_type: str | None,
     ) -> AsyncGenerator[dict, None]:
-        """既不是发票也不是合同：把文件交给日常对话模型。"""
+        """普通图片或文件：附件已在表里，这里只把内容交给日常对话模型。"""
         from app.services.invoice_vision_service import _guess_mime, _media_content
 
         yield {"type": "text", "content": "按普通问题处理这份文件…\n\n"}
@@ -470,7 +506,14 @@ class ChatService:
                 yield {"type": "text", "content": chunk}
         except Exception as exc:
             logger.exception("file chat failed")
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
             yield {"type": "error", "message": f"回复失败：{exc}"}
+        else:
+            await chat_file_service.mark(
+                db, file_id, recognize_status="succeeded", recognize_error=None
+            )
         if assistant_content.strip():
             await self.save_message(
                 db, session_id, user.tenant_id, "assistant", assistant_content
@@ -485,6 +528,7 @@ class ChatService:
         session_id: UUID,
         *,
         user_message: str,
+        file_id: UUID,
         file_url: str,
         file_hash: str,
         file_meta: dict,
@@ -511,6 +555,9 @@ class ChatService:
             file_bytes = _download_bytes(file_url)
         except Exception as exc:
             logger.exception("download invoice failed")
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
             yield {"type": "error", "message": f"下载发票文件失败：{exc}"}
             yield {"type": "done"}
             return
@@ -528,6 +575,9 @@ class ChatService:
             )
         except Exception as exc:
             logger.exception("invoice recognize failed")
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
             yield {"type": "error", "message": f"发票识别失败：{exc}"}
             yield {"type": "done"}
             return
@@ -544,7 +594,14 @@ class ChatService:
                 **fields,
             )
             await db.commit()
+            await chat_file_service.mark(
+                db, file_id, recognize_status="succeeded", invoice_id=inv.id, recognize_error=None
+            )
         except ConflictError as exc:
+            await db.rollback()
+            await chat_file_service.mark(
+                db, file_id, recognize_status="succeeded", recognize_error=exc.message
+            )
             yield {
                 "type": "text",
                 "content": f"⚠️ {exc.message}\n\n请到档案页查看已有记录，或修改号码后再试。",
@@ -554,6 +611,9 @@ class ChatService:
         except Exception as exc:
             logger.exception("create_pending failed")
             await db.rollback()
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
             yield {"type": "error", "message": f"保存识别结果失败：{exc}"}
             yield {"type": "done"}
             return

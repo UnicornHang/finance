@@ -3,6 +3,7 @@ import { Bot, Sparkles, Upload, FileText } from 'lucide-react'
 
 import { useSessionStore, useCurrentMessages } from '@/stores/sessionStore'
 import { sessionApi } from '@/api/chat'
+import { mergeMessages } from '@/lib/messages'
 import { MessageBubble } from './MessageBubble'
 
 const QUICK_PROMPTS = [
@@ -71,10 +72,20 @@ export function ChatWindow() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (currentSessionId && messages.length === 0) {
-      sessionApi.messages(currentSessionId).then((msgs) => setMessages(currentSessionId, msgs)).catch(() => {})
+    if (!currentSessionId) return
+    let cancelled = false
+    sessionApi
+      .messages(currentSessionId)
+      .then((msgs) => {
+        if (cancelled) return
+        const local = useSessionStore.getState().messages[currentSessionId] ?? []
+        setMessages(currentSessionId, mergeMessages(msgs, local))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
     }
-  }, [currentSessionId, messages.length, setMessages])
+  }, [currentSessionId, setMessages])
 
   useEffect(() => {
     if (scrollRef.current) {

@@ -24,7 +24,7 @@ export const sessionApi = {
 export async function* streamChat(
   sessionId: string,
   message: string,
-  fileRef?: { file_url: string; file_hash: string; file_meta?: Record<string, unknown> },
+  fileRef?: { id: string; file_url: string; file_hash: string; file_meta?: Record<string, unknown> },
 ): AsyncGenerator<StreamEvent> {
   const token = localStorage.getItem('access_token')
   const response = await fetch('/api/v1/chat/stream', {
@@ -36,6 +36,7 @@ export async function* streamChat(
     body: JSON.stringify({
       session_id: sessionId,
       message,
+      file_id: fileRef?.id,
       file_url: fileRef?.file_url,
       file_hash: fileRef?.file_hash,
       file_meta: fileRef?.file_meta,

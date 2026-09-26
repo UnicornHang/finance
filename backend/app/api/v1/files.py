@@ -11,13 +11,18 @@ import uuid
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import unquote
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.database import get_db
 from app.core.exceptions import BusinessError, ForbiddenError
 from app.deps import get_current_user
 from app.models import User
+from app.services.chat_file_service import chat_file_service
+from app.services.session_service import session_service
 from app.services.storage_service import storage_service
 
 logger = logging.getLogger(__name__)
@@ -39,6 +44,8 @@ def _parse_s3_url(s3_url: str) -> tuple[str, str]:
 async def upload_file(
     file: Annotated[UploadFile, File(description="任意文件（图片/PDF/Word 等）")],
     user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_id: Annotated[str, Form(description="当前会话 ID，附件先挂会话，发送后再挂消息")],
 ) -> dict[str, Any]:
     """通用 multipart 文件上传 → MinIO。
 
@@ -50,6 +57,12 @@ async def upload_file(
     前端拿到 `file_url` + `file_hash` 后把它们作为 JSON 字段随消息一起
     发到 `POST /api/v1/chat/stream`，由 chat_service 决定后续动作。
     """
+    try:
+        actual_session_id = UUID(session_id)
+    except (ValueError, TypeError):
+        raise BusinessError("无效的会话 ID", code="INVALID_SESSION_ID")
+    await session_service.verify_access(db, actual_session_id, user.id, user.tenant_id)
+
     try:
         content = await file.read()
     except Exception as exc:
@@ -78,17 +91,30 @@ async def upload_file(
         logger.exception("MinIO upload failed")
         raise BusinessError(f"文件上传失败：{exc}", code="UPLOAD_FAILED")
 
+    row = await chat_file_service.create_uploaded(
+        db,
+        user,
+        actual_session_id,
+        file_url=file_url,
+        file_hash=file_hash,
+        original_filename=original_filename,
+        content_type=content_type,
+        size=len(content),
+    )
+
     logger.info(
-        "File upload: tenant=%s user=%s key=%s hash=%s bytes=%d name=%s",
-        user.tenant_id, user.id, obj_key, file_hash, len(content), original_filename,
+        "File upload: tenant=%s user=%s key=%s hash=%s bytes=%d name=%s file_id=%s",
+        user.tenant_id, user.id, obj_key, file_hash, len(content), original_filename, row.id,
     )
 
     return {
+        "id": str(row.id),
         "file_hash": file_hash,
         "file_url": file_url,
         "original_filename": original_filename,
         "content_type": content_type,
         "size": len(content),
+        "recognize_status": row.recognize_status,
         "status": "uploaded",
     }
 

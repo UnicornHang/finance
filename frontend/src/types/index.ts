@@ -22,11 +22,16 @@ export interface Session {
 
 /** 聊天气泡内展示的附件（发票图片 / PDF 等） */
 export interface MessageAttachment {
+  id?: string
   file_url: string
   file_hash: string
   original_filename?: string | null
   content_type?: string | null
   size?: number | null
+  file_kind?: 'image' | 'file' | string | null
+  intent?: string | null
+  recognize_status?: string | null
+  recognize_error?: string | null
 }
 
 export interface Message {
@@ -34,7 +39,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | null
   tool_calls: Record<string, unknown> | null
-  /** 用户上传的附件列表（从 tool_calls.attachments 或乐观写入） */
+  /** 与 content 同一次发送的图片/文件 */
   attachments?: MessageAttachment[] | null
   created_at: string
 }

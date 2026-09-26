@@ -2,8 +2,9 @@ import { useCallback } from 'react'
 
 import { useUIStore } from '@/stores/uiStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { streamChat } from '@/api/chat'
+import { sessionApi, streamChat } from '@/api/chat'
 import type { FileRef } from '@/api/file'
+import { mergeMessages } from '@/lib/messages'
 import type { Message, MessageAttachment } from '@/types'
 
 /**
@@ -22,8 +23,10 @@ function tmpId(prefix: 'user' | 'assistant'): string {
 function toAttachment(fileRef: FileRef): MessageAttachment {
   const meta = fileRef.file_meta || {}
   return {
+    id: fileRef.id,
     file_url: fileRef.file_url,
     file_hash: fileRef.file_hash,
+    recognize_status: 'pending',
     original_filename:
       typeof meta.original_filename === 'string' ? meta.original_filename : null,
     content_type: typeof meta.content_type === 'string' ? meta.content_type : null,
@@ -89,6 +92,14 @@ export function useChat() {
         }
       } finally {
         setStreaming(false)
+        // 流结束后用已落库的消息替换临时气泡，附件跟消息一起留下
+        try {
+          const saved = await sessionApi.messages(sessionId)
+          const local = useSessionStore.getState().messages[sessionId] ?? []
+          useSessionStore.getState().setMessages(sessionId, mergeMessages(saved, local))
+        } catch {
+          // 刷新失败时保留本地气泡（含附件）
+        }
       }
     },
     [appendMessage, updateMessage, openSidePanel, setStreaming],

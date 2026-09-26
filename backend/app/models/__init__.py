@@ -114,10 +114,51 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str | None] = mapped_column(Text)
     tool_calls: Mapped[dict | None] = mapped_column(JSONB)
+    # 与本条 content 同时发出的图片/文件，不占用 tool_calls
+    attachments: Mapped[list | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
 
     __table_args__ = (
         Index("idx_messages_session", "session_id", "created_at"),
+    )
+
+
+# ================ 聊天附件 ================
+
+class ChatFile(Base):
+    """任意图片或文件。发送前 message_id 为空，发送后与那条消息绑定。不限于发票。"""
+
+    __tablename__ = "chat_files"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    message_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("messages.id", ondelete="SET NULL")
+    )
+    file_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(300))
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    size: Mapped[int | None] = mapped_column(Integer)
+    # image 或 file，与后面判成发票/合同无关
+    file_kind: Mapped[str] = mapped_column(String(20), default="file")
+    intent: Mapped[str | None] = mapped_column(String(20))
+    recognize_status: Mapped[str] = mapped_column(String(20), default="pending")
+    recognize_error: Mapped[str | None] = mapped_column(Text)
+    invoice_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("invoices.id", ondelete="SET NULL"))
+    contract_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()")
+    )
+
+    __table_args__ = (
+        Index("idx_chat_files_session", "session_id", "created_at"),
+        Index("idx_chat_files_message", "message_id"),
     )
 
 

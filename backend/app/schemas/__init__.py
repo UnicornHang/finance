@@ -75,6 +75,7 @@ class MessageOut(BaseSchema):
     role: str
     content: str | None
     tool_calls: dict | None
+    # 与 content 同一次发送的图片/文件
     attachments: list[dict] | None = None
     created_at: datetime
 

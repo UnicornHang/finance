@@ -1,15 +1,18 @@
 import { apiClient } from './client'
 
 export interface FileUploadResponse {
+  id: string
   file_hash: string
   file_url: string
   original_filename: string
   content_type: string
   size: number
+  recognize_status: string
   status: 'uploaded'
 }
 
 export interface FileRef {
+  id: string
   file_url: string
   file_hash: string
   file_meta: Record<string, unknown>
@@ -28,9 +31,10 @@ export const fileApi = {
    * `multipart/form-data; boundary=...`，手设反而会让浏览器/代理拒掉请求
    * （症状：`net::ERR_*` + 0 kB + 几毫秒）。
    */
-  upload: (file: File, signal?: AbortSignal) => {
+  upload: (file: File, sessionId: string, signal?: AbortSignal) => {
     const form = new FormData()
     form.append('file', file)
+    form.append('session_id', sessionId)
     return apiClient
       .post<FileUploadResponse>('/files/upload', form, { signal })
       .then((r) => r.data)

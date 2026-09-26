@@ -5,11 +5,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.deps import get_current_user
-from app.models import User
+from app.models import Message, User
+from app.services.chat_file_service import chat_file_service
 from app.services.session_service import session_service
 
 router = APIRouter()
@@ -106,14 +108,20 @@ async def delete_session(
     return {"message": "deleted", "session_id": str(session_id)}
 
 
-def _extract_attachments(tool_calls: dict | None) -> list[dict] | None:
-    """从 tool_calls.attachments 提取附件列表（用户上传文件回显用）。"""
+def _message_attachments(message: Message, rows: list) -> list[dict] | None:
+    """优先用 chat_files。没有行时再读消息上残留的 JSON。"""
+    if rows:
+        return [chat_file_service.to_attachment(row) for row in rows]
+    stored = message.attachments
+    if isinstance(stored, list) and stored:
+        return [item for item in stored if isinstance(item, dict)]
+    tool_calls = message.tool_calls
     if not isinstance(tool_calls, dict):
         return None
-    atts = tool_calls.get("attachments")
-    if not isinstance(atts, list) or not atts:
+    nested = tool_calls.get("attachments")
+    if not isinstance(nested, list) or not nested:
         return None
-    return [a for a in atts if isinstance(a, dict)]
+    return [item for item in nested if isinstance(item, dict)]
 
 
 @router.get("/{session_id}/messages")
@@ -123,9 +131,6 @@ async def list_messages(
     db: AsyncSession = Depends(get_db),
 ):
     """会话消息列表（按时间正序）。"""
-    from sqlalchemy import select
-    from app.models import Message
-
     # 先校验会话归属
     await session_service.verify_access(db, session_id, user.id, user.tenant_id)
 
@@ -136,6 +141,7 @@ async def list_messages(
         .limit(500)
     )
     messages = result.scalars().all()
+    files_by_message = await chat_file_service.list_by_message_ids(db, [m.id for m in messages])
 
     return [
         {
@@ -143,7 +149,7 @@ async def list_messages(
             "role": m.role,
             "content": m.content,
             "tool_calls": m.tool_calls,
-            "attachments": _extract_attachments(m.tool_calls),
+            "attachments": _message_attachments(m, files_by_message.get(m.id, [])),
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in messages

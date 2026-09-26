@@ -53,14 +53,21 @@ export function InputBox() {
     setUploadStatus('uploading')
     setUploadError(null)
 
+    if (!currentSessionId) {
+      setUploadStatus('error')
+      setUploadError('请先进入一个会话再上传')
+      return
+    }
+
     fileApi
-      .upload(next, ctrl.signal)
+      .upload(next, currentSessionId, ctrl.signal)
       .then((r) => {
         // 用户可能在 await 期间已经换了文件 — 用 fileMetaRef 校验是否还是同一文件
         if (fileMetaRef.current?.name !== next.name || fileMetaRef.current?.size !== next.size) {
           return
         }
         setFileRef({
+          id: r.id,
           file_url: r.file_url,
           file_hash: r.file_hash,
           file_meta: {
