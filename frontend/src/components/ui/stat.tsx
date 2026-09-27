@@ -94,10 +94,9 @@ export function StatCard({
 }
 
 /**
- * 区块标题
- * - title: 蓝色 headline 大标题（统一替代原 eyebrow + title 两段式）
- * - description: 灰色副说明
- * - actions: 右侧操作区（如 "新增" 按钮）
+ * 区块顶栏。
+ * - title / description 可选；都不传时只保留右侧操作按钮
+ * - actions: 右侧操作区（如 "新增"、"导出" 按钮）
  */
 export function SectionHeader({
   title,
@@ -105,21 +104,33 @@ export function SectionHeader({
   actions,
   className,
 }: {
-  title: string
+  title?: string
   description?: React.ReactNode
   actions?: React.ReactNode
   className?: string
 }) {
+  if (!title && !description && !actions) return null
+
   return (
-    <div className={cn('flex items-end justify-between gap-4', className)}>
-      <div className="min-w-0 space-y-1.5">
-        <h1 className="text-headline-lg font-semibold text-primary tracking-tight">
-          {title}
-        </h1>
-        {description && (
-          <p className="text-body-md text-ink-tertiary">{description}</p>
-        )}
-      </div>
+    <div
+      className={cn(
+        'flex gap-4',
+        title || description ? 'items-end justify-between' : 'items-center justify-end',
+        className,
+      )}
+    >
+      {(title || description) && (
+        <div className="min-w-0 space-y-1.5">
+          {title && (
+            <h1 className="text-headline-lg font-semibold text-primary tracking-tight">
+              {title}
+            </h1>
+          )}
+          {description && (
+            <p className="text-body-md text-ink-tertiary">{description}</p>
+          )}
+        </div>
+      )}
       {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
     </div>
   )

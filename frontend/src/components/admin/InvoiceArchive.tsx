@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Filter, Receipt, Search, Trash2 } from 'lucide-react'
+import { Download, Receipt, Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -233,19 +233,11 @@ export function InvoiceArchive() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        title="档案"
-        description="检索、筛选与导出发票原始凭证与结构化字段"
         actions={
-          <>
-            <Button variant="secondary" size="md">
-              <Filter className="h-4 w-4" />
-              高级筛选
-            </Button>
-            <Button size="md" onClick={handleExportCsv}>
-              <Download className="h-4 w-4" />
-              导出 CSV
-            </Button>
-          </>
+          <Button size="md" onClick={handleExportCsv}>
+            <Download className="h-4 w-4" />
+            导出 CSV
+          </Button>
         }
       />
 

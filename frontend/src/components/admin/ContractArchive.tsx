@@ -50,8 +50,6 @@ export function ContractArchive() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        title="合规"
-        description="所有合同的合规审查结果与归档凭证"
         actions={
           <Button size="md">
             <Download className="h-4 w-4" />

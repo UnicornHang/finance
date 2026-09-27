@@ -81,8 +81,6 @@ export function LLMSettings() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        title="模型"
-        description="为不同业务场景配置独立的模型路由与参数"
         actions={
           <TestAllButton
             scenes={(configs || []).map((c) => c.scene)}

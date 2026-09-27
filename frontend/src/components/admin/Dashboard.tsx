@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { StatCard, SectionHeader } from '@/components/ui/stat'
+import { StatCard } from '@/components/ui/stat'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { RiskBadge } from '@/components/sidepanel/RiskBadge'
@@ -22,11 +22,6 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 export function Dashboard() {
   return (
     <div className="space-y-8">
-      <SectionHeader
-        title="数据概览"
-        description="实时跟踪财务归档、合同审查与制度问答的关键指标"
-      />
-
       {/* KPI Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
