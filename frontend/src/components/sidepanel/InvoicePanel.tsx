@@ -33,6 +33,16 @@ import { formatCurrency } from '@/lib/utils'
 const POLL_INTERVAL_MS = 2000
 const POLL_MAX_ATTEMPTS = 30 // ~60s
 
+/** 业务错误文案在 response.data.message，不要回落到 Axios 的 status code 句子。 */
+function readApiMessage(err: unknown): string | null {
+  if (!err || typeof err !== 'object' || !('response' in err)) return null
+  const data = (err as { response?: { data?: { message?: unknown; detail?: unknown } } }).response
+    ?.data
+  if (typeof data?.message === 'string' && data.message.trim()) return data.message
+  if (typeof data?.detail === 'string' && data.detail.trim()) return data.detail
+  return null
+}
+
 /** 从 sidePanelData 中抽取可填入表单的发票字段。 */
 function pickInvoiceFields(data: InvoiceSidePanelData): Partial<InvoiceInput> {
   const source = data as Partial<InvoiceInput> & Record<string, unknown>
@@ -74,6 +84,7 @@ function calcConfidence(invoice: InvoiceInput | undefined): number | null {
 export function InvoicePanel() {
   const { sidePanelData, closeSidePanel, openSidePanel } = useUIStore()
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [pollAttempts, setPollAttempts] = useState(0)
   const [pollError, setPollError] = useState<string | null>(null)
   const queryClient = useQueryClient()
@@ -163,6 +174,7 @@ export function InvoicePanel() {
 
   const onSubmit = async (formData: InvoiceInput) => {
     setSubmitting(true)
+    setSubmitError(null)
     try {
       if (isReady && invoiceId) {
         // ready 状态：编辑 + 确认一步到位（pending_review → active）
@@ -180,11 +192,9 @@ export function InvoicePanel() {
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
       closeSidePanel()
     } catch (err: unknown) {
-      const msg =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : null
-      toast.error(msg || (err instanceof Error ? err.message : '归档失败'))
+      const msg = readApiMessage(err) || '归档失败'
+      setSubmitError(msg)
+      toast.error(msg)
     } finally {
       setSubmitting(false)
     }
@@ -267,6 +277,13 @@ export function InvoicePanel() {
                 识别购销方与税号
               </li>
             </ul>
+          </div>
+        )}
+
+        {!isProcessing && submitError && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-body-sm text-danger">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{submitError}</span>
           </div>
         )}
 
@@ -408,6 +425,7 @@ export function InvoicePanel() {
                       <SelectItem value="special">增值税专用发票</SelectItem>
                       <SelectItem value="general">增值税普通发票</SelectItem>
                       <SelectItem value="electronic">电子发票</SelectItem>
+                      <SelectItem value="vehicle">机动车销售发票</SelectItem>
                     </SelectContent>
                   </Select>
                 )}

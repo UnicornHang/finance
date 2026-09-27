@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.chat_file_service import chat_file_service
+from app.services.invoice_document import _guess_mime, _media_content
 from app.services.llm_config_service import llm_config_service
 from app.services.llm_service import llm_service
 from app.services.session_service import session_service
@@ -429,8 +430,6 @@ class ChatService:
         content_type: str | None,
     ) -> AsyncGenerator[dict, None]:
         """合同：交给合同审查场景的模型，不走发票识别。"""
-        from app.services.invoice_vision_service import _guess_mime, _media_content
-
         # 和发票一样先打开右侧栏，审查结束后再换成结果
         yield {
             "type": "sidepanel",
@@ -523,8 +522,6 @@ class ChatService:
         content_type: str | None,
     ) -> AsyncGenerator[dict, None]:
         """普通图片或文件：附件已在表里，这里只把内容交给日常对话模型。"""
-        from app.services.invoice_vision_service import _guess_mime, _media_content
-
         yield {"type": "text", "content": "按普通问题处理这份文件…\n\n"}
         mime = _guess_mime(file_bytes, content_type, filename)
         content = _media_content(

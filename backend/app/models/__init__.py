@@ -41,6 +41,7 @@ class InvoiceType(str, Enum):
     SPECIAL = "special"  # 专票
     GENERAL = "general"  # 普票
     ELECTRONIC = "electronic"
+    VEHICLE = "vehicle"  # 机动车销售统一发票
 
 
 class RiskLevel(str, Enum):

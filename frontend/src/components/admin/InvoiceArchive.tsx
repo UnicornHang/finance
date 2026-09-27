@@ -268,6 +268,7 @@ export function InvoiceArchive() {
               <SelectItem value="special">专票</SelectItem>
               <SelectItem value="general">普票</SelectItem>
               <SelectItem value="electronic">电子发票</SelectItem>
+              <SelectItem value="vehicle">机动车销售发票</SelectItem>
             </SelectContent>
           </Select>
           <Select

@@ -31,7 +31,7 @@ class InvoiceOCRResult:
     amount_excl_tax: float | None = None
     tax_amount: float | None = None
     amount_incl_tax: float | None = None
-    invoice_type: str | None = None  # special / general / electronic
+    invoice_type: str | None = None  # special / general / electronic / vehicle
     seller: str | None = None
     buyer: str | None = None
     confidence: dict[str, float] | None = None
