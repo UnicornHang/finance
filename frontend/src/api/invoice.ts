@@ -19,7 +19,8 @@ export interface InvoiceListResponse {
 }
 
 const LIST_PAGE_CAP = 100
-const EVERY_STATUS = ['pending_review', 'active', 'deleted'] as const
+/** 列表里展示的状态。已删除不出现在档案中。不能把 all 发给接口。 */
+const EVERY_STATUS = ['pending_review', 'active'] as const
 
 function listInvoices(params?: InvoiceListParams) {
   return apiClient
@@ -28,16 +29,19 @@ function listInvoices(params?: InvoiceListParams) {
 }
 
 /** 按一个真实状态把分页结果取完。接口单页最多 100 条。 */
-async function listStatusPages(status: string, invoiceType?: string): Promise<Invoice[]> {
+async function listStatusPages(
+  status: (typeof EVERY_STATUS)[number],
+  filters: Omit<InvoiceListParams, 'page' | 'page_size' | 'status_filter'>,
+): Promise<Invoice[]> {
   const collected: Invoice[] = []
   let page = 1
   let total = 0
   do {
     const res = await listInvoices({
+      ...filters,
       page,
       page_size: LIST_PAGE_CAP,
       status_filter: status,
-      invoice_type: invoiceType,
     })
     total = res.total
     collected.push(...res.items)
@@ -47,22 +51,22 @@ async function listStatusPages(status: string, invoiceType?: string): Promise<In
 }
 
 /**
- * 全部状态：分别查待确认、已归档、已删除再合并。
- * 不能传 status_filter=all，服务端会当成等值条件，库里没有这个状态，列表就是空的。
+ * 全部状态：分别查待确认、已归档，合并后按归档时间倒序，再按请求的页切片。
  */
-async function listAllStatuses(params: {
-  page?: number
-  page_size?: number
-  invoice_type?: string
-}): Promise<InvoiceListResponse> {
+async function listAllStatuses(params: InvoiceListParams): Promise<InvoiceListResponse> {
   const page = params.page ?? 1
   const pageSize = params.page_size ?? 20
   const groups = await Promise.all(
-    EVERY_STATUS.map((status) => listStatusPages(status, params.invoice_type)),
+    EVERY_STATUS.map((status) =>
+      listStatusPages(status, {
+        invoice_type: params.invoice_type,
+        search: params.search,
+        start_date: params.start_date,
+        end_date: params.end_date,
+      }),
+    ),
   )
-  const merged = groups
-    .flat()
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const merged = groups.flat().sort((a, b) => b.created_at.localeCompare(a.created_at))
   const start = (page - 1) * pageSize
   return {
     items: merged.slice(start, start + pageSize),

@@ -1,5 +1,34 @@
 import { clsx, type ClassValue } from 'clsx'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
+
+/**
+ * 设计稿里的 text-body-sm 等是字号，不是颜色。
+ * 不登记的话，合并类名时会把按钮上的 text-white 挤掉，深色底就变成深色字。
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [
+        {
+          text: [
+            'display-lg',
+            'headline-lg',
+            'headline-md',
+            'headline-sm',
+            'title-lg',
+            'body-lg',
+            'body-md',
+            'body-sm',
+            'label-md',
+            'label-sm',
+            'numeric-lg',
+            'numeric-md',
+          ],
+        },
+      ],
+    },
+  },
+})
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))

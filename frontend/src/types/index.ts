@@ -66,6 +66,8 @@ export interface Invoice {
   ocr_confidence: Record<string, number> | null
   status: 'pending_review' | 'active' | 'deleted' | string
   user_id: string
+  /** 上传该发票的用户姓名 */
+  operator_name?: string | null
   created_at: string
   updated_at: string | null
 }

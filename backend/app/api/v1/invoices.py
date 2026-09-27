@@ -22,6 +22,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -72,8 +73,17 @@ class InvoiceArchiveRequest(BaseModel):
 
 # ================ Helpers ================
 
-def _serialize(inv) -> dict[str, Any]:
-    """Invoice → 响应字典。"""
+async def _operator_names(db: AsyncSession, user_ids: set[UUID]) -> dict[UUID, str]:
+    """批量取出操作用户姓名。发票上只存 user_id，列表要展示姓名。"""
+    if not user_ids:
+        return {}
+    rows = (await db.execute(select(User.id, User.name).where(User.id.in_(user_ids)))).all()
+    # 统一成字符串键，避免 UUID 对象和发票上的 user_id 对不上
+    return {str(user_id): name for user_id, name in rows}
+
+
+def _serialize(inv, operator_name: str | None = None) -> dict[str, Any]:
+    """Invoice → 响应字典。operator_name 是上传该发票的用户姓名。"""
     return {
         "id": str(inv.id),
         "invoice_title": inv.invoice_title,
@@ -94,6 +104,7 @@ def _serialize(inv) -> dict[str, Any]:
         "ocr_confidence": inv.ocr_confidence,
         "status": inv.status,
         "user_id": str(inv.user_id),
+        "operator_name": operator_name,
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
         "updated_at": inv.updated_at.isoformat() if inv.updated_at else None,
     }
@@ -126,8 +137,9 @@ async def list_invoices(
         end_date=end_date,
         status_filter=status_filter,
     )
+    names = await _operator_names(db, {r.user_id for r in rows})
     return {
-        "items": [_serialize(r) for r in rows],
+        "items": [_serialize(r, names.get(str(r.user_id))) for r in rows],
         "total": total,
         "page": page,
         "page_size": page_size,
