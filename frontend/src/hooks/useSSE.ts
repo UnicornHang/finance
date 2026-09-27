@@ -73,15 +73,28 @@ export function useChat() {
       }
       appendMessage(sessionId, assistantMsg)
 
-      // 3. 用闭包局部变量累积内容（避免每次 chunk 都从 store 读，可读性 + 性能都更好）
+      // 3. 用闭包局部变量累积内容。按帧刷到界面，避免每个 token 都重建整段 DOM。
       let accumulated = ''
+      let frame = 0
+      let dirty = false
+      const flush = () => {
+        frame = 0
+        if (!dirty) return
+        dirty = false
+        updateMessage(sessionId, assistantMsg.id, { content: accumulated })
+      }
+      const schedule = () => {
+        dirty = true
+        if (frame !== 0) return
+        frame = requestAnimationFrame(flush)
+      }
 
       setStreaming(true)
       try {
         for await (const event of streamChat(sessionId, message, fileRef)) {
           if (event.type === 'text') {
             accumulated += event.content
-            updateMessage(sessionId, assistantMsg.id, { content: accumulated })
+            schedule()
           } else if (event.type === 'sidepanel') {
             openSidePanel(event.payload.type, event.payload.data)
           } else if (event.type === 'done') {
@@ -91,6 +104,8 @@ export function useChat() {
           }
         }
       } finally {
+        if (frame !== 0) cancelAnimationFrame(frame)
+        flush()
         setStreaming(false)
         // 流结束后用已落库的消息替换临时气泡，附件跟消息一起留下
         try {

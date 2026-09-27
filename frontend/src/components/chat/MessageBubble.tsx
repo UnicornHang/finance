@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import {
   Bot,
   CheckCheck,
@@ -280,7 +280,7 @@ function AttachmentPreviewDialog({
  * - 用户：图片按大图预览、文件按信息卡，二者形态不同；文字独立气泡（原有主色白字）
  * - 助手：白底边框气泡 + 头像，markdown 渲染
  */
-export function MessageBubble({ message }: Props) {
+function MessageBubbleView({ message }: Props) {
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const attachments = message.attachments?.filter(Boolean) ?? []
@@ -392,3 +392,6 @@ export function MessageBubble({ message }: Props) {
     </>
   )
 }
+
+/** 历史气泡的 message 引用不变，流式更新时不要整段重绘。 */
+export const MessageBubble = memo(MessageBubbleView)

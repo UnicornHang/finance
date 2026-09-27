@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.chat_file_service import chat_file_service
-from app.services.invoice_document import _guess_mime, _media_content
+from app.services.invoice_document import DocumentUnreadableError, _guess_mime, _media_content
 from app.services.llm_config_service import llm_config_service
 from app.services.llm_service import llm_service
 from app.services.session_service import session_service
@@ -365,6 +365,14 @@ class ChatService:
                 db=db,
                 tenant_id=str(user.tenant_id),
             )
+        except DocumentUnreadableError as exc:
+            logger.info("upload has no readable body file=%s", file_meta.get("original_filename"))
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
+            yield {"type": "error", "message": str(exc)}
+            yield {"type": "done"}
+            return
         except Exception as exc:
             logger.exception("classify upload failed")
             await chat_file_service.mark(
