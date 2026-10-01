@@ -192,12 +192,27 @@ async function restoreContract(
           : contract.status === 'pending_review'
             ? 'pending'
             : contract.status
+      // 档案摘要若被确认接口脏写覆盖，优先用当轮助手回复展示
+      const storedSummary = contract.review_result?.summary?.trim() || ''
+      const replySummary = reply?.trim() || ''
+      const useReplySummary =
+        !!replySummary &&
+        (storedSummary.length < 40 ||
+          (replySummary.length > storedSummary.length + 80 &&
+            !storedSummary.includes(replySummary.slice(0, Math.min(40, replySummary.length)))))
       openSidePanel('contract', {
         ...contract,
         status: 'ready',
         contract_id: contract.id,
         archive_status: archiveStatus,
         chat_file_id: attachment.id ?? null,
+        review_result: useReplySummary
+          ? {
+              ...(contract.review_result || {}),
+              summary: replySummary,
+              violations: contract.review_result?.violations || [],
+            }
+          : contract.review_result,
       })
       return
     } catch {

@@ -115,7 +115,7 @@ export function ContractPanel() {
         sign_date: signDate.trim() || null,
         amount: amount != null && !Number.isNaN(amount) ? amount : null,
         risk_level: riskLevel,
-        review_result: review ?? null,
+        // 审查摘要只在识别时写入，确认归档不再回传，避免覆盖成脏数据
       }
 
       if (data.contract_id && !alreadyArchived) {
@@ -134,6 +134,7 @@ export function ContractPanel() {
         }
         const pending = await contractApi.archive({
           ...fields,
+          review_result: review ?? null,
           file_url,
           file_hash,
           chat_file_id: data.chat_file_id || undefined,

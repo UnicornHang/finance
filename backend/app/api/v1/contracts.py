@@ -46,7 +46,7 @@ class ContractArchiveRequest(BaseModel):
 
 
 class ContractConfirmRequest(BaseModel):
-    """确认归档时可携带最后一次编辑字段。"""
+    """确认归档时可携带最后一次编辑字段（不含审查摘要，摘要以识别结果为准）。"""
 
     contract_name: str | None = None
     contract_no: str | None = None
@@ -55,7 +55,6 @@ class ContractConfirmRequest(BaseModel):
     sign_date: str | date | None = None
     amount: float | Decimal | None = None
     risk_level: str | None = None
-    review_result: dict[str, Any] | None = None
     key_clauses: str | None = None
 
 

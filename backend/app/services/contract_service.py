@@ -260,26 +260,53 @@ class ContractService:
         data: dict[str, Any],
         chat_file_id: UUID | None = None,
     ) -> "Contract":
-        """审查完成后写入待归档。不在这里做归档去重，也不写 active。"""
-        from app.models import Contract
+        """审查完成后写入待归档。不在这里做归档去重，也不把 status 擅自改成 active。
+
+        若附件已关联合同（含已归档），刷新识别字段与审查摘要，保留原 status。
+        """
+        from app.models import ChatFile, Contract
 
         fields = self._build_pending_fields(data)
         file_hash = fields["file_hash"]
-        existing = await self._find_pending_by_hash(db, tenant_id, file_hash)
+
+        existing: Contract | None = None
+        # 优先更新本附件已关联的合同，避免摘要写到另一条 pending、侧栏仍读旧档案
+        if chat_file_id is not None:
+            chat_file = await db.get(ChatFile, chat_file_id)
+            if (
+                chat_file is not None
+                and chat_file.tenant_id == tenant_id
+                and chat_file.user_id == user_id
+                and chat_file.contract_id is not None
+            ):
+                linked = await db.get(Contract, chat_file.contract_id)
+                if (
+                    linked is not None
+                    and linked.tenant_id == tenant_id
+                    and linked.status != "deleted"
+                ):
+                    existing = linked
+
+        if existing is None:
+            existing = await self._find_pending_by_hash(db, tenant_id, file_hash)
 
         if existing:
+            keep_status = existing.status
             for key, value in fields.items():
                 if key == "status":
                     continue
                 setattr(existing, key, value)
-            existing.status = "pending_review"
+            # 仅未归档的保持/回到 pending_review；已归档只刷新识别内容
+            if keep_status != "active":
+                existing.status = "pending_review"
             row = existing
             await db.flush()
             await db.refresh(row)
             logger.info(
-                "contract recognition refreshed (still pending): id=%s hash=%s",
+                "contract recognition refreshed: id=%s hash=%s status=%s",
                 row.id,
                 file_hash[:12],
+                row.status,
             )
         else:
             row = Contract(tenant_id=tenant_id, user_id=user_id, **fields)
@@ -352,7 +379,7 @@ class ContractService:
 
         before = _serialize_snapshot(row)
 
-        # 最后一次字段更新
+        # 最后一次字段更新（审查摘要由识别写入，确认时不允许前端覆盖）
         if fields:
             editable = {
                 "contract_name",
@@ -363,7 +390,6 @@ class ContractService:
                 "amount",
                 "key_clauses",
                 "risk_level",
-                "review_result",
             }
             for key, value in fields.items():
                 if key not in editable:
@@ -374,8 +400,6 @@ class ContractService:
                     setattr(row, key, _parse_amount(value))
                 elif key == "risk_level":
                     setattr(row, key, infer_risk_level(row.review_result, value))
-                elif key == "review_result" and value is not None and not isinstance(value, dict):
-                    setattr(row, key, {"summary": str(value), "violations": []})
                 elif isinstance(value, str):
                     setattr(row, key, value or None)
                 else:
