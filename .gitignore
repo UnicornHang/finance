@@ -65,3 +65,8 @@ coverage/
 # OS
 .DS_Store
 desktop.ini
+
+# Local-only (do not commit)
+.workbuddy/
+docs/backend-runbook.md
+docs/ubuntu-docker-setup.md
