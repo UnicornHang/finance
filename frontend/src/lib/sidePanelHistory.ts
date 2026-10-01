@@ -186,7 +186,19 @@ async function restoreContract(
     try {
       const contract = await contractApi.get(attachment.contract_id)
       if (isCancelled()) return
-      openSidePanel('contract', { ...contract, status: 'ready' })
+      const archiveStatus =
+        contract.status === 'active'
+          ? 'archived'
+          : contract.status === 'pending_review'
+            ? 'pending'
+            : contract.status
+      openSidePanel('contract', {
+        ...contract,
+        status: 'ready',
+        contract_id: contract.id,
+        archive_status: archiveStatus,
+        chat_file_id: attachment.id ?? null,
+      })
       return
     } catch {
       // 档案已删时仍展示当轮审查文字
@@ -221,6 +233,8 @@ async function restoreContract(
     amount: extract?.amount ?? null,
     file_url: attachment.file_url,
     file_hash: attachment.file_hash,
+    chat_file_id: attachment.id ?? null,
+    contract_id: attachment.contract_id ?? null,
     review_result: reply ? { summary: reply, violations: [] } : undefined,
   })
 }

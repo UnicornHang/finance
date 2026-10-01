@@ -413,6 +413,8 @@ class ChatService:
                 session_id,
                 user_message=user_message,
                 file_id=file_id,
+                file_url=file_url,
+                file_hash=file_hash,
                 file_bytes=file_bytes,
                 filename=file_meta.get("original_filename"),
                 content_type=file_meta.get("content_type"),
@@ -440,6 +442,8 @@ class ChatService:
         *,
         user_message: str,
         file_id: UUID,
+        file_url: str,
+        file_hash: str,
         file_bytes: bytes,
         filename: str | None,
         content_type: str | None,
@@ -453,6 +457,9 @@ class ChatService:
                 "data": {
                     "status": "processing",
                     "contract_name": filename,
+                    "file_url": file_url,
+                    "file_hash": file_hash,
+                    "chat_file_id": str(file_id),
                 },
             },
         }
@@ -517,6 +524,8 @@ class ChatService:
                         "content": (
                             "你是合同审查助手。用户消息里的正文已由系统从 PDF/Word 抽出，"
                             "必须当作有效合同文本审查，不得拒绝或讨论文件格式。"
+                            "审查完成后提醒用户在右侧核对字段并点击确认归档；"
+                            "不要声称已自动归档。"
                         ),
                     },
                     {"role": "user", "content": user_content},
@@ -544,6 +553,9 @@ class ChatService:
                     "data": {
                         "status": "ready",
                         "contract_name": filename,
+                        "file_url": file_url,
+                        "file_hash": file_hash,
+                        "chat_file_id": str(file_id),
                         **overview,
                         "review_result": {
                             "summary": f"合同审查失败：{exc}",
@@ -556,7 +568,52 @@ class ChatService:
             yield {"type": "done"}
             return
 
-        await chat_file_service.mark(db, file_id, recognize_status="succeeded", recognize_error=None)
+        # 审查结果写入 pending_review，等用户点「确定归档」才变 active
+        from app.services.contract_service import contract_service, infer_risk_level
+
+        review_result = {
+            "summary": assistant_content,
+            "violations": [],
+        }
+        risk_level = infer_risk_level(review_result, None)
+        contract_id: str | None = None
+        archive_status = "pending"
+        try:
+            pending = await contract_service.create_pending(
+                db,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                data={
+                    "contract_name": overview.get("contract_name") or filename,
+                    "party_a": overview.get("party_a"),
+                    "party_b": overview.get("party_b"),
+                    "sign_date": overview.get("sign_date"),
+                    "amount": overview.get("amount"),
+                    "risk_level": risk_level,
+                    "review_result": review_result,
+                    "file_url": file_url,
+                    "file_hash": file_hash,
+                },
+                chat_file_id=file_id,
+            )
+            await db.commit()
+            contract_id = str(pending.id)
+            await chat_file_service.mark(
+                db,
+                file_id,
+                recognize_status="succeeded",
+                contract_id=pending.id,
+                recognize_error=None,
+            )
+        except Exception as exc:
+            logger.exception("contract create_pending failed")
+            await db.rollback()
+            await chat_file_service.mark(
+                db, file_id, recognize_status="succeeded", recognize_error=None
+            )
+            # 侧栏仍可展示审查结果；无 contract_id 时走兼容确认路径
+            yield {"type": "text", "content": f"\n\n（识别结果暂存失败：{exc}，请稍后重试确认归档）\n"}
+
         if assistant_content.strip():
             await self.save_message(
                 db, session_id, user.tenant_id, "assistant", assistant_content
@@ -567,12 +624,15 @@ class ChatService:
                     "type": "contract",
                     "data": {
                         "status": "ready",
-                        "contract_name": filename,
+                        "file_url": file_url,
+                        "file_hash": file_hash,
+                        "chat_file_id": str(file_id),
+                        "contract_id": contract_id,
+                        "archive_status": archive_status if contract_id else None,
                         **overview,
-                        "review_result": {
-                            "summary": assistant_content,
-                            "violations": [],
-                        },
+                        "contract_name": overview.get("contract_name") or filename,
+                        "risk_level": risk_level,
+                        "review_result": review_result,
                     },
                 },
             }

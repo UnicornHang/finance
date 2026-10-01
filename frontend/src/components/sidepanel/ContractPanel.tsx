@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { FileText, Loader2, RotateCw, ShieldAlert, X } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Markdown } from '@/components/chat/Markdown'
 import { Button } from '@/components/ui/button'
@@ -6,32 +9,152 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/surface'
 import { Badge } from '@/components/ui/badge'
 import { RiskBadge } from './RiskBadge'
+import { contractApi } from '@/api/contract'
 import { useUIStore } from '@/stores/uiStore'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 
-/** 合同面板：根据 sidePanelData 内容显示处理中态 / 审查结果 / 流水线未实装降级。 */
-export function ContractPanel() {
-  const { sidePanelData, closeSidePanel } = useUIStore()
+/** 业务错误文案在 response.data.message。 */
+function readApiMessage(err: unknown): string | null {
+  if (!err || typeof err !== 'object' || !('response' in err)) return null
+  const data = (err as { response?: { data?: { message?: unknown; detail?: unknown } } }).response
+    ?.data
+  if (typeof data?.message === 'string' && data.message.trim()) return data.message
+  if (typeof data?.detail === 'string' && data.detail.trim()) return data.detail
+  return null
+}
 
-  if (!sidePanelData) return null
+type ContractPanelData = {
+  status?: 'processing' | 'ready' | string
+  review_result?: { violations?: unknown[]; summary?: string; risk_level?: string }
+  risk_level?: 'high' | 'medium' | 'low' | null
+  contract_name?: string | null
+  party_a?: string | null
+  party_b?: string | null
+  sign_date?: string | null
+  amount?: number | null
+  file_url?: string | null
+  file_hash?: string | null
+  chat_file_id?: string | null
+  contract_id?: string | null
+  /** pending=待确认归档；archived=已归档 */
+  archive_status?: 'pending' | 'archived' | string | null
+  message?: string
+  reason?: string
+}
 
-  const data = sidePanelData as {
-    status?: 'processing' | 'ready' | string
-    review_result?: { violations?: unknown[]; summary?: string }
-    risk_level?: 'high' | 'medium' | 'low' | null
-    contract_name?: string | null
-    party_a?: string | null
-    party_b?: string | null
-    sign_date?: string | null
-    amount?: number | null
-    message?: string
-    reason?: string
+/** 从审查摘要粗判风险，侧栏没带 risk_level 时用。 */
+function guessRiskLevel(data: ContractPanelData): 'high' | 'medium' | 'low' {
+  if (data.risk_level === 'high' || data.risk_level === 'medium' || data.risk_level === 'low') {
+    return data.risk_level
   }
+  const nested = data.review_result?.risk_level
+  if (nested === 'high' || nested === 'medium' || nested === 'low') return nested
+  const summary = data.review_result?.summary || ''
+  if (/高风险|极高风险/.test(summary)) return 'high'
+  if (/中风险/.test(summary)) return 'medium'
+  return 'low'
+}
+
+/** 合同面板：根据 sidePanelData 内容显示处理中态 / 审查结果，并支持确定归档。 */
+export function ContractPanel() {
+  const { sidePanelData, closeSidePanel, clearSidePanel } = useUIStore()
+  const queryClient = useQueryClient()
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const data = (sidePanelData ?? null) as ContractPanelData | null
+
+  const [contractName, setContractName] = useState('')
+  const [partyA, setPartyA] = useState('')
+  const [partyB, setPartyB] = useState('')
+  const [signDate, setSignDate] = useState('')
+  const [amountText, setAmountText] = useState('')
+
+  useEffect(() => {
+    if (!data || data.status === 'processing') return
+    setContractName(data.contract_name || '')
+    setPartyA(data.party_a || '')
+    setPartyB(data.party_b || '')
+    setSignDate((data.sign_date || '').slice(0, 10))
+    setAmountText(
+      data.amount == null || Number.isNaN(Number(data.amount)) ? '' : String(data.amount),
+    )
+    setSubmitError(null)
+  }, [
+    data?.contract_name,
+    data?.party_a,
+    data?.party_b,
+    data?.sign_date,
+    data?.amount,
+    data?.file_hash,
+    data?.status,
+  ])
+
+  if (!data) return null
 
   const isProcessing = data.status === 'processing'
   const review = data.review_result
   const violationCount = review?.violations?.length || 0
-  const pipelineNotImplemented = data.status === 'not_found' || data.reason === 'contract_parse_pipeline_not_implemented'
+  const pipelineNotImplemented =
+    data.status === 'not_found' || data.reason === 'contract_parse_pipeline_not_implemented'
+  const riskLevel = guessRiskLevel(data)
+  // contract_id 在审查后就会有（pending_review）；真正已归档看 archive_status / status
+  const alreadyArchived =
+    data.archive_status === 'archived' || data.status === 'active'
+
+  const onArchive = async () => {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const amountRaw = amountText.trim().replace(/,/g, '')
+      const amount = amountRaw ? Number(amountRaw) : null
+      const fields = {
+        contract_name: contractName.trim() || data.contract_name || null,
+        party_a: partyA.trim() || null,
+        party_b: partyB.trim() || null,
+        sign_date: signDate.trim() || null,
+        amount: amount != null && !Number.isNaN(amount) ? amount : null,
+        risk_level: riskLevel,
+        review_result: review ?? null,
+      }
+
+      if (data.contract_id && !alreadyArchived) {
+        // 主路径：pending_review → active
+        await contractApi.confirm(data.contract_id, fields)
+        toast.success('合同已归档')
+      } else if (!data.contract_id) {
+        // 兼容老会话：先写 pending，再确认（仍由用户这一次点击触发）
+        const file_url = data.file_url || ''
+        const file_hash = data.file_hash || ''
+        if (!file_url || !file_hash) {
+          const msg = '缺少文件信息，无法归档。请重新上传合同后再试。'
+          setSubmitError(msg)
+          toast.error(msg)
+          return
+        }
+        const pending = await contractApi.archive({
+          ...fields,
+          file_url,
+          file_hash,
+          chat_file_id: data.chat_file_id || undefined,
+        })
+        await contractApi.confirm(pending.id, fields)
+        toast.success('合同已归档')
+      } else {
+        toast.info('合同已归档，无需重复确认')
+        return
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['contracts'] })
+      clearSidePanel()
+    } catch (err: unknown) {
+      const msg = readApiMessage(err) || '归档失败'
+      setSubmitError(msg)
+      toast.error(msg)
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <aside className="flex h-full w-full flex-col bg-surface" data-slot="contract-panel">
@@ -53,7 +176,9 @@ export function ContractPanel() {
                 ? 'PDF 解析与合规审查中'
                 : pipelineNotImplemented
                   ? 'Phase B TODO'
-                  : 'RAG 规则匹配 · 风险等级标注'}
+                  : alreadyArchived
+                    ? '已归档'
+                    : '请核对字段后确认归档'}
             </p>
           </div>
         </div>
@@ -74,7 +199,7 @@ export function ContractPanel() {
             <Loader2 className="h-12 w-12 animate-spin text-primary/40" />
             <p className="text-body-md font-medium text-ink">AI 正在解析合同…</p>
             <p className="text-body-sm text-ink-tertiary">
-              下载 PDF → 文本提取 → 敏感信息脱敏 → RAG 规则匹配
+              下载 PDF → 文本提取 → 合规审查
             </p>
           </div>
         )}
@@ -86,72 +211,79 @@ export function ContractPanel() {
               {data.message ??
                 '上传动作已记录（文件已落到 MinIO contracts 桶），PDF 解析与合规审查将在 Phase B 完成。'}
             </p>
-            <p className="mt-2 text-body-sm text-ink-tertiary">
-              file_hash: <span className="font-mono">{(data as { file_hash?: string }).file_hash}</span>
-            </p>
           </div>
         )}
 
         {!isProcessing && !pipelineNotImplemented && (
           <div className="space-y-6">
-            {/* 顶部摘要卡 */}
             <div className="flex items-center justify-between rounded-md border border-line-subtle bg-canvas px-4 py-3">
               <div>
                 <p className="text-label-md font-semibold uppercase tracking-wider text-ink-tertiary">
                   风险评估
                 </p>
                 <div className="mt-1.5 flex items-center gap-2">
-                  <RiskBadge level={data.risk_level} />
+                  <RiskBadge level={riskLevel} />
                   <span className="text-body-sm text-ink-tertiary">
                     检出{' '}
-                    <span className="font-semibold text-ink tabular-nums">
-                      {violationCount}
-                    </span>{' '}
+                    <span className="font-semibold text-ink tabular-nums">{violationCount}</span>{' '}
                     项风险
                   </span>
                 </div>
               </div>
               {review?.summary && (
-                <Badge tone={violationCount > 0 ? 'warning' : 'success'} dot>
-                  {violationCount > 0 ? '需关注' : '审查通过'}
+                <Badge tone={riskLevel === 'low' && violationCount === 0 ? 'success' : 'warning'} dot>
+                  {riskLevel === 'high' ? '高风险' : riskLevel === 'medium' ? '需关注' : '审查通过'}
                 </Badge>
               )}
             </div>
 
-            {/* 基本信息 */}
             <section className="space-y-4">
               <Field label="合同名称">
-                <Input value={data.contract_name || ''} readOnly className="bg-canvas" />
+                <Input
+                  value={contractName}
+                  onChange={(e) => setContractName(e.target.value)}
+                  className="bg-canvas"
+                />
               </Field>
 
               <div className="grid grid-cols-2 gap-4">
                 <Field label="甲方">
-                  <Input value={data.party_a || ''} readOnly className="bg-canvas" />
+                  <Input
+                    value={partyA}
+                    onChange={(e) => setPartyA(e.target.value)}
+                    className="bg-canvas"
+                  />
                 </Field>
                 <Field label="乙方">
-                  <Input value={data.party_b || ''} readOnly className="bg-canvas" />
+                  <Input
+                    value={partyB}
+                    onChange={(e) => setPartyB(e.target.value)}
+                    className="bg-canvas"
+                  />
                 </Field>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <Field label="签订日期">
                   <Input
-                    value={formatDate(data.sign_date)}
-                    readOnly
+                    type="date"
+                    value={signDate}
+                    onChange={(e) => setSignDate(e.target.value)}
                     className="bg-canvas"
                   />
                 </Field>
                 <Field label="合同金额">
                   <Input
-                    value={formatCurrency(data.amount)}
-                    readOnly
+                    inputMode="decimal"
+                    value={amountText}
+                    onChange={(e) => setAmountText(e.target.value)}
+                    placeholder={formatCurrency(data.amount) || '金额'}
                     className="bg-canvas tabular-nums"
                   />
                 </Field>
               </div>
             </section>
 
-            {/* 违规项 */}
             {review?.violations && review.violations.length > 0 && (
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
@@ -168,9 +300,7 @@ export function ContractPanel() {
                       className="rounded-md border border-danger-border bg-danger-tint p-3 space-y-1.5"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-body-md font-semibold text-ink">
-                          {v.clause}
-                        </span>
+                        <span className="text-body-md font-semibold text-ink">{v.clause}</span>
                         <RiskBadge level={v.severity} size="sm" />
                       </div>
                       <p className="text-body-sm text-ink-secondary">{v.issue}</p>
@@ -180,7 +310,6 @@ export function ContractPanel() {
               </section>
             )}
 
-            {/* 审查摘要：模型输出是 Markdown，这里按标题/列表渲染，不要当纯文本堆在一起 */}
             {review?.summary && (
               <section className="space-y-2">
                 <h3 className="text-headline-sm font-semibold text-ink">审查摘要</h3>
@@ -192,12 +321,18 @@ export function ContractPanel() {
                 </div>
               </section>
             )}
+
+            {submitError && (
+              <div className="rounded-md border border-danger/30 bg-danger-tint px-3 py-2 text-body-sm text-danger">
+                {submitError}
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <footer className="flex items-center gap-2 border-t border-line px-5 py-3">
-        <Button variant="ghost" size="md" type="button">
+        <Button variant="ghost" size="md" type="button" disabled title="请重新上传合同以再次审查">
           <RotateCw className="h-4 w-4" />
           重新审查
         </Button>
@@ -205,7 +340,13 @@ export function ContractPanel() {
         <Button variant="secondary" onClick={closeSidePanel} type="button">
           关闭
         </Button>
-        <Button type="button">确定归档</Button>
+        <Button
+          type="button"
+          disabled={isProcessing || pipelineNotImplemented || submitting || alreadyArchived}
+          onClick={() => void onArchive()}
+        >
+          {submitting ? '归档中...' : alreadyArchived ? '已归档' : '确定归档'}
+        </Button>
       </footer>
     </aside>
   )
