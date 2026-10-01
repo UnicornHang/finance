@@ -32,6 +32,14 @@ export interface MessageAttachment {
   intent?: string | null
   recognize_status?: string | null
   recognize_error?: string | null
+  /** 合同侧栏字段等；审查时写入，重开会话直接用 */
+  extract_result?: {
+    contract_name?: string | null
+    party_a?: string | null
+    party_b?: string | null
+    sign_date?: string | null
+    amount?: number | null
+  } | null
   invoice_id?: string | null
   contract_id?: string | null
 }

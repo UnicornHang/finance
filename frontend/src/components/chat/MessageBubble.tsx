@@ -2,9 +2,11 @@ import { memo, useEffect, useState } from 'react'
 import {
   Bot,
   CheckCheck,
+  Eye,
   FileText,
   ImageIcon,
   Loader2,
+  PanelRightOpen,
   User,
 } from 'lucide-react'
 
@@ -15,13 +17,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { fileApi } from '@/api/file'
+import { documentKind } from '@/lib/sidePanelHistory'
 import { cn } from '@/lib/utils'
+import { useUIStore } from '@/stores/uiStore'
 import type { Message, MessageAttachment } from '@/types'
 
 import { Markdown } from './Markdown'
 
 interface Props {
   message: Message
+  /** 点击合同/发票附件时打开对应审查侧栏 */
+  onOpenDocument?: (attachment: MessageAttachment) => void
 }
 
 const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|bmp|heic|heif|jfif)$/i
@@ -130,39 +136,73 @@ function ImageAttachment({
 
 /**
  * 文件附件：文件信息卡（图标 + 文件名 + 类型/大小）
- * 仅用于非图片（PDF / Word 等），不用于图片
+ * 合同/发票可点开右侧审查结果；预览走旁边的小按钮。
  */
 function FileAttachment({
   attachment,
   onPreview,
+  onOpenDocument,
+  active,
 }: {
   attachment: MessageAttachment
   onPreview: (att: MessageAttachment) => void
+  onOpenDocument?: (att: MessageAttachment) => void
+  active?: boolean
 }) {
   const name = attachment.original_filename || '附件'
   const metaLine = [fileExtLabel(attachment), formatSize(attachment.size)]
     .filter(Boolean)
     .join(' ')
+  const kind = documentKind(attachment)
+  const canOpenReview =
+    Boolean(onOpenDocument) &&
+    (kind === 'contract' || kind === 'invoice') &&
+    attachment.recognize_status !== 'failed'
+  const reviewLabel =
+    kind === 'contract' ? '查看审查结果' : kind === 'invoice' ? '查看识别结果' : null
 
   return (
-    <button
-      type="button"
-      onClick={() => onPreview(attachment)}
-      className="flex w-[min(100%,280px)] items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-left shadow-sm transition-colors hover:bg-canvas"
-      aria-label={`预览文件 ${name}`}
+    <div
+      className={cn(
+        'flex w-[min(100%,300px)] items-stretch overflow-hidden rounded-2xl border bg-surface shadow-sm',
+        active ? 'border-primary ring-1 ring-primary/30' : 'border-line',
+      )}
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-tint">
-        <FileText className="h-5 w-5 text-primary" strokeWidth={2} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-body-md font-medium text-ink">{name}</p>
-        {metaLine && (
-          <p className="mt-0.5 truncate text-label-sm text-ink-tertiary">
-            {metaLine}
-          </p>
-        )}
-      </div>
-    </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (canOpenReview) onOpenDocument?.(attachment)
+          else onPreview(attachment)
+        }}
+        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-canvas"
+        aria-label={canOpenReview ? `${reviewLabel} ${name}` : `预览文件 ${name}`}
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-tint">
+          <FileText className="h-5 w-5 text-primary" strokeWidth={2} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-body-md font-medium text-ink">{name}</p>
+          {metaLine && (
+            <p className="mt-0.5 truncate text-label-sm text-ink-tertiary">{metaLine}</p>
+          )}
+          {canOpenReview && (
+            <p className="mt-1 inline-flex items-center gap-1 text-label-sm font-medium text-primary">
+              <PanelRightOpen className="h-3 w-3" />
+              {active ? '当前正在查看' : reviewLabel}
+            </p>
+          )}
+        </div>
+      </button>
+      <button
+        type="button"
+        onClick={() => onPreview(attachment)}
+        className="flex w-10 shrink-0 items-center justify-center border-l border-line text-ink-tertiary transition-colors hover:bg-canvas hover:text-ink"
+        aria-label={`预览文件 ${name}`}
+        title="预览原文件"
+      >
+        <Eye className="h-4 w-4" />
+      </button>
+    </div>
   )
 }
 
@@ -170,14 +210,62 @@ function FileAttachment({
 function AttachmentCard({
   attachment,
   onPreview,
+  onOpenDocument,
+  active,
 }: {
   attachment: MessageAttachment
   onPreview: (att: MessageAttachment) => void
+  onOpenDocument?: (att: MessageAttachment) => void
+  active?: boolean
 }) {
   if (isImageAttachment(attachment)) {
-    return <ImageAttachment attachment={attachment} onPreview={onPreview} />
+    const kind = documentKind(attachment)
+    const canOpenReview =
+      Boolean(onOpenDocument) &&
+      (kind === 'contract' || kind === 'invoice') &&
+      attachment.recognize_status !== 'failed'
+    return (
+      <div className="space-y-1.5">
+        <ImageAttachment
+          attachment={attachment}
+          onPreview={canOpenReview ? () => onOpenDocument?.(attachment) : onPreview}
+        />
+        {canOpenReview && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenDocument?.(attachment)}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-md px-2 py-1 text-label-sm font-medium',
+                active
+                  ? 'bg-primary-tint text-primary'
+                  : 'text-primary hover:bg-primary-tint',
+              )}
+            >
+              <PanelRightOpen className="h-3 w-3" />
+              {active ? '当前正在查看' : kind === 'invoice' ? '查看识别结果' : '查看审查结果'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onPreview(attachment)}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-label-sm text-ink-tertiary hover:bg-canvas hover:text-ink"
+            >
+              <Eye className="h-3 w-3" />
+              预览
+            </button>
+          </div>
+        )}
+      </div>
+    )
   }
-  return <FileAttachment attachment={attachment} onPreview={onPreview} />
+  return (
+    <FileAttachment
+      attachment={attachment}
+      onPreview={onPreview}
+      onOpenDocument={onOpenDocument}
+      active={active}
+    />
+  )
 }
 
 /**
@@ -280,7 +368,7 @@ function AttachmentPreviewDialog({
  * - 用户：图片按大图预览、文件按信息卡，二者形态不同；文字独立气泡（原有主色白字）
  * - 助手：白底边框气泡 + 头像，markdown 渲染
  */
-function MessageBubbleView({ message }: Props) {
+function MessageBubbleView({ message, onOpenDocument }: Props) {
   const isUser = message.role === 'user'
   const isTool = message.role === 'tool'
   const attachments = message.attachments?.filter(Boolean) ?? []
@@ -290,6 +378,10 @@ function MessageBubbleView({ message }: Props) {
     !!message.content &&
     !(hasAttachments && placeholderContents.has(message.content.trim()))
   const showStreamingDots = !message.content && !hasAttachments
+  const activeFileHash = useUIStore((s) => {
+    const data = s.sidePanelData as { file_hash?: string } | null
+    return s.sidePanelOpen ? data?.file_hash ?? null : null
+  })
 
   const [previewAtt, setPreviewAtt] = useState<MessageAttachment | null>(null)
 
@@ -328,6 +420,8 @@ function MessageBubbleView({ message }: Props) {
                   key={`${att.file_hash}-${att.file_url}`}
                   attachment={att}
                   onPreview={setPreviewAtt}
+                  onOpenDocument={onOpenDocument}
+                  active={Boolean(att.file_hash && att.file_hash === activeFileHash)}
                 />
               ))}
             </div>

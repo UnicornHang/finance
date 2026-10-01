@@ -150,6 +150,8 @@ class ChatFile(Base):
     intent: Mapped[str | None] = mapped_column(String(20))
     recognize_status: Mapped[str] = mapped_column(String(20), default="pending")
     recognize_error: Mapped[str | None] = mapped_column(Text)
+    # 合同侧栏字段等抽取结果；重开会话时不用再依赖当次 SSE
+    extract_result: Mapped[dict | None] = mapped_column(JSONB)
     invoice_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("invoices.id", ondelete="SET NULL"))
     contract_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))

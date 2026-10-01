@@ -1,5 +1,6 @@
 import { FileText, Loader2, RotateCw, ShieldAlert, X } from 'lucide-react'
 
+import { Markdown } from '@/components/chat/Markdown'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/ui/surface'
@@ -179,12 +180,15 @@ export function ContractPanel() {
               </section>
             )}
 
-            {/* 审查摘要 */}
+            {/* 审查摘要：模型输出是 Markdown，这里按标题/列表渲染，不要当纯文本堆在一起 */}
             {review?.summary && (
               <section className="space-y-2">
                 <h3 className="text-headline-sm font-semibold text-ink">审查摘要</h3>
-                <div className="rounded-md border border-line bg-surface-inset p-4 text-body-md text-ink-secondary leading-relaxed">
-                  {review.summary}
+                <div className="rounded-md border border-line bg-canvas px-4 py-3">
+                  <Markdown
+                    content={review.summary}
+                    className="text-ink-secondary [&_h1]:text-ink [&_h2]:text-ink [&_h3]:text-ink [&_strong]:text-ink"
+                  />
                 </div>
               </section>
             )}

@@ -12,7 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.chat_file_service import chat_file_service
-from app.services.invoice_document import DocumentUnreadableError, _guess_mime, _media_content
+from app.services.invoice_document import (
+    DocumentUnreadableError,
+    _as_llm_message_content,
+    _extract_contract_overview,
+    _guess_mime,
+    _media_content,
+    _prepare_document,
+)
 from app.services.llm_config_service import llm_config_service
 from app.services.llm_service import llm_service
 from app.services.session_service import session_service
@@ -451,17 +458,69 @@ class ChatService:
         }
         yield {"type": "text", "content": "这是合同，正在审查…\n\n"}
         mime = _guess_mime(file_bytes, content_type, filename)
-        content = _media_content(
-            file_bytes,
-            mime,
+        # 先抽正文，侧栏字段和送模共用同一份，避免模型再看到排版碎片
+        try:
+            _images, body_text = _prepare_document(file_bytes, mime, filename)
+            if not _images and not body_text:
+                raise DocumentUnreadableError(
+                    "没能读出这份文件的正文，无法继续审查。"
+                    "请上传未加密的 PDF 或 Word，或改用清晰的页面图片。"
+                )
+        except DocumentUnreadableError as exc:
+            logger.info("contract has no readable body file=%s", filename)
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
+            yield {"type": "error", "message": str(exc)}
+            yield {"type": "done"}
+            return
+
+        overview = _extract_contract_overview(body_text)
+        extract_result = {
+            "contract_name": filename,
+            **overview,
+        }
+        # 先落库，侧栏字段不依赖本次 SSE；重开会话也能读到
+        await chat_file_service.mark(db, file_id, extract_result=extract_result)
+        logger.info(
+            "contract body ready file=%s chars=%s party_a=%s amount=%s",
             filename,
-            "请审查这份合同，用中文指出主要风险和需要关注的条款。"
-            + (f"\n用户补充：{user_message}" if user_message else ""),
+            len(body_text),
+            overview.get("party_a"),
+            overview.get("amount"),
         )
+        instruction = (
+            "系统已经从合同文件中提取出可读正文，并放在下方。"
+            "请直接用中文审查主要风险和需要关注的条款。"
+            "禁止声称内容是 PDF 源码、二进制流、FlateDecode、endstream 或无法阅读；"
+            "若正文较短，就基于已有条款做审查，不要讨论文件格式。"
+        )
+        if user_message:
+            instruction += f"\n用户补充：{user_message}"
+        try:
+            content = _media_content(file_bytes, mime, filename, instruction)
+        except DocumentUnreadableError as exc:
+            logger.info("contract has no readable body file=%s", filename)
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
+            yield {"type": "error", "message": str(exc)}
+            yield {"type": "done"}
+            return
+        user_content = _as_llm_message_content(content)
         assistant_content = ""
         try:
             async for chunk in llm_service.stream(
-                [{"role": "user", "content": content}],
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是合同审查助手。用户消息里的正文已由系统从 PDF/Word 抽出，"
+                            "必须当作有效合同文本审查，不得拒绝或讨论文件格式。"
+                        ),
+                    },
+                    {"role": "user", "content": user_content},
+                ],
                 scene="contract_review",
                 db=db,
                 tenant_id=str(user.tenant_id),
@@ -485,6 +544,7 @@ class ChatService:
                     "data": {
                         "status": "ready",
                         "contract_name": filename,
+                        **overview,
                         "review_result": {
                             "summary": f"合同审查失败：{exc}",
                             "violations": [],
@@ -508,6 +568,7 @@ class ChatService:
                     "data": {
                         "status": "ready",
                         "contract_name": filename,
+                        **overview,
                         "review_result": {
                             "summary": assistant_content,
                             "violations": [],
@@ -532,18 +593,27 @@ class ChatService:
         """普通图片或文件：附件已在表里，这里只把内容交给日常对话模型。"""
         yield {"type": "text", "content": "按普通问题处理这份文件…\n\n"}
         mime = _guess_mime(file_bytes, content_type, filename)
-        content = _media_content(
-            file_bytes,
-            mime,
-            filename,
-            user_message or "请说明这份文件是什么，并回答用户可能关心的内容。",
-        )
+        try:
+            content = _media_content(
+                file_bytes,
+                mime,
+                filename,
+                user_message or "请说明这份文件是什么，并回答用户可能关心的内容。",
+            )
+        except DocumentUnreadableError as exc:
+            logger.info("file chat has no readable body file=%s", filename)
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
+            yield {"type": "error", "message": str(exc)}
+            yield {"type": "done"}
+            return
         system_prompt = await self._effective_system_prompt(
             db, user.tenant_id, "chitchat"
         )
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": content},
+            {"role": "user", "content": _as_llm_message_content(content)},
         ]
         assistant_content = ""
         try:

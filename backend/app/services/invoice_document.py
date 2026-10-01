@@ -228,6 +228,60 @@ def _looks_like_pdf_source(value: str) -> bool:
     return hits >= 2
 
 
+# 单个汉字或中文标点。用来把「投 资 合 作」粘回「投资合作」
+_CJK_OR_PUNCT = re.compile(r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]")
+# 浏览器「打印为 PDF」留在页脚的时间戳和本地路径，不是合同条款
+_PRINT_FOOTER_LINE = re.compile(
+    r"^(?:file://\S+.*|\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}.*导出\s*PDF.*)$",
+    re.IGNORECASE,
+)
+
+
+def _collapse_glyph_spaces(line: str) -> str:
+    """只粘合被拆开的单字，词语之间的空格保留。
+
+    「投 资 合 作」里每个词只有一个字，应合成「投资合作」。
+    「第一条 投资金额」两边都是词，中间空格要留下。
+    """
+    tokens = [token for token in re.split(r"[ \t]+", line.strip()) if token]
+    words: list[str] = []
+    glyphs = ""
+    for token in tokens:
+        if len(token) == 1 and _CJK_OR_PUNCT.fullmatch(token):
+            glyphs += token
+            continue
+        if glyphs:
+            words.append(glyphs)
+            glyphs = ""
+        words.append(token)
+    if glyphs:
+        words.append(glyphs)
+    return " ".join(words)
+
+
+def _normalize_document_text(value: str) -> str:
+    """整理抽出的正文，让模型读到连续条款而不是排版碎片。
+
+    有的 PDF 把每个汉字单独定位，抽出来会变成「投 资 合 作」。
+    浏览器打印还会在页脚留下 file:// 和「导出 PDF」。这些都不是条款。
+    """
+    if not value:
+        return ""
+    kept = []
+    for line in value.splitlines():
+        stripped = line.strip()
+        if not stripped or _PRINT_FOOTER_LINE.match(stripped):
+            continue
+        kept.append(_collapse_glyph_spaces(stripped))
+    return "\n".join(kept).strip()
+
+
+def _text_richness(value: str) -> int:
+    """汉字越多越像正文。没有汉字时用总长度，避免英文合同被丢掉。"""
+    cjk = sum(1 for ch in value if "\u4e00" <= ch <= "\u9fff")
+    return cjk if cjk else len(value)
+
+
 def _usable_document_text(value: str) -> bool:
     """可以交给模型的正文。"""
     stripped = value.strip()
@@ -254,7 +308,7 @@ def _pdf_text_pypdf(file_bytes: bytes) -> str:
 
 
 def _pdf_text_pdfium(file_bytes: bytes) -> str:
-    """pypdf 抽空时再用 PDFium。中文 CID 字体有时只有它能还原。"""
+    """用 PDFium 抽文字。中文合同时它通常不会在每个汉字之间插入空格。"""
     if pdfium is None:
         return ""
     parts: list[str] = []
@@ -274,16 +328,27 @@ def _pdf_text_pdfium(file_bytes: bytes) -> str:
 
 
 def _pdf_text(file_bytes: bytes) -> str:
-    """抽出 PDF 可见文字。抽不到就返回空，改由页面渲染接手。"""
-    for extractor in (_pdf_text_pypdf, _pdf_text_pdfium):
+    """抽出 PDF 可见文字。两种引擎都试，留下整理后更完整的那一份。
+
+    抽不到就返回空，改由页面渲染接手。
+    PDFium 先试：中文合同时它通常不会在每个汉字之间插入空格。
+    """
+    best = ""
+    best_score = -1
+    for extractor in (_pdf_text_pdfium, _pdf_text_pypdf):
         try:
-            text = extractor(file_bytes)
+            raw = extractor(file_bytes)
         except Exception:
             logger.debug("pdf text extractor failed", exc_info=True)
             continue
-        if _usable_document_text(text):
-            return text.strip()
-    return ""
+        text = _normalize_document_text(raw)
+        if not _usable_document_text(text):
+            continue
+        score = _text_richness(text)
+        if score > best_score:
+            best = text
+            best_score = score
+    return best
 
 
 def _extract_file_text(file_bytes: bytes, mime: str, filename: str | None) -> str:
@@ -418,6 +483,87 @@ def _prepare_document(
     return [], ""
 
 
+def _as_llm_message_content(parts: list[dict]) -> str | list[dict]:
+    """只有文本时改成普通字符串。
+
+    部分 OpenAI 兼容接口对 content 数组处理不稳定；纯文本合同用 string 更稳。
+    带图片时仍返回数组。
+    """
+    if len(parts) == 1 and parts[0].get("type") == "text":
+        return str(parts[0].get("text") or "")
+    return parts
+
+
+def _match_labeled_value(text: str, labels: tuple[str, ...]) -> str | None:
+    """按「标签：值」抓第一处非空内容，值取到行尾。"""
+    for label in labels:
+        pattern = rf"{re.escape(label)}\s*[（(][^）)]*[）)]?\s*[:：]\s*(.+)$"
+        matched = re.search(pattern, text, re.MULTILINE)
+        if matched:
+            value = matched.group(1).strip()
+            if value:
+                return value
+        pattern = rf"{re.escape(label)}\s*[:：]\s*(.+)$"
+        matched = re.search(pattern, text, re.MULTILINE)
+        if matched:
+            value = matched.group(1).strip()
+            if value:
+                return value
+    return None
+
+
+def _parse_money_amount(text: str) -> float | None:
+    """从正文里找第一个像金额的数字（优先带 ¥/￥ 的）。"""
+    for pattern in (
+        r"[¥￥]\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)",
+        r"(?:人民币|金额|价款|转让价)[^\n]{0,24}?"
+        r"([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)\s*元",
+    ):
+        matched = re.search(pattern, text)
+        if not matched:
+            continue
+        try:
+            return float(matched.group(1).replace(",", ""))
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_sign_date(text: str) -> str | None:
+    """抓签字/签署日期，返回 YYYY-MM-DD。"""
+    matched = re.search(
+        r"(?:日期|签署日期|签订日期|签约日期)\s*[:：]?\s*"
+        r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
+        text,
+    )
+    if not matched:
+        matched = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", text)
+    if not matched:
+        return None
+    year, month, day = matched.groups()
+    return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+
+def _extract_contract_overview(text: str) -> dict:
+    """从已抽出的正文里填侧栏字段。抓不到就空着，不臆造。"""
+    if not text.strip():
+        return {}
+    overview: dict = {}
+    party_a = _match_labeled_value(text, ("甲方", "转让方", "出卖人", "卖方"))
+    party_b = _match_labeled_value(text, ("乙方", "受让方", "买受人", "买方"))
+    if party_a:
+        overview["party_a"] = party_a
+    if party_b:
+        overview["party_b"] = party_b
+    amount = _parse_money_amount(text)
+    if amount is not None:
+        overview["amount"] = amount
+    sign_date = _parse_sign_date(text)
+    if sign_date:
+        overview["sign_date"] = sign_date
+    return overview
+
+
 def _media_content(
     file_bytes: bytes, mime: str, filename: str | None, instruction: str
 ) -> list[dict]:
@@ -433,10 +579,11 @@ def _media_content(
             "没能读出这份文件的正文，无法继续审查。"
             "请上传未加密的 PDF 或 Word，或改用清晰的页面图片。"
         )
-    content.append(
-        {
-            "type": "text",
-            "text": f"文件《{filename or '附件'}》正文：\n{text[:_TEXT_LIMIT]}",
-        }
+    # 合成一条文本。有的兼容接口只读取第一条 content，拆成两段时正文会丢
+    content[0]["text"] = (
+        f"{instruction}\n\n"
+        f"【系统已完成文字提取】下面是文件《{filename or '附件'}》的可读正文，"
+        f"不是 PDF 源码，也不是二进制流。请直接审查条款：\n"
+        f"{text[:_TEXT_LIMIT]}"
     )
     return content

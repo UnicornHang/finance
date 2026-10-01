@@ -1,10 +1,11 @@
 import { contractApi } from '@/api/contract'
+import { fileApi } from '@/api/file'
 import { invoiceApi } from '@/api/invoice'
 import { readAttachments } from '@/lib/messages'
 import { useUIStore } from '@/stores/uiStore'
 import type { Message, MessageAttachment } from '@/types'
 
-/** 当前会话最后一轮若是发票或合同，切回来时要重开的侧栏。 */
+/** 当前会话里某一轮发票或合同，可点开右侧栏查看。 */
 export type HistoryDocumentTurn =
   | { type: 'invoice'; attachment: MessageAttachment; reply: string | null }
   | { type: 'contract'; attachment: MessageAttachment; reply: string | null }
@@ -13,7 +14,7 @@ export type HistoryDocumentTurn =
  * 附件属于发票还是合同。
  * 已有分类结果时以 intent 为准；只有历史数据没写 intent 时，才按文件名兜底。
  */
-function documentKind(attachment: MessageAttachment): 'invoice' | 'contract' | null {
+export function documentKind(attachment: MessageAttachment): 'invoice' | 'contract' | null {
   if (attachment.intent === 'invoice' || attachment.intent === 'contract') {
     return attachment.intent
   }
@@ -29,27 +30,72 @@ function isInFlight(status: string | null | undefined): boolean {
   return status === 'pending' || status === 'running'
 }
 
+/** 同一附件：优先 id，其次 file_hash。 */
+function sameAttachment(a: MessageAttachment, b: MessageAttachment): boolean {
+  if (a.id && b.id) return a.id === b.id
+  return Boolean(a.file_hash && a.file_hash === b.file_hash)
+}
+
 /**
- * 看最后一条用户消息，而不是最后一条助手回复。
- * 助手回复只是这一轮的说明；发票/合同附件挂在用户消息上。
- * 用户后来又发了普通文字，则最后一轮不再是单据，返回 null。
+ * 列出本会话全部可查看的发票/合同轮次（时间正序）。
+ * 多份合同时右侧栏默认只开最新一份，其余靠点击附件切换。
  */
-export function latestHistorySidePanel(messages: Message[]): HistoryDocumentTurn | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
+export function listHistoryDocumentTurns(messages: Message[]): HistoryDocumentTurn[] {
+  const turns: HistoryDocumentTurn[] = []
+  for (let index = 0; index < messages.length; index += 1) {
     const message = messages[index]
     if (message.role !== 'user') continue
 
-    const attachment = readAttachments(message).find((item) => documentKind(item) !== null)
-    if (!attachment || attachment.recognize_status === 'failed') return null
-
-    const type = documentKind(attachment)
-    if (type !== 'invoice' && type !== 'contract') return null
-
-    const reply =
-      messages.slice(index + 1).find((item) => item.role === 'assistant')?.content ?? null
-    return { type, attachment, reply }
+    for (const attachment of readAttachments(message)) {
+      if (attachment.recognize_status === 'failed') continue
+      const type = documentKind(attachment)
+      if (type !== 'invoice' && type !== 'contract') continue
+      const reply =
+        messages.slice(index + 1).find((item) => item.role === 'assistant')?.content ?? null
+      turns.push({ type, attachment, reply })
+    }
   }
-  return null
+  return turns
+}
+
+/**
+ * 看最后一条带发票/合同附件的用户消息。
+ * 用户后来又发了普通文字，则仍返回最近一份单据（便于重开会话）。
+ */
+export function latestHistorySidePanel(messages: Message[]): HistoryDocumentTurn | null {
+  const turns = listHistoryDocumentTurns(messages)
+  return turns.length ? turns[turns.length - 1] : null
+}
+
+/** 按某个附件找回对应轮次（含紧随其后的助手审查摘要）。 */
+export function findDocumentTurnForAttachment(
+  messages: Message[],
+  attachment: MessageAttachment,
+): HistoryDocumentTurn | null {
+  return (
+    listHistoryDocumentTurns(messages).find((turn) =>
+      sameAttachment(turn.attachment, attachment),
+    ) ?? null
+  )
+}
+
+/** 打开某一轮发票/合同的右侧栏。 */
+export async function openHistoryDocument(
+  turn: HistoryDocumentTurn,
+  isCancelled: () => boolean = () => false,
+): Promise<void> {
+  switch (turn.type) {
+    case 'invoice':
+      await restoreInvoice(turn.attachment, isCancelled)
+      return
+    case 'contract':
+      await restoreContract(turn.attachment, turn.reply, isCancelled)
+      return
+    default: {
+      const unreachable: never = turn
+      return unreachable
+    }
+  }
 }
 
 /** 按历史消息恢复右侧栏；会话已经切走时 isCancelled 为 true，不再写入。 */
@@ -60,22 +106,10 @@ export async function restoreSidePanelFromHistory(
   const target = latestHistorySidePanel(messages)
   if (isCancelled()) return
   if (!target) {
-    useUIStore.getState().closeSidePanel()
+    useUIStore.getState().clearSidePanel()
     return
   }
-
-  switch (target.type) {
-    case 'invoice':
-      await restoreInvoice(target.attachment, isCancelled)
-      return
-    case 'contract':
-      await restoreContract(target.attachment, target.reply, isCancelled)
-      return
-    default: {
-      const unreachable: never = target
-      return unreachable
-    }
-  }
+  await openHistoryDocument(target, isCancelled)
 }
 
 /** 用发票 id 或文件哈希把识别结果填回侧栏。 */
@@ -83,7 +117,7 @@ async function restoreInvoice(
   attachment: MessageAttachment,
   isCancelled: () => boolean,
 ): Promise<void> {
-  const { openSidePanel, closeSidePanel } = useUIStore.getState()
+  const { openSidePanel, clearSidePanel } = useUIStore.getState()
   const fileHash = attachment.file_hash
   const processing = {
     status: 'processing' as const,
@@ -93,7 +127,7 @@ async function restoreInvoice(
 
   if (isInFlight(attachment.recognize_status)) {
     if (!fileHash) {
-      closeSidePanel()
+      clearSidePanel()
       return
     }
     openSidePanel('invoice', processing)
@@ -108,7 +142,7 @@ async function restoreInvoice(
       return
     }
     if (!fileHash) {
-      closeSidePanel()
+      clearSidePanel()
       return
     }
     const preview = await invoiceApi.previewByHash(fileHash)
@@ -125,19 +159,19 @@ async function restoreInvoice(
       openSidePanel('invoice', processing)
       return
     }
-    closeSidePanel()
+    clearSidePanel()
   } catch {
-    if (!isCancelled()) closeSidePanel()
+    if (!isCancelled()) clearSidePanel()
   }
 }
 
-/** 有合同档案就打开档案；否则用这一轮的助手回复作为审查摘要。 */
+/** 有合同档案就打开档案；否则用附件上的抽取字段 + 助手回复恢复侧栏。 */
 async function restoreContract(
   attachment: MessageAttachment,
   reply: string | null,
   isCancelled: () => boolean,
 ): Promise<void> {
-  const { openSidePanel, closeSidePanel } = useUIStore.getState()
+  const { openSidePanel, clearSidePanel } = useUIStore.getState()
   if (isInFlight(attachment.recognize_status)) {
     openSidePanel('contract', {
       status: 'processing',
@@ -161,12 +195,30 @@ async function restoreContract(
 
   if (isCancelled()) return
   if (!reply && !attachment.original_filename) {
-    closeSidePanel()
+    clearSidePanel()
     return
   }
+
+  // 优先用审查时落库的字段；老消息没有则按文件再抽一次
+  let extract = attachment.extract_result ?? null
+  const missingFields =
+    !extract?.party_a && !extract?.party_b && extract?.amount == null && !extract?.sign_date
+  if (missingFields && attachment.id) {
+    try {
+      extract = await fileApi.contractExtract(attachment.id)
+    } catch {
+      // 补抽失败仍展示摘要，字段留空
+    }
+  }
+  if (isCancelled()) return
+
   openSidePanel('contract', {
     status: 'ready',
-    contract_name: attachment.original_filename ?? '',
+    contract_name: extract?.contract_name || attachment.original_filename || '',
+    party_a: extract?.party_a ?? null,
+    party_b: extract?.party_b ?? null,
+    sign_date: extract?.sign_date ?? null,
+    amount: extract?.amount ?? null,
     file_url: attachment.file_url,
     file_hash: attachment.file_hash,
     review_result: reply ? { summary: reply, violations: [] } : undefined,

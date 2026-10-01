@@ -16,6 +16,7 @@ from app.services.invoice_document import (
     DocumentUnreadableError,
     _extract_file_text,
     _media_content,
+    _normalize_document_text,
     _prepare_document,
 )
 
@@ -130,6 +131,67 @@ def test_legacy_doc_extracts_chinese_runs() -> None:
     text = _extract_file_text(blob, "application/msword", "借款合同.doc")
     assert "借款合同" in text
     assert "借款金额" in text
+
+
+def test_spaced_cjk_and_print_footer_become_contract_text() -> None:
+    """浏览器打印的 PDF 常把标题拆成「投 资」，并带上 file:// 页脚。"""
+    raw = (
+        "投 资 合 作 协 议\n"
+        "甲 方 （ 投 资 方 ） ： 示例公司\n"
+        "file:///C:/tmp/a.html 1/2\n"
+        "2026/9/27 12:04 财务合同批量导出 PDF\n"
+        "甲方出资人民币壹万元。"
+    )
+    text = _normalize_document_text(raw + "\n第 一 条  投 资 金 额\n第一条 投资金额")
+    assert "投资合作协议" in text
+    assert "甲方（投资方）" in text
+    assert "示例公司" in text
+    assert "第一条 投资金额" in text
+    assert "甲方出资人民币壹万元。" in text
+    assert "file://" not in text
+    assert "导出" not in text
+
+
+def test_media_content_keeps_body_in_single_text_part() -> None:
+    """正文必须和指令在同一条文本里，避免接口只读第一条时丢掉合同。"""
+    sentence = "The borrower shall repay the loan amount on the due date"
+    pdf = _text_pdf(sentence, compress=True)
+    content = _media_content(pdf, "application/pdf", "借款合同.pdf", "请审查这份合同")
+    texts = [part.get("text", "") for part in content if part.get("type") == "text"]
+    assert len(texts) == 1
+    assert "borrower" in texts[0]
+    assert "请审查这份合同" in texts[0]
+
+
+def test_text_only_content_flattens_to_string() -> None:
+    """纯文本合同应送给模型字符串，而不是单元素 content 数组。"""
+    from app.services.invoice_document import _as_llm_message_content
+
+    sentence = "The borrower shall repay the loan amount on the due date"
+    pdf = _text_pdf(sentence, compress=True)
+    parts = _media_content(pdf, "application/pdf", "借款合同.pdf", "请审查")
+    flat = _as_llm_message_content(parts)
+    assert isinstance(flat, str)
+    assert "borrower" in flat
+    assert "系统已完成文字提取" in flat
+
+
+def test_extract_contract_overview_from_chinese_body() -> None:
+    """侧栏字段从正文标签抓取，不依赖模型再抽一遍。"""
+    from app.services.invoice_document import _extract_contract_overview
+
+    text = (
+        "股权转让协议\n"
+        "甲方（转让方）：张明\n"
+        "乙方（受让方）：深圳市星辰科技有限公司\n"
+        "人民币叁佰万元整（¥3,000,000.00）。\n"
+        "日期：2026年9月27日\n"
+    )
+    overview = _extract_contract_overview(text)
+    assert overview["party_a"] == "张明"
+    assert overview["party_b"] == "深圳市星辰科技有限公司"
+    assert overview["amount"] == 3000000.0
+    assert overview["sign_date"] == "2026-09-27"
 
 
 def test_unreadable_bytes_do_not_call_model_with_placeholder() -> None:

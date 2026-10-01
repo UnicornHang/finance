@@ -27,13 +27,18 @@ interface UIState {
   sidebarCollapsed: boolean
 
   openSidePanel: (type: 'invoice' | 'contract', data: SidePanelData) => void
+  /** 只收起面板，保留内容，便于「重新打开」 */
   closeSidePanel: () => void
+  /** 切会话或归档完成后清空，侧栏不再可重开 */
+  clearSidePanel: () => void
+  /** 用当前缓存的 type/data 再次展开 */
+  reopenSidePanel: () => void
   setStreaming: (streaming: boolean) => void
   setSidebarCollapsed: (collapsed: boolean) => void
   toggleSidebar: () => void
 }
 
-export const useUIStore = create<UIState>((set) => ({
+export const useUIStore = create<UIState>((set, get) => ({
   sidePanelOpen: false,
   sidePanelType: null,
   sidePanelData: null,
@@ -42,8 +47,15 @@ export const useUIStore = create<UIState>((set) => ({
 
   openSidePanel: (type, data) =>
     set({ sidePanelOpen: true, sidePanelType: type, sidePanelData: data }),
-  closeSidePanel: () =>
+  closeSidePanel: () => set({ sidePanelOpen: false }),
+  clearSidePanel: () =>
     set({ sidePanelOpen: false, sidePanelType: null, sidePanelData: null }),
+  reopenSidePanel: () => {
+    const { sidePanelType, sidePanelData } = get()
+    if (sidePanelType && sidePanelData != null) {
+      set({ sidePanelOpen: true })
+    }
+  },
   setStreaming: (streaming) => set({ streaming }),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   toggleSidebar: () =>

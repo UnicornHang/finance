@@ -47,4 +47,16 @@ export const fileApi = {
         params: { file_url: fileUrl, expires },
       })
       .then((r) => r.data),
+
+  /** 重开会话时补齐合同侧栏字段（甲方/乙方/金额/日期） */
+  contractExtract: (fileId: string) =>
+    apiClient
+      .get<{
+        contract_name?: string | null
+        party_a?: string | null
+        party_b?: string | null
+        sign_date?: string | null
+        amount?: number | null
+      }>(`/files/${fileId}/contract-extract`)
+      .then((r) => r.data),
 }

@@ -146,3 +146,17 @@ async def presign_file(
         raise BusinessError(f"生成预览链接失败：{exc}", code="PRESIGN_FAILED") from exc
 
     return {"url": url, "expires_in": expires}
+
+
+@router.get("/{file_id}/contract-extract")
+async def contract_extract(
+    file_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, Any]:
+    """重开会话时补齐合同侧栏字段。已落库则直接返回，否则从文件再抽一次。"""
+    from app.services.chat_service import _download_bytes
+
+    return await chat_file_service.ensure_contract_extract(
+        db, user, file_id, download_bytes=_download_bytes
+    )

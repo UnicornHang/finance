@@ -1,11 +1,16 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { Bot, Sparkles, Upload, FileText } from 'lucide-react'
 
 import { useSessionStore, useCurrentMessages } from '@/stores/sessionStore'
 import { useUIStore } from '@/stores/uiStore'
 import { sessionApi } from '@/api/chat'
 import { mergeMessages } from '@/lib/messages'
-import { restoreSidePanelFromHistory } from '@/lib/sidePanelHistory'
+import {
+  findDocumentTurnForAttachment,
+  openHistoryDocument,
+  restoreSidePanelFromHistory,
+} from '@/lib/sidePanelHistory'
+import type { MessageAttachment } from '@/types'
 import { MessageBubble } from './MessageBubble'
 
 const QUICK_PROMPTS = [
@@ -75,13 +80,13 @@ export function ChatWindow() {
 
   useEffect(() => {
     if (!currentSessionId) {
-      useUIStore.getState().closeSidePanel()
+      useUIStore.getState().clearSidePanel()
       return
     }
     let cancelled = false
     const sessionId = currentSessionId
     // 先收起上一会话的侧栏，避免发票表单留在普通对话上
-    useUIStore.getState().closeSidePanel()
+    useUIStore.getState().clearSidePanel()
     sessionApi
       .messages(sessionId)
       .then(async (msgs) => {
@@ -102,6 +107,16 @@ export function ChatWindow() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages])
+
+  /** 点某份合同/发票附件，打开对应审查侧栏（同一会话可切换多份）。 */
+  const handleOpenDocument = useCallback(
+    (attachment: MessageAttachment) => {
+      const turn = findDocumentTurnForAttachment(messages, attachment)
+      if (!turn) return
+      void openHistoryDocument(turn)
+    },
+    [messages],
+  )
 
   if (!currentSessionId) {
     return (
@@ -126,7 +141,11 @@ export function ChatWindow() {
       <div className="mx-auto max-w-3xl px-6 py-8">
         <div className="space-y-5">
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              onOpenDocument={handleOpenDocument}
+            />
           ))}
         </div>
       </div>

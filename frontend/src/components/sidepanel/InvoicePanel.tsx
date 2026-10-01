@@ -82,7 +82,7 @@ function calcConfidence(invoice: InvoiceInput | undefined): number | null {
 }
 
 export function InvoicePanel() {
-  const { sidePanelData, closeSidePanel, openSidePanel } = useUIStore()
+  const { sidePanelData, closeSidePanel, clearSidePanel, openSidePanel } = useUIStore()
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [pollAttempts, setPollAttempts] = useState(0)
@@ -190,7 +190,7 @@ export function InvoicePanel() {
         toast.success('已归档')
       }
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
-      closeSidePanel()
+      clearSidePanel()
     } catch (err: unknown) {
       const msg = readApiMessage(err) || '归档失败'
       setSubmitError(msg)

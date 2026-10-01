@@ -133,9 +133,57 @@ class ChatFileService:
             "intent": row.intent,
             "recognize_status": row.recognize_status,
             "recognize_error": row.recognize_error,
+            "extract_result": row.extract_result,
             "invoice_id": str(row.invoice_id) if row.invoice_id else None,
             "contract_id": str(row.contract_id) if row.contract_id else None,
         }
+
+    async def ensure_contract_extract(
+        self,
+        db: AsyncSession,
+        user: User,
+        file_id: UUID,
+        *,
+        download_bytes,
+    ) -> dict[str, Any]:
+        """返回合同侧栏字段；库里没有时从文件再抽一次并写回。"""
+        from app.services.invoice_document import (
+            DocumentUnreadableError,
+            _extract_contract_overview,
+            _guess_mime,
+            _prepare_document,
+        )
+
+        row = await db.get(ChatFile, file_id)
+        if row is None or row.tenant_id != user.tenant_id:
+            raise BusinessError("附件不存在", code="FILE_NOT_FOUND")
+        if row.user_id != user.id:
+            raise ForbiddenError("无权使用该附件", code="FILE_FORBIDDEN")
+
+        cached = row.extract_result if isinstance(row.extract_result, dict) else None
+        if cached and (cached.get("party_a") or cached.get("party_b") or cached.get("amount")):
+            return {
+                "contract_name": cached.get("contract_name") or row.original_filename,
+                **{k: cached.get(k) for k in ("party_a", "party_b", "sign_date", "amount") if cached.get(k) is not None},
+            }
+
+        file_bytes = download_bytes(row.file_url)
+        mime = _guess_mime(file_bytes, row.content_type, row.original_filename)
+        try:
+            _images, body_text = _prepare_document(file_bytes, mime, row.original_filename)
+            if not body_text and not _images:
+                raise DocumentUnreadableError("未能抽出合同正文")
+        except DocumentUnreadableError as exc:
+            raise BusinessError(str(exc), code="DOCUMENT_UNREADABLE") from exc
+
+        overview = _extract_contract_overview(body_text)
+        extract_result = {
+            "contract_name": row.original_filename,
+            **overview,
+        }
+        row.extract_result = extract_result
+        await db.commit()
+        return extract_result
 
     def prompt_hint(self, rows: list[ChatFile]) -> str:
         """拼进后续对话的附件摘要，让模型知道这句话挂了哪个文件。"""
