@@ -104,7 +104,10 @@ export interface Contract {
   review_result: { violations: Violation[]; risk_level: string; summary: string } | null
   risk_level: 'high' | 'medium' | 'low' | null
   status: string
+  file_url: string | null
+  file_hash: string | null
   created_at: string
+  updated_at?: string | null
 }
 
 export interface Violation {

@@ -461,7 +461,7 @@ function KbPreviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex gap-2 border-b border-line-subtle pb-2">
+        <div className="mt-4 flex gap-2 border-b border-line-subtle pb-2">
           <Button
             type="button"
             size="sm"

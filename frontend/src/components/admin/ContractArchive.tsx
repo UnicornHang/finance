@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, FileText, Search } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -13,12 +14,27 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { SectionHeader } from '@/components/ui/stat'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Table, TBody, TD, TH, THead, TR, EmptyState, Toolbar } from '@/components/ui/table'
 import { RiskBadge } from '@/components/sidepanel/RiskBadge'
 import { contractApi } from '@/api/contract'
+import { fileApi } from '@/api/file'
+import type { Contract } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
+import { ContractDetailDialog } from './ContractDetailDialog'
+
 export function ContractArchive() {
+  const queryClient = useQueryClient()
   const { data: contracts, isLoading } = useQuery({
     queryKey: ['contracts'],
     queryFn: () => contractApi.list(),
@@ -26,6 +42,35 @@ export function ContractArchive() {
 
   const [search, setSearch] = useState('')
   const [riskFilter, setRiskFilter] = useState('')
+  const [detail, setDetail] = useState<Contract | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
+  const detailQuery = useQuery({
+    queryKey: ['contract', detail?.id],
+    queryFn: () => contractApi.get(detail!.id),
+    enabled: !!detail,
+  })
+
+  // 合同原件走通用预签名，无独立 /contracts/{id}/file
+  const fileQuery = useQuery({
+    queryKey: ['contract-file', detail?.id, detailQuery.data?.file_url],
+    queryFn: () => fileApi.presign(detailQuery.data!.file_url!),
+    enabled: !!detail && !!detailQuery.data?.file_url,
+    retry: false,
+  })
+
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => contractApi.remove(id),
+    onSuccess: () => {
+      toast.success('已删除')
+      setDetail(null)
+      setPendingDelete(null)
+      queryClient.invalidateQueries({ queryKey: ['contracts'] })
+    },
+    onError: () => {
+      toast.error('删除失败')
+    },
+  })
 
   const list = (contracts || []).filter((c) => {
     if (riskFilter && c.risk_level !== riskFilter) return false
@@ -115,8 +160,14 @@ export function ContractArchive() {
               </THead>
               <TBody>
                 {list.map((c) => (
-                  <TR key={c.id}>
-                    <TD className="font-semibold">{c.contract_name || '-'}</TD>
+                  <TR
+                    key={c.id}
+                    className="cursor-pointer"
+                    onClick={() => setDetail(c)}
+                  >
+                    <TD className="font-semibold text-primary hover:underline">
+                      {c.contract_name || '-'}
+                    </TD>
                     <TD className="text-ink-secondary">{c.party_a || '-'}</TD>
                     <TD className="text-ink-secondary">{c.party_b || '-'}</TD>
                     <TD className="text-right tabular-nums font-semibold">
@@ -135,6 +186,51 @@ export function ContractArchive() {
           )}
         </CardContent>
       </Card>
+
+      <ContractDetailDialog
+        preview={detail}
+        contract={detailQuery.data}
+        loading={detailQuery.isLoading}
+        fileUrl={fileQuery.data?.url}
+        fileLoading={fileQuery.isFetching}
+        deleting={removeMutation.isPending}
+        onClose={() => setDetail(null)}
+        onRequestFile={() => {
+          void fileQuery.refetch()
+        }}
+        onRequestDelete={() => {
+          if (!detail) return
+          setPendingDelete(detail.id)
+        }}
+      />
+
+      <AlertDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => {
+          if (!open && !removeMutation.isPending) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定删除该合同？</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除后该合同将从档案列表中移除。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removeMutation.isPending}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={removeMutation.isPending}
+              onClick={() => {
+                if (!pendingDelete) return
+                removeMutation.mutate(pendingDelete)
+              }}
+            >
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
