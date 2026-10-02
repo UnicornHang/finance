@@ -187,14 +187,16 @@ class MilvusKbStore:
             return hits
         metric = settings.milvus_metric_type.upper()
         for hit in results[0]:
-            distance = float(hit.distance)
+            raw = float(hit.distance)
             if metric == "COSINE":
-                # Milvus COSINE：distance = 1 - cosine_similarity，范围约 [0, 2]
-                score = max(0.0, 1.0 - distance)
+                # Milvus COSINE：hit.distance 本身就是相似度（越大越相关，约 [-1, 1]）
+                # 切勿再做 1-distance，否则会把排序完全反转
+                score = max(0.0, raw)
             elif metric == "IP":
-                score = distance
+                score = raw
             else:
-                score = 1.0 / (1.0 + distance)
+                # L2 等：distance 越小越近
+                score = 1.0 / (1.0 + raw)
             entity = hit.entity
             hits.append(
                 {
