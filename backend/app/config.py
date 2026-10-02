@@ -83,6 +83,20 @@ class Settings(BaseSettings):
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_dimension: int = 1536
 
+    # ---- Milvus（企业级向量库，知识库主路径）----
+    milvus_enabled: bool = True
+    milvus_host: str = "127.0.0.1"
+    milvus_port: int = 19530
+    milvus_user: str = ""
+    milvus_password: str = ""
+    milvus_collection: str = "finance_kb_chunks"
+    milvus_index_type: str = "IVF_FLAT"
+    milvus_metric_type: str = "COSINE"
+    milvus_nlist: int = 1024
+    milvus_nprobe: int = 16
+    # 是否同时把向量写入 Postgres（仅作 Milvus 故障降级备份，默认关闭）
+    kb_store_pg_embedding: bool = False
+
     # ---- Celery ----
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"

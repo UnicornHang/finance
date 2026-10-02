@@ -22,6 +22,7 @@ from app.services.invoice_document import (
 )
 from app.services.llm_config_service import llm_config_service
 from app.services.llm_service import llm_service
+from app.services.rag_service import rag_service
 from app.services.session_service import session_service
 
 if TYPE_CHECKING:
@@ -496,11 +497,26 @@ class ChatService:
             overview.get("party_a"),
             overview.get("amount"),
         )
+        # 知识库规则（有向量块才注入；未索引时不阻断审查）
+        rules_block = ""
+        try:
+            rules = await rag_service.retrieve_rules(db, str(user.tenant_id))
+            if rules:
+                numbered = "\n".join(f"{i + 1}. {r.strip()}" for i, r in enumerate(rules) if r.strip())
+                rules_block = (
+                    "\n\n以下合规规则来自企业知识库，请优先对照检查，并在结论中引用相关规则要点：\n"
+                    f"{numbered}\n"
+                )
+                logger.info("contract review injected %s rule chunks", len(rules))
+        except Exception:
+            logger.exception("contract review RAG rules skipped")
+
         instruction = (
             "系统已经从合同文件中提取出可读正文，并放在下方。"
             "请直接用中文审查主要风险和需要关注的条款。"
             "禁止声称内容是 PDF 源码、二进制流、FlateDecode、endstream 或无法阅读；"
             "若正文较短，就基于已有条款做审查，不要讨论文件格式。"
+            f"{rules_block}"
         )
         if user_message:
             instruction += f"\n用户补充：{user_message}"
@@ -516,18 +532,17 @@ class ChatService:
             return
         user_content = _as_llm_message_content(content)
         assistant_content = ""
+        system_prompt = (
+            "你是合同审查助手。用户消息里的正文已由系统从 PDF/Word 抽出，"
+            "必须当作有效合同文本审查，不得拒绝或讨论文件格式。"
+            "若提供了知识库合规规则，请对照规则指出风险，并区分「规则命中」与「一般法务建议」。"
+            "审查完成后提醒用户在右侧核对字段并点击确认归档；"
+            "不要声称已自动归档。"
+        )
         try:
             async for chunk in llm_service.stream(
                 [
-                    {
-                        "role": "system",
-                        "content": (
-                            "你是合同审查助手。用户消息里的正文已由系统从 PDF/Word 抽出，"
-                            "必须当作有效合同文本审查，不得拒绝或讨论文件格式。"
-                            "审查完成后提醒用户在右侧核对字段并点击确认归档；"
-                            "不要声称已自动归档。"
-                        ),
-                    },
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 scene="contract_review",

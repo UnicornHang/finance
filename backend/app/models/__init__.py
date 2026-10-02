@@ -316,7 +316,8 @@ class KbChunk(Base):
     tenant_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(1536))
+    # 企业主路径向量在 Milvus；此列可空，仅作可选降级备份
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
     token_count: Mapped[int | None] = mapped_column(Integer)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))

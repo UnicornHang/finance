@@ -154,7 +154,7 @@ async def seed_kb_default_docs():
 7. **不可抗力**：建议包含不可抗力条款
 8. **知识产权**：涉及技术/软件的合同需明确知识产权归属
 """,
-                status="active",
+                status="pending",  # 需在管理端点「重新索引」完成向量化
                 version=1,
             ),
             KbDocument(
@@ -175,7 +175,7 @@ async def seed_kb_default_docs():
 2. 部门负责人审批
 3. 出差后 7 天内提交报销
 """,
-                status="active",
+                status="pending",
                 version=1,
             ),
         ]

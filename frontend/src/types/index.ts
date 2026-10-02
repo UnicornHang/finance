@@ -158,6 +158,9 @@ export interface KbDocument {
   chunk_count: number
   version: number
   created_at: string
+  error_message?: string | null
+  source_file?: string | null
+  tenant_id?: string | null
 }
 
 // SSE 事件类型

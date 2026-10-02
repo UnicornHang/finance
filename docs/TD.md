@@ -793,12 +793,14 @@ async def review_contract(text: str, tenant_id: str) -> dict:
 
 | 项 | 选型 | 理由 |
 |---|---|---|
-| 向量库 | pgvector | 与 PostgreSQL 一体，运维简单 |
-| 备选 | Milvus | 大规模时 |
-| Embedding | text-embedding-3-small / bge-m3 | 中文效果好 |
-| 重排 | bge-reranker | 提升精度 |
+| 向量库 | **Milvus**（主） | 企业级 Agent：专业 ANN、独立扩缩、标量过滤 |
+| 元数据/正文 | PostgreSQL | 事务、租户、关键词、回表取 content |
+| 降级备份 | pgvector（可选） | `KB_STORE_PG_EMBEDDING=true` 时双写 |
+| Embedding | **qwen3.7-text-embedding**（通义，默认 1024 维） | 国内可达、中英检索强；可换 OpenAI / 本地 bge |
+| 重排 | bge-reranker | 提升精度（演进） |
 | 切分 | 递归切分 + 语义切分 | 平衡 |
-| 检索 | 向量 + 关键词混合 | 提升召回 |
+| 检索 | Milvus 向量 + PG 关键词混合 | 提升召回 |
+| 详设 | [RAG-KB-Design.md](./RAG-KB-Design.md) | 架构/ADR/替代方案 |
 
 ### 9.2 索引流程
 

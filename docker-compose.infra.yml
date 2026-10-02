@@ -1,5 +1,5 @@
 # 本机有docker优先使用docker，没有则使用docker-compose
-# 仅基础设施：PostgreSQL(pgvector) + Redis + MinIO
+# 仅基础设施：PostgreSQL(pgvector) + Redis + MinIO + Milvus
 #
 # 用途：Windows 本机开发时把重依赖放进 VMware 里的 Ubuntu 虚拟机，
 #       后端 / Celery / 前端仍在 Windows 本机运行，通过 VM IP 连接。
@@ -8,6 +8,7 @@
 #   docker compose -f docker-compose.infra.yml up -d
 #
 # 注意：init.sql 需与本文件同目录，首次初始化数据库时自动创建扩展。
+# Milvus gRPC：19530（本机 .env 设 MILVUS_HOST=<VM-IP>）
 
 services:
   postgres:
@@ -64,7 +65,76 @@ services:
       timeout: 10s
       retries: 3
 
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.16
+    container_name: finance-infra-milvus-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: >
+      etcd -advertise-client-urls=http://127.0.0.1:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
+    volumes:
+      - milvus_etcd_data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus-minio:
+    image: quay.io/minio/minio:latest
+    container_name: finance-infra-milvus-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - milvus_minio_data:/minio_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    container_name: finance-infra-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MINIO_ACCESS_KEY_ID: minioadmin
+      MINIO_SECRET_ACCESS_KEY: minioadmin
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      milvus-etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  milvus_etcd_data:
+  milvus_minio_data:
+  milvus_data:
