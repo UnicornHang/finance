@@ -7,6 +7,7 @@ import { Dashboard } from '@/components/admin/Dashboard'
 import { InvoiceArchive } from '@/components/admin/InvoiceArchive'
 import { ContractArchive } from '@/components/admin/ContractArchive'
 import { KnowledgeBase } from '@/components/admin/KnowledgeBase'
+import { KnowledgeBaseDetail } from '@/components/admin/KnowledgeBaseDetail'
 import { UserManage } from '@/components/admin/UserManage'
 import { LLMSettings } from '@/components/admin/LLMSettings'
 import { useAuthStore } from '@/stores/authStore'
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="invoices" element={<InvoiceArchive />} />
         <Route path="contracts" element={<ContractArchive />} />
         <Route path="kb" element={<KnowledgeBase />} />
+        <Route path="kb/:id" element={<KnowledgeBaseDetail />} />
         <Route path="users" element={<UserManage />} />
         <Route path="llm" element={<LLMSettings />} />
       </Route>

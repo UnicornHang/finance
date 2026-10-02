@@ -28,6 +28,9 @@ from app.services.storage_service import storage_service
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# 对话附件上限：10MB（与前端 InputBox 一致）
+MAX_CHAT_UPLOAD_BYTES = 10 * 1024 * 1024
+
 
 def _parse_s3_url(s3_url: str) -> tuple[str, str]:
     """s3://bucket/key → (bucket, key)。"""
@@ -70,6 +73,11 @@ async def upload_file(
         raise BusinessError(f"读取文件失败：{exc}", code="UPLOAD_READ_FAILED")
     if not content:
         raise BusinessError("文件内容为空", code="EMPTY_FILE")
+    if len(content) > MAX_CHAT_UPLOAD_BYTES:
+        raise BusinessError(
+            "文件超过 10MB，请压缩后重新上传",
+            code="FILE_TOO_LARGE",
+        )
 
     file_hash = hashlib.sha256(content).hexdigest()
     original_filename = file.filename or "upload.bin"

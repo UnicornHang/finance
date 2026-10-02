@@ -36,12 +36,12 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 
 const NAV_ITEMS = [
-  { to: '', label: '数据概览', icon: LayoutDashboard },
-  { to: 'invoices', label: '发票归档', icon: Receipt },
-  { to: 'contracts', label: '合同归档', icon: FileText },
-  { to: 'kb', label: '知识库', icon: BookOpen },
-  { to: 'users', label: '用户管理', icon: Users },
-  { to: 'llm', label: 'LLM 设置', icon: Cpu },
+  { to: '/admin', label: '数据概览', icon: LayoutDashboard, end: true },
+  { to: '/admin/invoices', label: '发票归档', icon: Receipt, end: false },
+  { to: '/admin/contracts', label: '合同归档', icon: FileText, end: false },
+  { to: '/admin/kb', label: '知识库', icon: BookOpen, end: false },
+  { to: '/admin/users', label: '用户管理', icon: Users, end: false },
+  { to: '/admin/llm', label: 'LLM 设置', icon: Cpu, end: false },
 ]
 
 const ROLE_LABEL: Record<string, string> = {
@@ -81,22 +81,22 @@ export function Admin() {
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === ''}
-              className={({ isActive }) =>
-                cn(
-                  'relative flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5',
-                  'text-body-md font-medium transition-colors',
-                  isActive
-                    ? 'bg-primary-tint text-primary'
-                    : 'text-ink-secondary hover:bg-surface-inset hover:text-ink',
-                )
-              }
-            >
-              <item.icon className="h-4 w-4 shrink-0" />
-              <span className="whitespace-nowrap">{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
+              end={item.end}
+                className={({ isActive }) =>
+                  cn(
+                    'relative flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5',
+                    'text-body-md font-medium transition-colors',
+                    isActive
+                      ? 'bg-primary-tint text-primary'
+                      : 'text-ink-secondary hover:bg-surface-inset hover:text-ink',
+                  )
+                }
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                <span className="whitespace-nowrap">{item.label}</span>
+              </NavLink>
+            ))}
+          </nav>
 
         {/* 右：搜索 + 通知 + 帮助 + 用户 */}
         <div className="flex shrink-0 items-center gap-2">
@@ -183,7 +183,7 @@ export function Admin() {
       </header>
 
       {/* ============ 主体：侧边栏 + 内容 ============ */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* 左侧 Aside (Figma: 1:4) */}
         <aside
           className={cn(
@@ -195,7 +195,7 @@ export function Admin() {
               <NavLink
                 key={item.to}
                 to={item.to}
-                end={item.to === ''}
+                end={item.end}
                 className={({ isActive }) =>
                   cn(
                     'flex items-center gap-3 rounded-md px-3 py-2',
@@ -238,10 +238,12 @@ export function Admin() {
           </div>
         </aside>
 
-        {/* 主区域 */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="px-8 py-8">
-            <Outlet />
+        {/* 主区域：绝对定位撑满；padding 不在滚动层，避免详情 h-full 被撑出外层滚动条 */}
+        <main className="relative min-h-0 flex-1 overflow-hidden">
+          <div className="absolute inset-0 flex flex-col p-8">
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <Outlet />
+            </div>
           </div>
         </main>
       </div>

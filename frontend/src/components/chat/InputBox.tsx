@@ -10,6 +10,9 @@ import { cn } from '@/lib/utils'
 
 type UploadStatus = 'idle' | 'uploading' | 'uploaded' | 'error'
 
+/** 对话附件上限：10MB（与后端 `/files/upload` 一致） */
+const MAX_CHAT_FILE_BYTES = 10 * 1024 * 1024
+
 /**
  * 输入框
  * - 多行自适应
@@ -41,23 +44,33 @@ export function InputBox() {
     ta.style.height = Math.min(ta.scrollHeight, 200) + 'px'
   }
 
-  // 选中新文件：abort 旧上传，立即开始新上传
+  // 选中新文件：校验大小 → abort 旧上传 → 立即开始新上传
   const startUpload = (next: File) => {
     abortRef.current?.abort()
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
+    abortRef.current = null
     fileMetaRef.current = { name: next.name, size: next.size }
 
     setFile(next)
     setFileRef(null)
-    setUploadStatus('uploading')
     setUploadError(null)
+
+    // 超限：展示 chip + 失败态，不发起请求
+    if (next.size > MAX_CHAT_FILE_BYTES) {
+      setUploadStatus('error')
+      setUploadError('文件超过 10MB，请压缩后重新上传')
+      if (fileRefInput.current) fileRefInput.current.value = ''
+      return
+    }
 
     if (!currentSessionId) {
       setUploadStatus('error')
       setUploadError('请先进入一个会话再上传')
       return
     }
+
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    setUploadStatus('uploading')
 
     fileApi
       .upload(next, currentSessionId, ctrl.signal)
