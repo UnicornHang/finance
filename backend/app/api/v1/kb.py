@@ -1,6 +1,8 @@
 """知识库管理 API。
 
+- GET  /kb/settings               索引默认配置
 - GET  /kb/documents              列表
+- GET  /kb/documents/{doc_id}     详情预览（全文 + 切分块）
 - POST /kb/documents              上传并索引
 - DELETE /kb/documents/{doc_id}   删除
 - POST /kb/documents/{doc_id}/reindex  重新向量化
@@ -83,6 +85,16 @@ async def upload_document(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
+
+
+@router.get("/documents/{doc_id}")
+async def get_document(
+    doc_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """文档详情预览（全文 + 切分块）。"""
+    return await kb_service.get_document_detail(db, user=user, doc_id=doc_id)
 
 
 @router.delete("/documents/{doc_id}")

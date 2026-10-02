@@ -130,6 +130,39 @@ class KbService:
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
 
+    async def get_document_detail(
+        self,
+        db: AsyncSession,
+        *,
+        user: "User",
+        doc_id: UUID,
+    ) -> dict[str, Any]:
+        """文档预览：元数据 + 全文 + 切分块列表。"""
+        self._assert_admin(user)
+        from app.models import KbChunk
+
+        row = await self.get_document(db, user=user, doc_id=doc_id)
+        result = await db.execute(
+            select(KbChunk)
+            .where(KbChunk.doc_id == row.id)
+            .order_by(KbChunk.chunk_index.asc())
+            .limit(200)
+        )
+        chunks = [
+            {
+                "id": str(c.id),
+                "chunk_index": c.chunk_index,
+                "content": c.content,
+                "token_count": c.token_count,
+            }
+            for c in result.scalars().all()
+        ]
+        detail = self._serialize(row)
+        detail["content"] = row.content or ""
+        detail["embedding_model"] = row.embedding_model
+        detail["chunks"] = chunks
+        return detail
+
     async def list_documents(
         self,
         db: AsyncSession,

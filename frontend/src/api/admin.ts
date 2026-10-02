@@ -6,6 +6,7 @@ import type {
   LLMScene,
   LLMTestResult,
   KbDocument,
+  KbDocumentDetail,
   KbIndexSettings,
 } from '@/types'
 
@@ -55,6 +56,8 @@ export const kbApi = {
   settings: () =>
     apiClient.get<KbIndexSettings>('/kb/settings').then((r) => r.data),
   list: () => apiClient.get<KbDocument[]>('/kb/documents').then((r) => r.data),
+  get: (id: string) =>
+    apiClient.get<KbDocumentDetail>(`/kb/documents/${id}`).then((r) => r.data),
   upload: (formData: FormData) =>
     apiClient.post<KbDocument>('/kb/documents', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

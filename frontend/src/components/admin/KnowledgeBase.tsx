@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/select'
 import { SectionHeader, StatCard } from '@/components/ui/stat'
 import { EmptyState } from '@/components/ui/table'
+import { Markdown } from '@/components/chat/Markdown'
 import { kbApi } from '@/api/admin'
 import { formatDate } from '@/lib/utils'
 import type { KbIndexSettings } from '@/types'
@@ -84,6 +85,7 @@ export function KnowledgeBase() {
 
   const [uploadOpen, setUploadOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [previewId, setPreviewId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [question, setQuestion] = useState('合同合规审查要注意哪些条款？')
   const [topK, setTopK] = useState(5)
@@ -205,6 +207,13 @@ export function KnowledgeBase() {
         uploading={uploading}
         onSubmit={handleUploadSubmit}
         onRetrieveTopKChange={setTopK}
+      />
+
+      <KbPreviewDialog
+        docId={previewId}
+        onOpenChange={(open) => {
+          if (!open) setPreviewId(null)
+        }}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -330,9 +339,14 @@ export function KnowledgeBase() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <p className="truncate text-body-md font-semibold text-ink">
+                        <button
+                          type="button"
+                          className="truncate text-left text-body-md font-semibold text-ink underline-offset-2 hover:text-primary hover:underline"
+                          title="预览文档内容"
+                          onClick={() => setPreviewId(d.id)}
+                        >
                           {d.title}
-                        </p>
+                        </button>
                         <Badge tone={STATUS_TONE[d.status] || 'neutral'} dot>
                           {STATUS_LABEL[d.status] || d.status}
                         </Badge>
@@ -385,6 +399,138 @@ export function KnowledgeBase() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+/** 点击文档标题打开的预览弹窗。 */
+function KbPreviewDialog({
+  docId,
+  onOpenChange,
+}: {
+  docId: string | null
+  onOpenChange: (open: boolean) => void
+}) {
+  const open = Boolean(docId)
+  const { data, isFetching, isError, error } = useQuery({
+    queryKey: ['kb-document', docId],
+    queryFn: () => kbApi.get(docId!),
+    enabled: open,
+  })
+  const [tab, setTab] = useState<'content' | 'chunks'>('content')
+
+  useEffect(() => {
+    if (open) setTab('content')
+  }, [open, docId])
+
+  const errMsg =
+    (error as { response?: { data?: { message?: string } } })?.response?.data
+      ?.message || '加载失败'
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{data?.title || '文档预览'}</DialogTitle>
+          <DialogDescription asChild>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-label-sm text-ink-tertiary">
+              {data && (
+                <>
+                  <Badge tone={STATUS_TONE[data.status] || 'neutral'} dot>
+                    {STATUS_LABEL[data.status] || data.status}
+                  </Badge>
+                  <span>{data.doc_type || '通用'}</span>
+                  <span>·</span>
+                  <span className="tabular-nums">{data.chunk_count} 块</span>
+                  <span>·</span>
+                  <span>v{data.version}</span>
+                  {data.embedding_model && (
+                    <>
+                      <span>·</span>
+                      <span>{data.embedding_model}</span>
+                    </>
+                  )}
+                  {data.source_file && (
+                    <>
+                      <span>·</span>
+                      <span className="truncate">{data.source_file}</span>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex gap-2 border-b border-line-subtle pb-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={tab === 'content' ? 'primary' : 'ghost'}
+            onClick={() => setTab('content')}
+          >
+            全文
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={tab === 'chunks' ? 'primary' : 'ghost'}
+            onClick={() => setTab('chunks')}
+          >
+            切分块 ({data?.chunks?.length ?? 0})
+          </Button>
+        </div>
+
+        <div className="max-h-[55vh] min-h-[200px] overflow-y-auto rounded-lg border border-line-subtle bg-canvas px-4 py-3">
+          {isFetching && (
+            <p className="text-body-sm text-ink-tertiary">加载中…</p>
+          )}
+          {!isFetching && isError && (
+            <p className="text-body-sm text-danger">{errMsg}</p>
+          )}
+          {!isFetching && !isError && data && tab === 'content' && (
+            data.content.trim() ? (
+              <Markdown content={data.content} className="text-ink" />
+            ) : (
+              <p className="text-body-sm text-ink-tertiary">暂无正文</p>
+            )
+          )}
+          {!isFetching && !isError && data && tab === 'chunks' && (
+            data.chunks.length === 0 ? (
+              <p className="text-body-sm text-ink-tertiary">
+                尚无切分块，请先完成索引
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {data.chunks.map((c) => (
+                  <li
+                    key={c.id}
+                    className="rounded-md border border-line-subtle bg-surface px-3 py-2"
+                  >
+                    <div className="mb-1 text-label-sm text-ink-tertiary">
+                      块 #{c.chunk_index}
+                      {c.token_count != null && (
+                        <span className="ml-2 tabular-nums">
+                          {c.token_count} 字
+                        </span>
+                      )}
+                    </div>
+                    <p className="whitespace-pre-wrap text-body-sm text-ink-secondary">
+                      {c.content}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

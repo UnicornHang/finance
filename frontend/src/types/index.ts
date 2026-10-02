@@ -163,6 +163,19 @@ export interface KbDocument {
   tenant_id?: string | null
 }
 
+/** 文档预览详情 */
+export interface KbDocumentDetail extends KbDocument {
+  content: string
+  embedding_model?: string | null
+  updated_at?: string | null
+  chunks: Array<{
+    id: string
+    chunk_index: number
+    content: string
+    token_count?: number | null
+  }>
+}
+
 /** 知识库上传弹窗默认配置（GET /kb/settings） */
 export interface KbIndexSettings {
   chunk_size: number
