@@ -46,6 +46,60 @@ SYSTEM_PROMPT = """你是企业财务 AI 助手，名叫「¥ 小财」。
 - 必要时引导用户提供更具体的上下文
 """
 
+# 制度问答专用约束：必须优先用知识库片段，禁止编造标准
+POLICY_SYSTEM_PROMPT = """你是企业财务 AI 助手，负责根据「企业知识库」回答制度/补贴/报销/合规等问题。
+
+硬性要求：
+1. 优先且仅依据下方提供的「知识库参考资料」回答具体标准、金额、流程；
+2. 回答中必须写明来源文档标题（如《差旅补贴标准》）；
+3. 参考资料未覆盖的内容，明确说「知识库暂无相关规定」，不要编造公司内部数字；
+4. 不要用外部「国家机关参考标准」替代本公司知识库已有内容；
+5. 用简洁专业的中文。
+"""
+
+# 粗粒度启发：命中则更倾向走制度问答 + RAG
+_POLICY_HINTS = (
+    "差旅",
+    "补贴",
+    "报销",
+    "制度",
+    "标准",
+    "住宿",
+    "餐补",
+    "交通",
+    "合规",
+    "政策",
+    "规定",
+    "审批",
+    "多少钱",
+    "怎么报",
+    "一线城市",
+    "二线",
+)
+
+
+def _looks_like_policy_query(text: str) -> bool:
+    """用户问题是否像制度/标准查询。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    return any(k in t for k in _POLICY_HINTS)
+
+
+def _format_rag_context(hits: list[dict]) -> str:
+    """把召回片段格式化为可注入提示词的参考资料。"""
+    parts: list[str] = []
+    for i, h in enumerate(hits, start=1):
+        title = h.get("title") or "未命名文档"
+        doc_type = h.get("doc_type") or ""
+        score = h.get("score")
+        score_s = f"{float(score):.3f}" if score is not None else "-"
+        body = (h.get("content") or "").strip()
+        parts.append(
+            f"[{i}] 《{title}》（类型:{doc_type}，相关度:{score_s}）\n{body}"
+        )
+    return "\n\n".join(parts)
+
 
 def _parse_s3_url(s3_url: str) -> tuple[str, str]:
     """s3://bucket/key → (bucket, key)"""
@@ -299,20 +353,76 @@ class ChatService:
         if history and history[-1]["content"] == display_msg:
             history = history[:-1]
 
-        system_prompt = await self._effective_system_prompt(
-            db, user.tenant_id, "chitchat"
+        # 制度问答：先检索知识库，有足够相关分则注入参考资料
+        rag_hits: list[dict] = []
+        try:
+            rag_hits = await rag_service.retrieve(
+                db,
+                display_msg,
+                str(user.tenant_id),
+                top_k=5,
+            )
+        except Exception:
+            logger.exception("chat RAG retrieve failed, fall back to chitchat")
+            rag_hits = []
+
+        best_score = float(rag_hits[0]["score"]) if rag_hits else 0.0
+        # 相关分足够，或问题像制度查询且有任意召回
+        use_policy = bool(rag_hits) and (
+            best_score >= 0.35 or _looks_like_policy_query(display_msg)
         )
+
+        if use_policy:
+            scene = "policy_query"
+            base_prompt = await self._effective_system_prompt(
+                db, user.tenant_id, scene
+            )
+            # 用户自定义 prompt 时仍追加硬约束，避免忽略知识库
+            if base_prompt.strip() == SYSTEM_PROMPT.strip():
+                system_prompt = POLICY_SYSTEM_PROMPT
+            else:
+                system_prompt = (
+                    f"{base_prompt.strip()}\n\n"
+                    "补充约束：回答制度/标准类问题时，必须优先依据知识库参考资料，"
+                    "并注明来源文档；资料不足时明确说明，禁止编造公司内部数字。"
+                )
+            context = _format_rag_context(rag_hits[:5])
+            user_content = (
+                f"【知识库参考资料】\n{context}\n\n"
+                f"【用户问题】\n{display_msg}\n\n"
+                "请基于参考资料作答；若资料不足以回答，请直接说明知识库暂无相关规定。"
+            )
+            logger.info(
+                "chat policy_query rag hits=%s best_score=%.3f",
+                len(rag_hits),
+                best_score,
+            )
+        else:
+            scene = "chitchat"
+            system_prompt = await self._effective_system_prompt(
+                db, user.tenant_id, scene
+            )
+            user_content = display_msg
+            # 问题像制度查询但库里没命中：明确告知，避免模型瞎编外部标准冒充公司制度
+            if _looks_like_policy_query(display_msg) and not rag_hits:
+                system_prompt = (
+                    f"{system_prompt}\n\n"
+                    "用户在问企业制度/补贴标准，但当前知识库未召回相关内容。"
+                    "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
+                    "不要用外部机关参考标准冒充本公司规定。"
+                )
+
         messages = [
             {"role": "system", "content": system_prompt},
             *history[-20:],
-            {"role": "user", "content": display_msg},
+            {"role": "user", "content": user_content},
         ]
 
         assistant_content = ""
         try:
             async for chunk in llm_service.stream(
                 messages,
-                scene="chitchat",
+                scene=scene,
                 db=db,
                 tenant_id=str(user.tenant_id),
             ):

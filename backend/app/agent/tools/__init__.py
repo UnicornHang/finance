@@ -20,9 +20,23 @@ async def ocr_invoice(file_url: str) -> dict:
 
 @tool
 async def query_policy(question: str, tenant_id: str) -> str:
-    """查询企业制度。"""
-    # TODO: 接入 RAG
-    return f"（待实现）{question}"
+    """查询企业制度（RAG 检索知识库）。"""
+    from app.core.database import async_session_factory
+    from app.services.rag_service import rag_service
+
+    async with async_session_factory() as db:
+        hits = await rag_service.retrieve(
+            db, question, tenant_id, top_k=5, doc_type=None
+        )
+    if not hits:
+        return "知识库未召回到相关制度片段。"
+    parts: list[str] = []
+    for h in hits:
+        title = h.get("title") or "未命名"
+        score = float(h.get("score") or 0)
+        body = (h.get("content") or "").strip()
+        parts.append(f"《{title}》(score={score:.3f})\n{body}")
+    return "\n\n---\n\n".join(parts)
 
 
 @tool
