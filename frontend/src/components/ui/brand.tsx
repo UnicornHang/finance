@@ -1,45 +1,35 @@
 import { cn } from '@/lib/utils'
+import logoImg from '@/assets/image/logo.png'
 
 /**
- * 品牌 Logo - 几何化 ¥ 符号
- * 单色版本适配深色/浅色背景
+ * 品牌 Logo - 使用官方 logo 图片
+ * tone 保留以兼容调用方，图片本身已带品牌色
  */
 export function BrandLogo({
   size = 32,
   className,
   withWordmark = false,
-  tone = 'primary',
+  tone: _tone = 'primary',
 }: {
   size?: number
   className?: string
   withWordmark?: boolean
   tone?: 'primary' | 'white' | 'ink'
 }) {
-  const bg =
-    tone === 'white'
-      ? 'bg-surface-inset text-ink'
-      : tone === 'ink'
-        ? 'bg-ink text-white'
-        : 'bg-primary text-white'
-
   return (
     <div className={cn('inline-flex items-center gap-2.5', className)}>
-      <div
-        className={cn(
-          'inline-flex items-center justify-center rounded-md font-bold',
-          bg,
-        )}
-        style={{ width: size, height: size, fontSize: size * 0.55 }}
-      >
-        ¥
-      </div>
+      <img
+        src={logoImg}
+        alt="Finance AI"
+        width={size}
+        height={size}
+        className="rounded-md object-contain"
+        style={{ width: size, height: size }}
+      />
       {withWordmark && (
-        <div className="flex flex-col leading-tight">
-          <span className="text-title-lg font-semibold text-ink">Finance AI</span>
-          <span className="text-label-sm uppercase tracking-wider text-ink-tertiary">
-            Pristine Treasury
-          </span>
-        </div>
+        <span className="bg-gradient-to-r from-[#006194] via-[#0284c7] to-[#0ea5e9] bg-clip-text text-title-lg font-semibold leading-none text-transparent">
+          Finance AI
+        </span>
       )}
     </div>
   )

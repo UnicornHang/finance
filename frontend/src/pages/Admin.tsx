@@ -72,7 +72,7 @@ export function Admin() {
       <header className="flex h-16 shrink-0 items-center gap-6 border-b border-line bg-surface px-6">
         {/* 左：品牌 */}
         <div className="flex shrink-0 items-center">
-          <BrandLogo size={32} withWordmark />
+          <BrandLogo size={40} withWordmark />
         </div>
 
         {/* 中：Admin 内部分页快速切换 */}
