@@ -36,6 +36,16 @@ class TestRetrieveRequest(BaseModel):
     doc_type: str | None = None
 
 
+@router.get("/settings")
+async def kb_settings(
+    user: Annotated[User, Depends(get_current_user)],
+):
+    """知识库索引默认配置（供上传弹窗展示）。"""
+    if user.role != "admin":
+        raise ForbiddenError("仅管理员可查看知识库配置", code="KB_FORBIDDEN")
+    return kb_service.get_index_settings()
+
+
 @router.get("/documents")
 async def list_documents(
     user: Annotated[User, Depends(get_current_user)],
@@ -52,12 +62,15 @@ async def upload_document(
     file: Annotated[UploadFile, File(description="制度/规则文档")],
     title: Annotated[str | None, Form()] = None,
     doc_type: Annotated[str | None, Form()] = None,
-    is_global: Annotated[bool, Form()] = False,
+    is_global: Annotated[str, Form()] = "false",
+    chunk_size: Annotated[int, Form()] = 500,
+    chunk_overlap: Annotated[int, Form()] = 50,
 ):
     """上传知识库文档并同步切分向量化。"""
     raw = await file.read()
     if not raw:
         raise BusinessError("空文件", code="KB_EMPTY_FILE")
+    global_flag = (is_global or "").strip().lower() in {"1", "true", "yes", "on"}
     return await kb_service.upload_document(
         db,
         user=user,
@@ -66,7 +79,9 @@ async def upload_document(
         content_type=file.content_type,
         title=title,
         doc_type=doc_type,
-        is_global=is_global,
+        is_global=global_flag,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
     )
 
 

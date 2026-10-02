@@ -6,6 +6,7 @@ import type {
   LLMScene,
   LLMTestResult,
   KbDocument,
+  KbIndexSettings,
 } from '@/types'
 
 export const userApi = {
@@ -51,6 +52,8 @@ export const llmApi = {
 }
 
 export const kbApi = {
+  settings: () =>
+    apiClient.get<KbIndexSettings>('/kb/settings').then((r) => r.data),
   list: () => apiClient.get<KbDocument[]>('/kb/documents').then((r) => r.data),
   upload: (formData: FormData) =>
     apiClient.post<KbDocument>('/kb/documents', formData, {
@@ -59,6 +62,8 @@ export const kbApi = {
   remove: (id: string) => apiClient.delete(`/kb/documents/${id}`),
   reindex: (id: string) =>
     apiClient.post(`/kb/documents/${id}/reindex`).then((r) => r.data),
-  testRetrieve: (question: string) =>
-    apiClient.post('/kb/test-retrieve', { question }).then((r) => r.data),
+  testRetrieve: (question: string, topK = 5) =>
+    apiClient
+      .post('/kb/test-retrieve', { question, top_k: topK })
+      .then((r) => r.data),
 }

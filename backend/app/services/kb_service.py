@@ -170,6 +170,34 @@ class KbService:
             raise ForbiddenError("无权访问该文档", code="KB_FORBIDDEN")
         return row
 
+    def get_index_settings(self) -> dict[str, Any]:
+        """返回上传弹窗用的默认索引参数。"""
+        return {
+            "chunk_size": CHUNK_SIZE,
+            "chunk_overlap": CHUNK_OVERLAP,
+            "embedding_model": settings.embedding_model,
+            "embedding_dimension": settings.embedding_dimension,
+            "embedding_base_url": settings.embedding_base_url,
+            "index_mode": "high_quality",
+            "index_modes": [
+                {
+                    "value": "high_quality",
+                    "label": "高质量（向量）",
+                    "description": "切分后调用 Embedding，写入 Milvus 语义检索",
+                },
+                {
+                    "value": "economy",
+                    "label": "经济（关键词）",
+                    "description": "暂未开放；当前仅支持向量索引",
+                    "disabled": True,
+                },
+            ],
+            "retrieve_top_k": 5,
+            "milvus_enabled": milvus_kb_store.enabled,
+            "allowed_suffixes": sorted(ALLOWED_SUFFIXES),
+            "max_upload_bytes": MAX_UPLOAD_BYTES,
+        }
+
     async def upload_document(
         self,
         db: AsyncSession,
@@ -181,10 +209,19 @@ class KbService:
         title: str | None = None,
         doc_type: str | None = None,
         is_global: bool = False,
+        chunk_size: int = CHUNK_SIZE,
+        chunk_overlap: int = CHUNK_OVERLAP,
     ) -> dict[str, Any]:
         """上传并同步完成切分向量化。"""
         self._assert_admin(user)
         from app.models import KbDocument
+
+        size = int(chunk_size) if chunk_size else CHUNK_SIZE
+        overlap = int(chunk_overlap) if chunk_overlap else CHUNK_OVERLAP
+        if size < 100 or size > 4000:
+            raise BusinessError("分段长度须在 100–4000 之间", code="KB_CHUNK_SIZE_INVALID")
+        if overlap < 0 or overlap >= size:
+            raise BusinessError("重叠长度须 ≥0 且小于分段长度", code="KB_CHUNK_OVERLAP_INVALID")
 
         text = extract_document_text(
             file_bytes, filename=filename, content_type=content_type
@@ -206,7 +243,12 @@ class KbService:
         await db.flush()
         try:
             await self._index_document(
-                db, row, bump_version=False, embed_tenant_id=user.tenant_id
+                db,
+                row,
+                bump_version=False,
+                embed_tenant_id=user.tenant_id,
+                chunk_size=size,
+                chunk_overlap=overlap,
             )
         except BusinessError:
             # 保留 failed 记录，便于前端看到错误后点重索引
@@ -266,12 +308,16 @@ class KbService:
         *,
         bump_version: bool,
         embed_tenant_id: UUID,
+        chunk_size: int = CHUNK_SIZE,
+        chunk_overlap: int = CHUNK_OVERLAP,
     ) -> None:
         """切分 → Embedding → Postgres 存正文 → Milvus 存向量。"""
         from app.models import KbChunk
 
         try:
-            chunks = recursive_split(row.content or "")
+            chunks = recursive_split(
+                row.content or "", chunk_size=chunk_size, overlap=chunk_overlap
+            )
             if not chunks:
                 raise BusinessError("切分结果为空", code="KB_EMPTY_CONTENT")
 

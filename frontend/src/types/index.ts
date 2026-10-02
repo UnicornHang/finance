@@ -163,6 +163,26 @@ export interface KbDocument {
   tenant_id?: string | null
 }
 
+/** 知识库上传弹窗默认配置（GET /kb/settings） */
+export interface KbIndexSettings {
+  chunk_size: number
+  chunk_overlap: number
+  embedding_model: string
+  embedding_dimension: number
+  embedding_base_url: string
+  index_mode: string
+  index_modes: Array<{
+    value: string
+    label: string
+    description: string
+    disabled?: boolean
+  }>
+  retrieve_top_k: number
+  milvus_enabled: boolean
+  allowed_suffixes: string[]
+  max_upload_bytes: number
+}
+
 // SSE 事件类型
 export type StreamEvent =
   | { type: 'text'; content: string; session_id?: string }

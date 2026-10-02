@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   BookOpen,
@@ -14,10 +14,28 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { SectionHeader, StatCard } from '@/components/ui/stat'
 import { EmptyState } from '@/components/ui/table'
 import { kbApi } from '@/api/admin'
 import { formatDate } from '@/lib/utils'
+import type { KbIndexSettings } from '@/types'
 
 const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
   active: 'success',
@@ -35,6 +53,13 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '失败',
 }
 
+const DOC_TYPES = [
+  { value: 'policy', label: '制度政策' },
+  { value: 'rule', label: '合规规则' },
+  { value: 'template', label: '合同模板' },
+  { value: 'other', label: '其他' },
+] as const
+
 type RetrieveHit = {
   chunk_id: string
   doc_id: string
@@ -45,18 +70,29 @@ type RetrieveHit = {
   source?: string
 }
 
-/** 管理端知识库：上传/列表/重索引/删除/检索测试。 */
+/** 管理端知识库：上传弹窗 / 列表 / 重索引 / 删除 / 检索测试。 */
 export function KnowledgeBase() {
   const queryClient = useQueryClient()
   const { data: docs, refetch, isFetching } = useQuery({
     queryKey: ['kb-documents'],
     queryFn: () => kbApi.list(),
   })
+  const { data: settings } = useQuery({
+    queryKey: ['kb-settings'],
+    queryFn: () => kbApi.settings(),
+  })
+
+  const [uploadOpen, setUploadOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [search, setSearch] = useState('')
   const [question, setQuestion] = useState('合同合规审查要注意哪些条款？')
+  const [topK, setTopK] = useState(5)
   const [hits, setHits] = useState<RetrieveHit[] | null>(null)
   const [retrieving, setRetrieving] = useState(false)
+
+  useEffect(() => {
+    if (settings?.retrieve_top_k) setTopK(settings.retrieve_top_k)
+  }, [settings?.retrieve_top_k])
 
   const reindexMutation = useMutation({
     mutationFn: (id: string) => kbApi.reindex(id),
@@ -82,20 +118,30 @@ export function KnowledgeBase() {
     onError: () => toast.error('删除失败'),
   })
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    if (!file) return
+  const handleUploadSubmit = async (payload: {
+    file: File
+    title: string
+    docType: string
+    isGlobal: boolean
+    chunkSize: number
+    chunkOverlap: number
+  }) => {
     setUploading(true)
     try {
       const formData = new FormData()
-      formData.append('file', file)
+      formData.append('file', payload.file)
+      if (payload.title.trim()) formData.append('title', payload.title.trim())
+      formData.append('doc_type', payload.docType)
+      formData.append('is_global', payload.isGlobal ? 'true' : 'false')
+      formData.append('chunk_size', String(payload.chunkSize))
+      formData.append('chunk_overlap', String(payload.chunkOverlap))
       const doc = await kbApi.upload(formData)
       if (doc.status === 'failed') {
         toast.error(doc.error_message || '索引失败，可稍后重试「重新索引」')
       } else {
         toast.success('上传并索引完成')
       }
+      setUploadOpen(false)
       await refetch()
     } catch (err: unknown) {
       const msg =
@@ -115,7 +161,7 @@ export function KnowledgeBase() {
     }
     setRetrieving(true)
     try {
-      const res = (await kbApi.testRetrieve(q)) as {
+      const res = (await kbApi.testRetrieve(q, topK)) as {
         items?: RetrieveHit[]
         total?: number
       }
@@ -145,21 +191,20 @@ export function KnowledgeBase() {
     <div className="space-y-6">
       <SectionHeader
         actions={
-          <label>
-            <input
-              type="file"
-              accept=".pdf,.doc,.docx,.txt,.md,.markdown"
-              className="hidden"
-              onChange={(e) => void handleUpload(e)}
-            />
-            <Button size="md" asChild disabled={uploading}>
-              <span>
-                <Upload className="h-4 w-4" />
-                {uploading ? '上传索引中...' : '上传文档'}
-              </span>
-            </Button>
-          </label>
+          <Button size="md" type="button" onClick={() => setUploadOpen(true)}>
+            <Upload className="h-4 w-4" />
+            上传文档
+          </Button>
         }
+      />
+
+      <KbUploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        settings={settings}
+        uploading={uploading}
+        onSubmit={handleUploadSubmit}
+        onRetrieveTopKChange={setTopK}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -180,6 +225,19 @@ export function KnowledgeBase() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void handleTestRetrieve()
               }}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="whitespace-nowrap text-label-sm text-ink-tertiary">
+              Top-K
+            </Label>
+            <Input
+              type="number"
+              min={1}
+              max={20}
+              className="h-9 w-16"
+              value={topK}
+              onChange={(e) => setTopK(Number(e.target.value) || 5)}
             />
           </div>
           <Button
@@ -327,5 +385,285 @@ export function KnowledgeBase() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+type UploadFormProps = {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  settings?: KbIndexSettings
+  uploading: boolean
+  onSubmit: (payload: {
+    file: File
+    title: string
+    docType: string
+    isGlobal: boolean
+    chunkSize: number
+    chunkOverlap: number
+  }) => Promise<void>
+  onRetrieveTopKChange: (k: number) => void
+}
+
+/** 上传文档弹窗：分段 / 索引方式 / Embedding / 检索 / 选文件。 */
+function KbUploadDialog({
+  open,
+  onOpenChange,
+  settings,
+  uploading,
+  onSubmit,
+  onRetrieveTopKChange,
+}: UploadFormProps) {
+  const [file, setFile] = useState<File | null>(null)
+  const [title, setTitle] = useState('')
+  const [docType, setDocType] = useState('policy')
+  const [isGlobal, setIsGlobal] = useState(false)
+  const [chunkSize, setChunkSize] = useState(500)
+  const [chunkOverlap, setChunkOverlap] = useState(50)
+  const [indexMode, setIndexMode] = useState('high_quality')
+  const [retrieveTopK, setRetrieveTopK] = useState(5)
+
+  useEffect(() => {
+    if (!open || !settings) return
+    setChunkSize(settings.chunk_size)
+    setChunkOverlap(settings.chunk_overlap)
+    setIndexMode(settings.index_mode)
+    setRetrieveTopK(settings.retrieve_top_k)
+  }, [open, settings])
+
+  useEffect(() => {
+    if (!open) {
+      setFile(null)
+      setTitle('')
+      setDocType('policy')
+      setIsGlobal(false)
+    }
+  }, [open])
+
+  const accept = (settings?.allowed_suffixes || ['.txt', '.md', '.pdf', '.docx', '.doc'])
+    .map((s) => (s.startsWith('.') ? s : `.${s}`))
+    .join(',')
+
+  const handleConfirm = async () => {
+    if (!file) {
+      toast.error('请先选择文件')
+      return
+    }
+    if (chunkOverlap >= chunkSize) {
+      toast.error('重叠长度须小于分段长度')
+      return
+    }
+    onRetrieveTopKChange(retrieveTopK)
+    await onSubmit({
+      file,
+      title,
+      docType,
+      isGlobal,
+      chunkSize,
+      chunkOverlap,
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>上传知识库文档</DialogTitle>
+          <DialogDescription>
+            配置分段与索引参数后上传；系统将切分并写入向量库。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5 py-1">
+          {/* 上传文本文件 */}
+          <section className="space-y-2">
+            <h3 className="text-body-sm font-semibold text-ink">上传文本文件</h3>
+            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line-strong bg-canvas px-4 py-6 transition-colors hover:border-primary/40 hover:bg-primary-tint/30">
+              <Upload className="h-5 w-5 text-primary" />
+              <span className="text-body-sm text-ink">
+                {file ? file.name : '点击选择或拖入文件'}
+              </span>
+              <span className="text-label-sm text-ink-tertiary">
+                支持 txt / md / pdf / doc / docx，最大{' '}
+                {Math.round((settings?.max_upload_bytes || 8 * 1024 * 1024) / 1024 / 1024)}MB
+              </span>
+              <input
+                type="file"
+                accept={accept}
+                className="hidden"
+                onChange={(e) => {
+                  const next = e.target.files?.[0] || null
+                  setFile(next)
+                  if (next && !title.trim()) {
+                    setTitle(next.name.replace(/\.[^.]+$/, ''))
+                  }
+                  e.target.value = ''
+                }}
+              />
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="kb-title">文档标题</Label>
+                <Input
+                  id="kb-title"
+                  placeholder="默认取文件名"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>文档类型</Label>
+                <Select value={docType} onValueChange={setDocType}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DOC_TYPES.map((t) => (
+                      <SelectItem key={t.value} value={t.value}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-body-sm text-ink-secondary">
+              <Checkbox
+                checked={isGlobal}
+                onCheckedChange={(v) => setIsGlobal(v === true)}
+              />
+              作为通用文档（全租户可见）
+            </label>
+          </section>
+
+          {/* 分段设置 */}
+          <section className="space-y-2">
+            <h3 className="text-body-sm font-semibold text-ink">分段设置</h3>
+            <p className="text-label-sm text-ink-tertiary">
+              递归按段落切分；块过长时再按长度切分并保留重叠。
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="kb-chunk-size">分段最大长度</Label>
+                <Input
+                  id="kb-chunk-size"
+                  type="number"
+                  min={100}
+                  max={4000}
+                  value={chunkSize}
+                  onChange={(e) => setChunkSize(Number(e.target.value) || 500)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="kb-chunk-overlap">分段重叠长度</Label>
+                <Input
+                  id="kb-chunk-overlap"
+                  type="number"
+                  min={0}
+                  max={2000}
+                  value={chunkOverlap}
+                  onChange={(e) => setChunkOverlap(Number(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+          </section>
+
+          {/* 索引方式 */}
+          <section className="space-y-2">
+            <h3 className="text-body-sm font-semibold text-ink">索引方式</h3>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(settings?.index_modes || [
+                {
+                  value: 'high_quality',
+                  label: '高质量（向量）',
+                  description: '切分后 Embedding，写入向量库',
+                },
+              ]).map((mode) => {
+                const selected = indexMode === mode.value
+                const disabled = Boolean(mode.disabled)
+                return (
+                  <button
+                    key={mode.value}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      if (!disabled) setIndexMode(mode.value)
+                    }}
+                    className={[
+                      'rounded-lg border px-3 py-3 text-left transition-colors',
+                      selected
+                        ? 'border-primary bg-primary-tint/40'
+                        : 'border-line-subtle bg-canvas',
+                      disabled ? 'cursor-not-allowed opacity-50' : 'hover:border-primary/40',
+                    ].join(' ')}
+                  >
+                    <p className="text-body-sm font-medium text-ink">{mode.label}</p>
+                    <p className="mt-1 text-label-sm text-ink-tertiary">
+                      {mode.description}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+
+          {/* Embedding 模型 */}
+          <section className="space-y-2">
+            <h3 className="text-body-sm font-semibold text-ink">Embedding 模型</h3>
+            <div className="rounded-lg border border-line-subtle bg-canvas px-3 py-3">
+              <p className="text-body-sm font-medium text-ink">
+                {settings?.embedding_model || '加载中…'}
+              </p>
+              <p className="mt-1 text-label-sm text-ink-tertiary">
+                维数 {settings?.embedding_dimension ?? '—'}
+                {settings?.milvus_enabled ? ' · 写入 Milvus' : ' · Milvus 未启用'}
+              </p>
+              <p className="mt-1 truncate text-label-sm text-ink-tertiary">
+                {settings?.embedding_base_url || ''}
+              </p>
+              <p className="mt-2 text-label-sm text-ink-tertiary">
+                模型由服务端 `.env` 配置；更换后需对已有文档执行「重新索引」。
+              </p>
+            </div>
+          </section>
+
+          {/* 检索设置 */}
+          <section className="space-y-2">
+            <h3 className="text-body-sm font-semibold text-ink">检索设置</h3>
+            <p className="text-label-sm text-ink-tertiary">
+              影响本页「检索测试」默认召回条数；向量检索使用 COSINE。
+            </p>
+            <div className="max-w-xs space-y-1.5">
+              <Label htmlFor="kb-top-k">Top-K</Label>
+              <Input
+                id="kb-top-k"
+                type="number"
+                min={1}
+                max={20}
+                value={retrieveTopK}
+                onChange={(e) => setRetrieveTopK(Number(e.target.value) || 5)}
+              />
+            </div>
+          </section>
+        </div>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={uploading}
+            onClick={() => onOpenChange(false)}
+          >
+            取消
+          </Button>
+          <Button
+            type="button"
+            disabled={uploading || !file}
+            onClick={() => void handleConfirm()}
+          >
+            {uploading ? '上传索引中...' : '开始上传并索引'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
