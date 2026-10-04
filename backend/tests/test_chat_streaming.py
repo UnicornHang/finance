@@ -5,7 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.agent.router import Intent, IntentDecision, IntentSource
 from app.services.chat_service import ChatService, SYSTEM_PROMPT
+
+
+def _intent(intent: Intent, confidence: float = 0.9) -> IntentDecision:
+    """测试用固定分类结果。"""
+    return IntentDecision(
+        intent=intent, confidence=confidence, source=IntentSource.LLM
+    )
 
 
 def _make_msg(role="assistant", content=None):
@@ -82,18 +90,20 @@ async def test_stream_response_yields_events(mock_db, mock_user, mock_session):
         mock_cfg_svc.resolve = AsyncMock(return_value=None)
         with patch("app.services.chat_service.llm_service") as mock_llm:
             mock_llm.stream = mock_llm_stream
-
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
-
-                service = ChatService()
-                service.save_message = AsyncMock()
-
-                events = []
-                async for event in service.stream_response(
-                    mock_db, mock_user, mock_session.id, "hello"
+                with patch(
+                    "app.services.chat_service.classify_intent",
+                    AsyncMock(return_value=_intent(Intent.CHITCHAT)),
                 ):
-                    events.append(event)
+                    service = ChatService()
+                    service.save_message = AsyncMock()
+
+                    events = []
+                    async for event in service.stream_response(
+                        mock_db, mock_user, mock_session.id, "hello"
+                    ):
+                        events.append(event)
 
     # 验证事件类型序列
     event_types = [e["type"] for e in events]
@@ -121,18 +131,20 @@ async def test_stream_response_handles_llm_error(mock_db, mock_user, mock_sessio
         mock_cfg_svc.resolve = AsyncMock(return_value=None)
         with patch("app.services.chat_service.llm_service") as mock_llm:
             mock_llm.stream = failing_llm_stream
-
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
-
-                service = ChatService()
-                service.save_message = AsyncMock()
-
-                events = []
-                async for event in service.stream_response(
-                    mock_db, mock_user, mock_session.id, "hello"
+                with patch(
+                    "app.services.chat_service.classify_intent",
+                    AsyncMock(return_value=_intent(Intent.CHITCHAT)),
                 ):
-                    events.append(event)
+                    service = ChatService()
+                    service.save_message = AsyncMock()
+
+                    events = []
+                    async for event in service.stream_response(
+                        mock_db, mock_user, mock_session.id, "hello"
+                    ):
+                        events.append(event)
 
     error_events = [e for e in events if e["type"] == "error"]
     assert len(error_events) == 1
@@ -181,12 +193,16 @@ async def test_stream_uses_custom_system_prompt(mock_db, mock_user, mock_session
             mock_llm.stream = mock_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
-                service = ChatService()
-                service.save_message = AsyncMock()
-                async for _ in service.stream_response(
-                    mock_db, mock_user, mock_session.id, "你是谁？"
+                with patch(
+                    "app.services.chat_service.classify_intent",
+                    AsyncMock(return_value=_intent(Intent.CHITCHAT)),
                 ):
-                    pass
+                    service = ChatService()
+                    service.save_message = AsyncMock()
+                    async for _ in service.stream_response(
+                        mock_db, mock_user, mock_session.id, "你是谁？"
+                    ):
+                        pass
 
     assert captured["messages"][0]["role"] == "system"
     assert captured["messages"][0]["content"] == "你叫MoFan，是魔方财务科技顾问。"
@@ -232,8 +248,10 @@ async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_ses
             mock_llm.stream = mock_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
-                with patch("app.services.chat_service.rag_service") as mock_rag:
-                    mock_rag.retrieve = AsyncMock(return_value=[])
+                with patch(
+                    "app.services.chat_service.classify_intent",
+                    AsyncMock(return_value=_intent(Intent.PUBLIC_TAX)),
+                ):
                     with patch(
                         "app.services.chat_service.official_policy_service"
                     ) as mock_policy:
@@ -259,3 +277,81 @@ async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_ses
     assert "https://www.chinatax.gov.cn/a" in user_content
     tool_kw = service.save_message.call_args.kwargs
     assert tool_kw.get("tool_calls", {}).get("tool") == "search_official_policy"
+
+
+@pytest.mark.asyncio
+async def test_stream_policy_query_injects_rag(mock_db, mock_user, mock_session):
+    """制度意图注入知识库片段，并使用 policy_query 场景。"""
+    captured: dict = {}
+
+    async def mock_llm_stream(messages, scene, **kwargs):
+        captured["messages"] = messages
+        captured["scene"] = scene
+        yield "按制度"
+
+    rag_hits = [
+        {
+            "title": "差旅补贴管理办法",
+            "doc_type": "policy",
+            "score": 0.82,
+            "content": "一线城市住宿上限 500 元。",
+        }
+    ]
+
+    with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
+        mock_cfg_svc.resolve = AsyncMock(return_value=None)
+        with patch("app.services.chat_service.llm_service") as mock_llm:
+            mock_llm.stream = mock_llm_stream
+            with patch("app.services.chat_service.session_service") as mock_session_svc:
+                mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
+                with patch(
+                    "app.services.chat_service.classify_intent",
+                    AsyncMock(return_value=_intent(Intent.POLICY_QUERY)),
+                ):
+                    with patch("app.services.chat_service.rag_service") as mock_rag:
+                        mock_rag.retrieve = AsyncMock(return_value=rag_hits)
+                        service = ChatService()
+                        service.save_message = AsyncMock()
+                        async for _ in service.stream_response(
+                            mock_db,
+                            mock_user,
+                            mock_session.id,
+                            "差旅住宿补贴怎么报？",
+                        ):
+                            pass
+
+    assert captured["scene"] == "policy_query"
+    assert "差旅补贴管理办法" in captured["messages"][-1]["content"]
+    assert "一线城市住宿上限 500 元" in captured["messages"][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_stream_invoice_intent_without_file_asks_upload(
+    mock_db, mock_user, mock_session
+):
+    """无附件的发票意图只引导上传，不走识别。"""
+    captured: dict = {}
+
+    async def mock_llm_stream(messages, scene, **kwargs):
+        captured["messages"] = messages
+        yield "请上传"
+
+    with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
+        mock_cfg_svc.resolve = AsyncMock(return_value=None)
+        with patch("app.services.chat_service.llm_service") as mock_llm:
+            mock_llm.stream = mock_llm_stream
+            with patch("app.services.chat_service.session_service") as mock_session_svc:
+                mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
+                with patch(
+                    "app.services.chat_service.classify_intent",
+                    AsyncMock(return_value=_intent(Intent.INVOICE_UPLOAD)),
+                ):
+                    service = ChatService()
+                    service.save_message = AsyncMock()
+                    async for _ in service.stream_response(
+                        mock_db, mock_user, mock_session.id, "帮我识别发票"
+                    ):
+                        pass
+
+    assert "没有附件" in captured["messages"][-1]["content"]
+    assert "上传" in captured["messages"][-1]["content"]

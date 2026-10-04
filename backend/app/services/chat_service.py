@@ -1,6 +1,7 @@
 """Chat 编排服务。
 
 负责消息持久化、上下文组装、LLM 流式输出。
+文本先经意图分类再进入既有管道；附件仍先做文件分类。
 上传发票时由通用多模态大模型识别图片/文件 → 入库侧栏 → 模型带着结果回复。不使用 OCR。
 """
 
@@ -11,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.router import Intent, classify_intent
 from app.services.chat_file_service import chat_file_service
 from app.services.invoice_document import (
     DocumentUnreadableError,
@@ -118,150 +120,8 @@ PORTAL_SYSTEM_PROMPT = (
 """
 )
 
-# 粗粒度启发：命中则更倾向走制度问答 + RAG
-_POLICY_HINTS = (
-    "差旅",
-    "补贴",
-    "报销",
-    "制度",
-    "标准",
-    "住宿",
-    "餐补",
-    "交通",
-    "合规",
-    "政策",
-    "规定",
-    "审批",
-    "多少钱",
-    "怎么报",
-    "一线城市",
-    "二线",
-)
-
-
-def _looks_like_policy_query(text: str) -> bool:
-    """用户问题是否像企业内部制度/标准查询。"""
-    t = (text or "").strip()
-    if not t:
-        return False
-    return any(k in t for k in _POLICY_HINTS)
-
-
-# 公开财税：走外网检索，而不是企业知识库
-_PUBLIC_TAX_HINTS = (
-    "税率",
-    "增值税",
-    "所得税",
-    "企业所得税",
-    "个人所得税",
-    "个税",
-    "税收优惠",
-    "税务优惠",
-    "加计扣除",
-    "留抵退税",
-    "出口退税",
-    "进项",
-    "销项",
-    "征收率",
-    "印花税",
-    "附加税",
-    "消费税",
-    "税务总局",
-    "国家税务总局",
-    "财政部",
-    "财税",
-    "税总",
-    "汇算清缴",
-    "数电票",
-    "电子发票",
-    "小微企业",
-    "高新",
-    "研发费用",
-    "地区优惠",
-    "大湾区",
-    "税收政策",
-    "税收",
-    "最新政策",
-    "政策法规",
-    "免税",
-    "即征即退",
-    "核定征收",
-    "税务局",
-    "法规库",
-    "会计准则",
-    "新规",
-    "文号",
-    "会计司",
-    "法律法规",
-    "政策文件",
-    "法规",
-)
-
-
-_INTERNAL_REIMBURSE_HINTS = (
-    "差旅",
-    "补贴",
-    "报销",
-    "住宿",
-    "餐补",
-    "怎么报",
-)
-
-
-def _looks_like_internal_reimburse(text: str) -> bool:
-    """是否在问本公司差旅/报销标准（必须走知识库）。"""
-    t = (text or "").strip()
-    if not t:
-        return False
-    return any(k in t for k in _INTERNAL_REIMBURSE_HINTS)
-
-
-def _looks_like_public_tax_query(text: str) -> bool:
-    """用户问题是否像公开财税政策/税率/法规查询。"""
-    t = (text or "").strip()
-    if not t:
-        return False
-    if _looks_like_official_portal_query(t):
-        return False
-    return any(k in t for k in _PUBLIC_TAX_HINTS)
-
-
-def _should_use_official_search(text: str) -> bool:
-    """公开财税检索优先于弱相关知识库命中。
-
-    「政策」会出现在制度启发里，差旅文档也常被召回；
-    问广州税收政策时不能因此锁进「知识库暂无」。
-    """
-    if not _looks_like_public_tax_query(text):
-        return False
-    if not _looks_like_internal_reimburse(text):
-        return True
-    return any(
-        k in text
-        for k in ("税率", "税收政策", "税收优惠", "最新政策", "新规", "税务总局", "财政部")
-    )
-
-
-_PORTAL_HINTS = (
-    "发票真伪",
-    "查验发票",
-    "验真",
-    "工商信息",
-    "信用公示",
-    "企业公示",
-    "裁判文书",
-    "gsxt",
-    "wenshu",
-    "inv-veri",
-)
-
-
-def _looks_like_official_portal_query(text: str) -> bool:
-    """是否在要发票查验/公示/文书等官方业务入口，而不是政策检索。"""
-    t = (text or "").strip().lower()
-    if not t:
-        return False
-    return any(k in t for k in _PORTAL_HINTS)
+# 制度 RAG 注入门槛：低于此相关分视为未命中，避免弱召回冒充公司规定
+_POLICY_RAG_MIN_SCORE = 0.35
 
 
 def _format_rag_context(hits: list[dict]) -> str:
@@ -525,48 +385,54 @@ class ChatService:
                 yield event
             return
 
-        # ========== 常规对话分支 ==========
+        # 无附件：LLM 意图分类后再进入既有管道
         history = await self.load_recent_messages(db, session_id, limit=20)
         history = [m for m in history if not (m["role"] == "user" and m["content"] == display_msg)]
         if history and history[-1]["content"] == display_msg:
             history = history[:-1]
 
-        # 制度问答：先检索知识库，有足够相关分则注入参考资料
-        rag_hits: list[dict] = []
-        try:
-            rag_hits = await rag_service.retrieve(
-                db,
-                display_msg,
-                str(user.tenant_id),
-                top_k=5,
-            )
-        except Exception:
-            logger.exception("chat RAG retrieve failed, fall back to chitchat")
-            rag_hits = []
-
-        best_score = float(rag_hits[0]["score"]) if rag_hits else 0.0
-        prefer_official = _should_use_official_search(display_msg)
-        # 相关分足够，或问题像内部报销且有召回；公开财税不走这条
-        use_policy = (not prefer_official) and bool(rag_hits) and (
-            best_score >= 0.35 or _looks_like_internal_reimburse(display_msg)
+        decision = await classify_intent(
+            display_msg,
+            db=db,
+            tenant_id=str(user.tenant_id),
         )
+        async for event in self._stream_text_intent(
+            db,
+            user,
+            session,
+            session_id,
+            display_msg=display_msg,
+            history=history,
+            intent=decision.intent,
+        ):
+            yield event
+
+    async def _stream_text_intent(
+        self,
+        db: AsyncSession,
+        user: "User",
+        session: "Session",
+        session_id: UUID,
+        *,
+        display_msg: str,
+        history: list[dict],
+        intent: Intent,
+    ) -> AsyncGenerator[dict, None]:
+        """按意图进入制度 / 公开财税 / 门户 / 闲聊管道。"""
         search_trace: dict | None = None
 
-        if use_policy:
-            scene = "policy_query"
-            system_prompt = POLICY_SYSTEM_PROMPT
-            context = _format_rag_context(rag_hits[:5])
+        if intent in (Intent.INVOICE_UPLOAD, Intent.CONTRACT_UPLOAD):
+            scene = "chitchat"
+            system_prompt = await self._effective_system_prompt(
+                db, user.tenant_id, scene
+            )
+            kind = "发票" if intent == Intent.INVOICE_UPLOAD else "合同"
             user_content = (
-                f"【知识库参考资料】\n{context}\n\n"
-                f"【用户问题】\n{display_msg}\n\n"
-                "请基于参考资料作答；若资料不足以回答，请直接说明知识库暂无相关规定。"
+                f"{display_msg}\n\n"
+                f"用户想处理{kind}但本轮没有附件。"
+                f"请引导对方在对话框上传{kind}文件后再继续，不要假装已经识别或审查完成。"
             )
-            logger.info(
-                "chat policy_query rag hits=%s best_score=%.3f",
-                len(rag_hits),
-                best_score,
-            )
-        elif _looks_like_official_portal_query(display_msg):
+        elif intent == Intent.OFFICIAL_PORTAL:
             scene = "chitchat"
             system_prompt = PORTAL_SYSTEM_PROMPT
             user_content = (
@@ -578,8 +444,7 @@ class ChatService:
                 "12366 纳税服务平台 https://12366.chinatax.gov.cn 。"
                 "不要假装已经完成查验。"
             )
-        elif prefer_official:
-            # 公开财税：只查权威站点白名单，必要时抓取原文
+        elif intent == Intent.PUBLIC_TAX:
             scene = "chitchat"
             system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
             yield {"type": "status", "message": "正在按财政部、税务总局等权威网站检索…"}
@@ -617,20 +482,24 @@ class ChatService:
                 search_trace["fetched_count"],
                 search_result.get("provider"),
             )
-        else:
+        elif intent == Intent.POLICY_QUERY:
+            scene, system_prompt, user_content = await self._build_policy_turn(
+                db, user, display_msg
+            )
+        elif intent == Intent.CHITCHAT:
             scene = "chitchat"
             system_prompt = await self._effective_system_prompt(
                 db, user.tenant_id, scene
             )
             user_content = display_msg
-            # 问题像制度查询但库里没命中：明确告知，避免模型瞎编外部标准冒充公司制度
-            if _looks_like_policy_query(display_msg) and not rag_hits:
-                system_prompt = (
-                    f"{system_prompt}\n\n"
-                    "用户在问企业制度/补贴标准，但当前知识库未召回相关内容。"
-                    "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
-                    "不要用外部机关参考标准冒充本公司规定。"
-                )
+        else:
+            # 新增枚举未接线时保守闲聊，避免误入制度或外网检索
+            logger.warning("unhandled intent=%s, fallback chitchat", intent)
+            scene = "chitchat"
+            system_prompt = await self._effective_system_prompt(
+                db, user.tenant_id, scene
+            )
+            user_content = display_msg
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -675,6 +544,52 @@ class ChatService:
                 await self.auto_title(db, session, display_msg)
 
         yield {"type": "done"}
+
+    async def _build_policy_turn(
+        self, db: AsyncSession, user: "User", display_msg: str
+    ) -> tuple[str, str, str]:
+        """企业制度：检索知识库；弱召回或空库则禁止编造。"""
+        rag_hits: list[dict] = []
+        try:
+            rag_hits = await rag_service.retrieve(
+                db,
+                display_msg,
+                str(user.tenant_id),
+                top_k=5,
+            )
+        except Exception:
+            logger.exception("chat RAG retrieve failed, treat as empty knowledge")
+            rag_hits = []
+
+        best_score = float(rag_hits[0]["score"]) if rag_hits else 0.0
+        usable = bool(rag_hits) and best_score >= _POLICY_RAG_MIN_SCORE
+        if usable:
+            context = _format_rag_context(rag_hits[:5])
+            logger.info(
+                "chat policy_query rag hits=%s best_score=%.3f",
+                len(rag_hits),
+                best_score,
+            )
+            return (
+                "policy_query",
+                POLICY_SYSTEM_PROMPT,
+                (
+                    f"【知识库参考资料】\n{context}\n\n"
+                    f"【用户问题】\n{display_msg}\n\n"
+                    "请基于参考资料作答；若资料不足以回答，请直接说明知识库暂无相关规定。"
+                ),
+            )
+
+        system_prompt = await self._effective_system_prompt(
+            db, user.tenant_id, "chitchat"
+        )
+        system_prompt = (
+            f"{system_prompt}\n\n"
+            "用户在问企业制度/补贴标准，但当前知识库未召回足够相关内容。"
+            "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
+            "不要用外部机关参考标准冒充本公司规定。"
+        )
+        return "chitchat", system_prompt, display_msg
 
     async def _dispatch_upload(
         self,

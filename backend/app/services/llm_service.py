@@ -223,8 +223,9 @@ class LLMService:
         tenant_id: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        apply_scene_prompt: bool = True,
     ) -> str:
-        """同步调用 LLM。"""
+        """同步调用 LLM。意图分类等结构化调用应关闭 apply_scene_prompt。"""
         cfg = await self._resolve_config(scene, db, tenant_id)
         if not cfg or not (cfg.get("api_key") or "").strip():
             return self._mock_response(messages)
@@ -234,7 +235,7 @@ class LLMService:
             cfg,
             temperature=temperature,
             max_tokens=max_tokens,
-            apply_scene_prompt=True,
+            apply_scene_prompt=apply_scene_prompt,
         )
 
     async def complete_with_config(

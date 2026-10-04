@@ -1,11 +1,12 @@
-"""权威站点检索：白名单、启发式与资料格式化。"""
+"""权威站点检索：白名单、启发回退与资料格式化。"""
 
-from app.services.chat_service import (
-    _looks_like_official_portal_query,
-    _looks_like_policy_query,
-    _looks_like_public_tax_query,
-    _should_use_official_search,
+from app.agent.heuristics import (
+    looks_like_official_portal_query,
+    looks_like_policy_query,
+    looks_like_public_tax_query,
+    should_use_official_search,
 )
+from app.agent.router import Intent, heuristic_intent
 from app.services.official_policy_service import (
     boost_official_policy_query,
     extract_html_text,
@@ -17,36 +18,40 @@ from app.services.official_policy_service import (
 def test_guangzhou_latest_tax_prefers_official_search():
     """「政策」命中制度启发时，公开税收问题仍走官网检索。"""
     q = "广州最新财务税收政策是怎样的？"
-    assert _looks_like_public_tax_query(q)
-    assert _looks_like_policy_query(q)
-    assert _should_use_official_search(q)
+    assert looks_like_public_tax_query(q)
+    assert looks_like_policy_query(q)
+    assert should_use_official_search(q)
+    assert heuristic_intent(q) == Intent.PUBLIC_TAX
 
 
 def test_internal_reimburse_does_not_prefer_official_search():
     """差旅报销不走外网。"""
     q = "差旅住宿补贴怎么报？"
-    assert not _should_use_official_search(q)
+    assert not should_use_official_search(q)
+    assert heuristic_intent(q) == Intent.POLICY_QUERY
 
 
 def test_internal_policy_is_not_public_tax():
     """差旅报销仍走企业知识库。"""
     q = "差旅住宿补贴怎么报？"
-    assert _looks_like_policy_query(q)
-    assert not _looks_like_public_tax_query(q)
+    assert looks_like_policy_query(q)
+    assert not looks_like_public_tax_query(q)
 
 
 def test_weather_is_neither_policy_nor_public_tax():
     """天气等无关问题不触发检索。"""
     q = "今天广州的天气怎么样"
-    assert not _looks_like_public_tax_query(q)
-    assert not _looks_like_official_portal_query(q)
+    assert not looks_like_public_tax_query(q)
+    assert not looks_like_official_portal_query(q)
+    assert heuristic_intent(q) == Intent.CHITCHAT
 
 
 def test_invoice_verify_is_portal_not_search():
     """发票查验引导官方平台，不走政策检索。"""
     q = "帮我查验这张发票真伪"
-    assert _looks_like_official_portal_query(q)
-    assert not _looks_like_public_tax_query(q)
+    assert looks_like_official_portal_query(q)
+    assert not looks_like_public_tax_query(q)
+    assert heuristic_intent(q) == Intent.OFFICIAL_PORTAL
 
 
 def test_boost_query_pins_official_sites():

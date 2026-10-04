@@ -3,8 +3,7 @@
 调用模型：客户端先 `POST /api/v1/files/upload` 把文件落到 MinIO，
 拿到 `{file_hash, file_url}` 后带这两个值进 `POST /api/v1/chat/stream`。
 
-文件决定权交给 chat_service / LLM：根据 user_message 语义判断是 ocr_invoice /
-parse_document / kb_query，agent 内部选择下一步动作。
+文本由 classify_intent 路由到既有管道；附件仍先文件分类再进入识别/审查。
 """
 
 import json
