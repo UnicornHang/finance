@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | B2-1 / B2-2 已落地；B2-3 单据子图、B2-4 Langfuse 未做 |
+| 状态 | 已实施（B2-1～B2-4） |
 | 前置 | B1 已落地：无附件文本走 LangGraph + 意图白名单；附件仍 `_dispatch_upload` |
 | 关联 | [B1 文档](agent-langchain-langgraph.md)；`docs/PRD.md` §6 四层上下文；`docs/TD.md` §5 / §6 |
 | 原则 | 归档必须人确认；Agent 不持全局状态；不引入 `archive_*` 工具 |

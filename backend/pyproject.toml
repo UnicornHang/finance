@@ -81,6 +81,9 @@ dev = [
     "bandit>=1.7.0",
     "ipython>=8.28.0",
 ]
+obs = [
+    "langfuse>=2.0.0",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

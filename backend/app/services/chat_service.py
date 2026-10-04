@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.context import SessionContext, attach_memory
 from app.agent.memory import maybe_roll_summary, set_last_intent
 from app.agent.memory.entities import remember_contract_pending, remember_invoice_pending
+from app.agent.observe import record
 from app.agent.policy import effective_intent
 from app.agent.router import Intent, classify_intent
 from app.services.chat_file_service import chat_file_service
@@ -33,6 +34,8 @@ from app.services.official_policy_service import (
     format_official_policy_context,
     official_policy_service,
 )
+from app.services.invoice_service import invoice_service
+from app.services.contract_service import contract_service
 from app.services.session_service import session_service
 from app.services.tool_config_service import tool_config_service
 from app.services.web_search_service import WebSearchRuntime
@@ -403,7 +406,10 @@ class ChatService:
 
         # 有附件时先语义判断，再进入对应业务，不默认当发票
         if chat_file is not None and file_url and file_hash:
-            async for event in self._dispatch_upload(
+            from app.agent.orchestrator import agent_orchestrator
+
+            async for event in agent_orchestrator.stream_upload(
+                self,
                 db,
                 user,
                 session,
@@ -436,6 +442,12 @@ class ChatService:
             tenant_id=str(user.tenant_id),
         )
         intent = effective_intent(decision.intent, ctx.last_intent(), display_msg)
+        record(
+            "effective_intent",
+            classified=decision.intent.value,
+            effective=intent.value,
+            tenant_id=str(user.tenant_id),
+        )
         started = False
         try:
             from app.agent.orchestrator import agent_orchestrator
@@ -486,6 +498,13 @@ class ChatService:
         ctx: SessionContext | None = None,
     ) -> AsyncGenerator[dict, None]:
         """按意图进入制度 / 公开财税 / 门户 / 闲聊管道。"""
+        if intent == Intent.CONFIRM_PENDING:
+            async for event in self._stream_confirm_pending(
+                db, user, session_id, display_msg=display_msg, ctx=ctx
+            ):
+                yield event
+            return
+
         search_trace: dict | None = None
 
         if intent in (Intent.INVOICE_UPLOAD, Intent.CONTRACT_UPLOAD):
@@ -658,6 +677,95 @@ class ChatService:
         )
         return "chitchat", system_prompt, display_msg
 
+    async def _stream_confirm_pending(
+        self,
+        db: AsyncSession,
+        user: "User",
+        session_id: UUID,
+        *,
+        display_msg: str,
+        ctx: SessionContext | None,
+    ) -> AsyncGenerator[dict, None]:
+        """对话确认归档：与 REST confirm 共用 service，无 pending 则只提示侧栏。"""
+        kind = ctx.pending_kind() if ctx else None
+        raw_id = ctx.pending_id() if ctx else None
+        if kind not in ("invoice_pending", "contract_pending") or not raw_id:
+            text = (
+                "当前没有待归档的发票或合同。"
+                "请先上传单据，在右侧侧栏核对字段后再点击「确认归档」。"
+            )
+            yield {"type": "text", "content": text}
+            await self.save_message(
+                db, session_id, user.tenant_id, "assistant", text
+            )
+            yield {"type": "done"}
+            return
+
+        try:
+            item_id = UUID(str(raw_id))
+        except ValueError:
+            text = "待归档单据编号无效，请在右侧侧栏确认归档。"
+            yield {"type": "text", "content": text}
+            await self.save_message(
+                db, session_id, user.tenant_id, "assistant", text
+            )
+            yield {"type": "done"}
+            return
+
+        try:
+            if kind == "invoice_pending":
+                row = await invoice_service.confirm(
+                    db,
+                    tenant_id=user.tenant_id,
+                    user=user,
+                    invoice_id=item_id,
+                    fields=None,
+                )
+                yield {
+                    "type": "sidepanel",
+                    "payload": {
+                        "type": "invoice",
+                        "data": {
+                            **_serialize_invoice(row),
+                            "status": "ready",
+                            "archive_status": "archived",
+                            "invoice_id": str(row.id),
+                        },
+                    },
+                }
+                text = "已确认归档这张发票，档案状态与侧栏确认一致。"
+            else:
+                row = await contract_service.confirm(
+                    db,
+                    tenant_id=user.tenant_id,
+                    user=user,
+                    contract_id=item_id,
+                    fields=None,
+                )
+                yield {
+                    "type": "sidepanel",
+                    "payload": {
+                        "type": "contract",
+                        "data": {
+                            "status": "ready",
+                            "contract_id": str(row.id),
+                            "archive_status": "archived",
+                            "contract_name": row.contract_name,
+                            "risk_level": row.risk_level,
+                        },
+                    },
+                }
+                text = "已确认归档这份合同，档案状态与侧栏确认一致。"
+        except Exception as exc:
+            logger.exception("confirm_pending via chat failed")
+            yield {"type": "error", "message": f"确认归档失败：{exc}"}
+            yield {"type": "done"}
+            return
+
+        yield {"type": "text", "content": text}
+        await self.save_message(db, session_id, user.tenant_id, "assistant", text)
+        yield {"type": "done"}
+
     async def _dispatch_upload(
         self,
         db: AsyncSession,
@@ -671,96 +779,20 @@ class ChatService:
         file_hash: str,
         file_meta: dict,
     ) -> AsyncGenerator[dict, None]:
-        """先判断附件是什么，再进入发票识别、合同审查或普通对话。"""
-        from app.services.invoice_vision_service import invoice_vision_service
+        """兼容入口：转发到附件子图编排。"""
+        from app.agent.orchestrator import agent_orchestrator
 
-        yield {"type": "text", "content": "正在判断这份文件…\n\n"}
-        try:
-            file_bytes = _download_bytes(file_url)
-        except Exception as exc:
-            logger.exception("download upload failed")
-            await chat_file_service.mark(
-                db, file_id, recognize_status="failed", recognize_error=str(exc)
-            )
-            yield {"type": "error", "message": f"下载文件失败：{exc}"}
-            yield {"type": "done"}
-            return
-
-        try:
-            intent = await invoice_vision_service.classify(
-                file_bytes,
-                content_type=file_meta.get("content_type"),
-                filename=file_meta.get("original_filename"),
-                user_message=user_message,
-                db=db,
-                tenant_id=str(user.tenant_id),
-            )
-        except DocumentUnreadableError as exc:
-            logger.info("upload has no readable body file=%s", file_meta.get("original_filename"))
-            await chat_file_service.mark(
-                db, file_id, recognize_status="failed", recognize_error=str(exc)
-            )
-            yield {"type": "error", "message": str(exc)}
-            yield {"type": "done"}
-            return
-        except Exception as exc:
-            logger.exception("classify upload failed")
-            await chat_file_service.mark(
-                db, file_id, recognize_status="failed", recognize_error=str(exc)
-            )
-            yield {"type": "error", "message": f"无法判断文件类型：{exc}"}
-            yield {"type": "done"}
-            return
-
-        await chat_file_service.mark(db, file_id, intent=intent)
-        mapped = {
-            "invoice": Intent.INVOICE_UPLOAD.value,
-            "contract": Intent.CONTRACT_UPLOAD.value,
-        }
-        await set_last_intent(
-            db, session_id, mapped.get(intent, Intent.CHITCHAT.value)
-        )
-
-        if intent == "invoice":
-            async for event in self._stream_invoice_recognize(
-                db,
-                user,
-                session,
-                session_id,
-                user_message=user_message,
-                file_id=file_id,
-                file_url=file_url,
-                file_hash=file_hash,
-                file_meta=file_meta,
-            ):
-                yield event
-            return
-
-        if intent == "contract":
-            async for event in self._stream_contract_review(
-                db,
-                user,
-                session_id,
-                user_message=user_message,
-                file_id=file_id,
-                file_url=file_url,
-                file_hash=file_hash,
-                file_bytes=file_bytes,
-                filename=file_meta.get("original_filename"),
-                content_type=file_meta.get("content_type"),
-            ):
-                yield event
-            return
-
-        async for event in self._stream_file_chat(
+        async for event in agent_orchestrator.stream_upload(
+            self,
             db,
             user,
+            session,
             session_id,
             user_message=user_message,
             file_id=file_id,
-            file_bytes=file_bytes,
-            filename=file_meta.get("original_filename"),
-            content_type=file_meta.get("content_type"),
+            file_url=file_url,
+            file_hash=file_hash,
+            file_meta=file_meta,
         ):
             yield event
 

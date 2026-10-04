@@ -273,7 +273,7 @@ B1 **不启用** Graph persist / checkpointer。
 
 **B1 完成标准**
 
-1. 无附件文本走 LangGraph；附件仍走 `ChatService._dispatch_upload`。  
+1. 无附件文本走 LangGraph；附件走 `stream_upload` 子图，识别/审查实现仍是 ChatService 原函数。  
 2. 第 9.2～9.6 节单测与回归通过。  
 3. 公开财税 / 企业制度 / 官方门户三条路径的来源与 A 等价（不串库）。  
 4. 不支持 tools 的配置自动回退 A，对话不中断。  
@@ -281,8 +281,13 @@ B1 **不启用** Graph persist / checkpointer。
 
 ---
 
-## 11. 与后续 B2 的边界
+## 11. 与 B2 的边界
 
-B2 单独方案见 **[docs/agent-b2.md](agent-b2.md)**：会话摘要与 pending 实体（B2-1）、短追问继承白名单（B2-2）、单据子图但仍用侧栏/REST 确认（B2-3）、可选 Langfuse（B2-4）。
+B2 方案见 **[docs/agent-b2.md](agent-b2.md)**，**已实施**：
 
-B2 **不得**把归档做成模型 Tool，也不得用 Graph interrupt 替换现有确认归档 API。历史消息全量向量 RAG、多 Agent 不在 B2。
+- B2-1 会话摘要 / pending 实体  
+- B2-2 短追问继承白名单  
+- B2-3 附件子图（`classify_file` → invoice / contract / file_chat），归档仍走侧栏 REST 或对话 `confirm_pending`（同一 `confirm` service）  
+- B2-4 可选 Langfuse：无公钥+私钥时不上报  
+
+B2 **没有**把归档做成模型 Tool，也没有用 Graph interrupt 替换确认归档 API。历史消息全量向量 RAG、多 Agent 不在 B2。

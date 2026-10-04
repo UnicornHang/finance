@@ -148,12 +148,32 @@ _FOLLOWUP_HINTS = (
 )
 
 
+_CONFIRM_HINTS = (
+    "确认归档",
+    "确定归档",
+    "帮我存进去",
+    "帮我归档",
+    "确认入库",
+    "帮我确认归档",
+)
+
+
+def looks_like_confirm_archive(text: str) -> bool:
+    """用户是否在对话里要求把当前待办单据确认归档。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    return any(k in t for k in _CONFIRM_HINTS)
+
+
 def looks_like_followup(text: str) -> bool:
     """短追问或省略主语，可能应继承上一轮制度/公开财税白名单。"""
     t = (text or "").strip()
     if not t:
         return False
     if looks_like_official_portal_query(t):
+        return False
+    if looks_like_confirm_archive(t):
         return False
     if any(k in t for k in _FOLLOWUP_HINTS):
         return True

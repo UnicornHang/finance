@@ -22,6 +22,7 @@ def test_portal_and_chitchat_have_no_tools():
     assert tools_for_intent(Intent.CHITCHAT) == []
     assert tools_for_intent(Intent.INVOICE_UPLOAD) == []
     assert tools_for_intent(Intent.CONTRACT_UPLOAD) == []
+    assert tools_for_intent(Intent.CONFIRM_PENDING) == []
 
 
 def test_effective_intent_does_not_open_chitchat_tools():

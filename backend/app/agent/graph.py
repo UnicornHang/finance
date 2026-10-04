@@ -12,6 +12,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.llm_adapter import ChatFinanceLLM
+from app.agent.observe import record
 from app.agent.policy import MAX_TOOL_ROUNDS, TOOL_QUERY_POLICY, tools_for_intent
 from app.agent.router import Intent
 
@@ -113,6 +114,11 @@ async def agent_node(state: AgentState) -> dict:
         ]
         forced = True
         logger.info("force tool %s for intent=%s", name, state.get("intent"))
+        record(
+            "force_tool",
+            tool=name,
+            intent=str(state.get("intent") or ""),
+        )
 
     if legal and round_n >= MAX_TOOL_ROUNDS:
         logger.info("max tool rounds reached, ignore further calls")
@@ -163,6 +169,7 @@ async def tools_node(state: AgentState) -> dict:
             result = f"工具 {name} 调用失败：{exc}"
         text = result if isinstance(result, str) else str(result)
         chunks.append(text)
+        record("tool", tool=str(name), intent=str(state.get("intent") or ""))
         messages.append(
             ToolMessage(
                 content=text,

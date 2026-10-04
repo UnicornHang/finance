@@ -10,10 +10,15 @@ from uuid import UUID
 from app.agent.context import SessionContext, attach_memory
 from app.agent.graph import get_text_graph, graph_runtime
 from app.agent.llm_adapter import ChatFinanceLLM, history_to_messages
+from app.agent.memory import set_last_intent
 from app.agent.memory.entities import remember_policy_title
+from app.agent.observe import record
 from app.agent.policy import status_event_for_tools, tools_for_intent
 from app.agent.router import Intent
 from app.agent.tools.catalog import build_text_tools, pick_tools
+from app.agent.upload_graph import get_upload_graph, upload_runtime
+from app.services.chat_file_service import chat_file_service
+from app.services.invoice_vision_service import invoice_vision_service
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +50,13 @@ class AgentOrchestrator:
         """跑图后把最终回复流式输出为 SSE dict。"""
         # 从 chat_service 取 llm_service，便于测试 patch 同一绑定
         from app.services.chat_service import llm_service
+
+        if intent == Intent.CONFIRM_PENDING:
+            async for event in service._stream_confirm_pending(
+                db, user, session_id, display_msg=display_msg, ctx=ctx
+            ):
+                yield event
+            return
 
         allowed = tools_for_intent(intent)
         status = status_event_for_tools(allowed)
@@ -93,6 +105,12 @@ class AgentOrchestrator:
             system_prompt,
             user_content,
             ctx,
+        )
+        record(
+            "llm_scene",
+            intent=intent.value,
+            scene=scene,
+            tenant_id=str(user.tenant_id),
         )
         search_trace = trace.get("search")
 
@@ -194,7 +212,7 @@ class AgentOrchestrator:
                     ),
                     "chitchat",
                 )
-            case Intent.CHITCHAT:
+            case Intent.CHITCHAT | Intent.CONFIRM_PENDING:
                 system_prompt = await service._effective_system_prompt(
                     db, user.tenant_id, "chitchat"
                 )
@@ -258,6 +276,7 @@ class AgentOrchestrator:
                 | Intent.OFFICIAL_PORTAL
                 | Intent.INVOICE_UPLOAD
                 | Intent.CONTRACT_UPLOAD
+                | Intent.CONFIRM_PENDING
             ):
                 system_prompt = opening_system
                 user_content = opening_user
@@ -274,6 +293,119 @@ class AgentOrchestrator:
             ],
             scene,
         )
+
+    async def stream_upload(
+        self,
+        service: "ChatService",
+        db: "AsyncSession",
+        user: "User",
+        session: "Session",
+        session_id: UUID,
+        *,
+        user_message: str,
+        file_id: UUID,
+        file_url: str,
+        file_hash: str,
+        file_meta: dict,
+    ) -> AsyncGenerator[dict, None]:
+        """附件子图分类后，调用现有识别/审查/文件闲聊并流式 SSE。"""
+        # 避免与 ChatService 模块循环：下载函数定义在 chat_service
+        from app.services.chat_service import _download_bytes
+
+        yield {"type": "text", "content": "正在判断这份文件…\n\n"}
+        try:
+            file_bytes = _download_bytes(file_url)
+        except Exception as exc:
+            logger.exception("download upload failed")
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=str(exc)
+            )
+            yield {"type": "error", "message": f"下载文件失败：{exc}"}
+            yield {"type": "done"}
+            return
+
+        token = upload_runtime.set(
+            {
+                "classify": invoice_vision_service.classify,
+                "file_bytes": file_bytes,
+                "content_type": file_meta.get("content_type"),
+                "filename": file_meta.get("original_filename"),
+                "user_message": user_message,
+                "db": db,
+                "tenant_id": str(user.tenant_id),
+            }
+        )
+        try:
+            final = await get_upload_graph().ainvoke(
+                {"user_message": user_message or "", "file_kind": "", "error": ""}
+            )
+        finally:
+            upload_runtime.reset(token)
+
+        kind = final.get("file_kind") or "chat"
+        error = (final.get("error") or "").strip()
+        if kind == "error":
+            await chat_file_service.mark(
+                db, file_id, recognize_status="failed", recognize_error=error
+            )
+            yield {"type": "error", "message": error}
+            yield {"type": "done"}
+            return
+
+        await chat_file_service.mark(db, file_id, intent=kind)
+        mapped = {
+            "invoice": Intent.INVOICE_UPLOAD.value,
+            "contract": Intent.CONTRACT_UPLOAD.value,
+        }
+        await set_last_intent(
+            db, session_id, mapped.get(kind, Intent.CHITCHAT.value)
+        )
+        record(
+            "upload_route",
+            file_kind=kind,
+            tenant_id=str(user.tenant_id),
+        )
+
+        match kind:
+            case "invoice":
+                async for event in service._stream_invoice_recognize(
+                    db,
+                    user,
+                    session,
+                    session_id,
+                    user_message=user_message,
+                    file_id=file_id,
+                    file_url=file_url,
+                    file_hash=file_hash,
+                    file_meta=file_meta,
+                ):
+                    yield event
+            case "contract":
+                async for event in service._stream_contract_review(
+                    db,
+                    user,
+                    session_id,
+                    user_message=user_message,
+                    file_id=file_id,
+                    file_url=file_url,
+                    file_hash=file_hash,
+                    file_bytes=file_bytes,
+                    filename=file_meta.get("original_filename"),
+                    content_type=file_meta.get("content_type"),
+                ):
+                    yield event
+            case _:
+                async for event in service._stream_file_chat(
+                    db,
+                    user,
+                    session_id,
+                    user_message=user_message,
+                    file_id=file_id,
+                    file_bytes=file_bytes,
+                    filename=file_meta.get("original_filename"),
+                    content_type=file_meta.get("content_type"),
+                ):
+                    yield event
 
 
 def _first_policy_title(tool_result: str) -> str:

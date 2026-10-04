@@ -134,6 +134,18 @@ class SessionContext:
         except ValueError:
             return None
 
+    def pending_kind(self) -> str | None:
+        """当前待归档种类：invoice_pending / contract_pending。"""
+        return _pending_kind(self.entities.get(PENDING_TASK))
+
+    def pending_id(self) -> str | None:
+        """当前待归档单据 id。"""
+        raw = self.entities.get(PENDING_TASK)
+        if isinstance(raw, dict):
+            pid = str(raw.get("id") or "").strip()
+            return pid or None
+        return None
+
     def memory_block(self) -> str:
         """注入 system 的摘要与待办块。"""
         pending = self.entities.get(PENDING_TASK)

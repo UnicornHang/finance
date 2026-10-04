@@ -1,6 +1,6 @@
 """意图到只读工具白名单。硬门禁写在代码里，不只写在 prompt。"""
 
-from app.agent.heuristics import looks_like_followup
+from app.agent.heuristics import looks_like_confirm_archive, looks_like_followup
 from app.agent.router import Intent
 
 TOOL_QUERY_POLICY = "query_policy"
@@ -19,6 +19,7 @@ _INTENT_TOOLS: dict[Intent, tuple[str, ...]] = {
     Intent.CHITCHAT: (),
     Intent.INVOICE_UPLOAD: (),
     Intent.CONTRACT_UPLOAD: (),
+    Intent.CONFIRM_PENDING: (),
 }
 
 
@@ -31,6 +32,8 @@ def effective_intent(
     """本轮分类优先；仅闲聊且像追问时继承上一轮制度或公开财税。"""
     if classified != Intent.CHITCHAT:
         return classified
+    if looks_like_confirm_archive(text):
+        return Intent.CONFIRM_PENDING
     if last not in _INHERITABLE_INTENTS:
         return classified
     if looks_like_followup(text):

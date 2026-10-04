@@ -10,11 +10,13 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from app.agent.heuristics import (
+    looks_like_confirm_archive,
     looks_like_internal_reimburse,
     looks_like_official_portal_query,
     looks_like_policy_query,
     should_use_official_search,
 )
+from app.agent.observe import record
 from app.services.llm_service import llm_service
 
 if TYPE_CHECKING:
@@ -35,6 +37,7 @@ class Intent(str, Enum):
     OFFICIAL_PORTAL = "official_portal"
     INVOICE_UPLOAD = "invoice_upload"
     CONTRACT_UPLOAD = "contract_upload"
+    CONFIRM_PENDING = "confirm_pending"
 
 
 class IntentSource(str, Enum):
@@ -63,12 +66,14 @@ INTENT_PROMPT = """你是财务对话的意图分类器。只输出一个 JSON �
 - official_portal：发票真伪查验、企业工商公示、裁判文书、12366 办税等，只能引导用户去官方网站自行办理
 - invoice_upload：用户想识别/归档发票，但本轮主要是在谈发票单据（无附件时请仍标此意图）
 - contract_upload：用户想审查/解析合同
+- confirm_pending：用户要求把当前待核对的发票或合同确认归档（如「确认归档」「帮我存进去」），不是重新识别
 
 硬规则：
 1. 问「我们公司差旅怎么报 / 住宿补贴多少」→ policy_query，即使出现「政策」「规定」。
 2. 问「广州企业所得税优惠 / 增值税税率 / 财政部最新文件」→ public_tax，不要标成 policy_query。
 3. 「帮我查验发票真伪 / 工商信息 / 裁判文书」→ official_portal，不要假装能查到结果，也不要标 public_tax。
-4. 天气、问候、你是谁 → chitchat。
+4. 「确认归档 / 帮我存进去」且没有新附件 → confirm_pending。
+5. 天气、问候、你是谁 → chitchat。
 
 用户输入：{input}
 附件类型：{file_type}
@@ -116,6 +121,7 @@ def _parse_intent_value(raw: object) -> Intent | None:
         "官方门户": Intent.OFFICIAL_PORTAL,
         "发票": Intent.INVOICE_UPLOAD,
         "合同": Intent.CONTRACT_UPLOAD,
+        "确认归档": Intent.CONFIRM_PENDING,
     }
     if key in aliases:
         return aliases[key]
@@ -137,7 +143,9 @@ def _parse_confidence(raw: object) -> float:
 
 
 def heuristic_intent(text: str) -> Intent:
-    """LLM 不可用时的保守意图。门户 > 公开财税 > 内部报销/制度 > 闲聊。"""
+    """LLM 不可用时的保守意图。确认归档 > 门户 > 公开财税 > 内部报销/制度 > 闲聊。"""
+    if looks_like_confirm_archive(text):
+        return Intent.CONFIRM_PENDING
     if looks_like_official_portal_query(text):
         return Intent.OFFICIAL_PORTAL
     if should_use_official_search(text):
@@ -170,40 +178,51 @@ async def classify_intent(
     附件已由 ChatService 走文件分类；此处 file_type 仅给骨架编排预留短路。
     """
     if file_type == "invoice":
-        return _decision(Intent.INVOICE_UPLOAD, 1.0, IntentSource.FILE_TYPE)
-    if file_type == "contract":
-        return _decision(Intent.CONTRACT_UPLOAD, 1.0, IntentSource.FILE_TYPE)
+        decision = _decision(Intent.INVOICE_UPLOAD, 1.0, IntentSource.FILE_TYPE)
+    elif file_type == "contract":
+        decision = _decision(Intent.CONTRACT_UPLOAD, 1.0, IntentSource.FILE_TYPE)
+    else:
+        text = (input_text or "").strip()
+        if not text:
+            decision = _decision(Intent.CHITCHAT, 1.0, IntentSource.HEURISTIC)
+        else:
+            prompt = INTENT_PROMPT.format(input=text, file_type=file_type or "none")
+            decision = None
+            try:
+                result = await llm_service.invoke(
+                    messages=[{"role": "user", "content": prompt}],
+                    scene="chitchat",
+                    db=db,
+                    tenant_id=tenant_id,
+                    temperature=0.0,
+                    max_tokens=256,
+                    apply_scene_prompt=False,
+                )
+                data = _parse_json_object(result)
+                intent = _parse_intent_value(data.get("intent"))
+                confidence = _parse_confidence(data.get("confidence"))
+                if intent is not None and confidence >= MIN_INTENT_CONFIDENCE:
+                    decision = _decision(intent, confidence, IntentSource.LLM)
+                else:
+                    logger.info(
+                        "intent llm rejected intent=%s confidence=%.3f, fallback heuristic",
+                        None if intent is None else intent.value,
+                        confidence,
+                    )
+            except Exception:
+                logger.exception("intent llm classify failed, fallback heuristic")
+            if decision is None:
+                decision = _decision(heuristic_intent(text), 0.0, IntentSource.HEURISTIC)
 
-    text = (input_text or "").strip()
-    if not text:
-        return _decision(Intent.CHITCHAT, 1.0, IntentSource.HEURISTIC)
-
-    prompt = INTENT_PROMPT.format(input=text, file_type=file_type or "none")
-    try:
-        result = await llm_service.invoke(
-            messages=[{"role": "user", "content": prompt}],
-            scene="chitchat",
-            db=db,
-            tenant_id=tenant_id,
-            temperature=0.0,
-            max_tokens=256,
-            apply_scene_prompt=False,
-        )
-        data = _parse_json_object(result)
-        intent = _parse_intent_value(data.get("intent"))
-        confidence = _parse_confidence(data.get("confidence"))
-        if intent is not None and confidence >= MIN_INTENT_CONFIDENCE:
-            return _decision(intent, confidence, IntentSource.LLM)
-        logger.info(
-            "intent llm rejected intent=%s confidence=%.3f, fallback heuristic",
-            None if intent is None else intent.value,
-            confidence,
-        )
-    except Exception:
-        logger.exception("intent llm classify failed, fallback heuristic")
-
-    fallback = heuristic_intent(text)
-    return _decision(fallback, 0.0, IntentSource.HEURISTIC)
+    record(
+        "classify_intent",
+        intent=decision.intent.value,
+        source=decision.source.value,
+        confidence=decision.confidence,
+        tenant_id=tenant_id or "",
+        text=(input_text or "")[:80],
+    )
+    return decision
 
 
 async def route_intent(
