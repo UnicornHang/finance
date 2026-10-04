@@ -77,6 +77,17 @@ class Settings(BaseSettings):
     tencent_ocr_secret_key: str = ""
     tencent_ocr_region: str = "ap-guangzhou"
 
+    # ---- 公开财税检索（最新政策/税率，非企业知识库）----
+    web_search_enabled: bool = False
+    web_search_provider: Literal["bocha", "tavily"] = "bocha"
+    web_search_api_key: str = ""
+    web_search_base_url: str = ""
+    web_search_timeout: int = 15
+    web_search_max_results: int = 8
+    # 检索命中后抓取前 N 条官方页面正文；0 = 只用不摘要
+    web_search_fetch_pages: int = 2
+    web_search_fetch_max_chars: int = 4000
+
     # ---- Embedding ----
     embedding_model: str = "text-embedding-3-small"
     embedding_api_key: str = ""

@@ -5,6 +5,7 @@ import type {
   LLMProvider,
   LLMScene,
   LLMTestResult,
+  ToolConfig,
   KbDocument,
   KbDocumentDetail,
   KbIndexSettings,
@@ -50,6 +51,32 @@ export const llmApi = {
     apiClient.post<LLMTestResult>(`/llm/configs/${scene}/test`).then((r) => r.data),
   testPayload: (payload: LlmConfigPayload) =>
     apiClient.post<LLMTestResult>('/llm/test', payload).then((r) => r.data),
+}
+
+export interface ToolConfigPayload {
+  provider: string
+  api_key?: string
+  base_url?: string | null
+  enabled?: boolean
+  timeout_seconds?: number
+  max_results?: number
+  fetch_pages?: number
+  fetch_max_chars?: number
+}
+
+export const toolApi = {
+  listConfigs: () =>
+    apiClient.get<ToolConfig[]>('/tools/configs').then((r) => r.data),
+  upsertConfig: (toolName: string, payload: ToolConfigPayload) =>
+    apiClient
+      .put<ToolConfig>(`/tools/configs/${toolName}`, payload)
+      .then((r) => r.data),
+  testSavedConfig: (toolName: string) =>
+    apiClient
+      .post<LLMTestResult>(`/tools/configs/${toolName}/test`)
+      .then((r) => r.data),
+  testPayload: (payload: ToolConfigPayload & { tool_name?: string }) =>
+    apiClient.post<LLMTestResult>('/tools/test', payload).then((r) => r.data),
 }
 
 export const kbApi = {

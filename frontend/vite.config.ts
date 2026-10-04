@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname)
   // 优先级：shell 环境变量 > .env/.env.local > 默认值（后端跑 Windows 本机时的端口）
   const apiTarget =
-    process.env.VITE_API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8001'
+    process.env.VITE_API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:8000'
 
   return {
     plugins: [react()],

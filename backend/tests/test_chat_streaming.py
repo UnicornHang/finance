@@ -190,3 +190,71 @@ async def test_stream_uses_custom_system_prompt(mock_db, mock_user, mock_session
     assert captured["messages"][0]["role"] == "system"
     assert captured["messages"][0]["content"] == "你叫MoFan，是魔方财务科技顾问。"
     assert "小财" not in captured["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_session):
+    """公开财税问题先检索再生成，并推送 status 事件。"""
+    captured: dict = {}
+
+    async def mock_llm_stream(messages, scene, **kwargs):
+        captured["messages"] = messages
+        captured["scene"] = scene
+        yield "根据检索"
+
+    search_payload = {
+        "ok": True,
+        "provider": "bocha",
+        "query": "q",
+        "hits": [
+            {
+                "title": "国家税务总局公告",
+                "url": "https://www.chinatax.gov.cn/a",
+                "snippet": "小微企业优惠",
+                "published_at": "2026-03-01",
+                "source_kind": "official",
+            }
+        ],
+        "pages": [
+            {
+                "title": "国家税务总局公告",
+                "url": "https://www.chinatax.gov.cn/a",
+                "text": "对小型微利企业减免企业所得税",
+            }
+        ],
+        "error": None,
+    }
+
+    with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
+        mock_cfg_svc.resolve = AsyncMock(return_value=None)
+        with patch("app.services.chat_service.llm_service") as mock_llm:
+            mock_llm.stream = mock_llm_stream
+            with patch("app.services.chat_service.session_service") as mock_session_svc:
+                mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
+                with patch("app.services.chat_service.rag_service") as mock_rag:
+                    mock_rag.retrieve = AsyncMock(return_value=[])
+                    with patch(
+                        "app.services.chat_service.official_policy_service"
+                    ) as mock_policy:
+                        mock_policy.search_and_fetch = AsyncMock(
+                            return_value=search_payload
+                        )
+                        service = ChatService()
+                        service.save_message = AsyncMock()
+                        events = []
+                        async for event in service.stream_response(
+                            mock_db,
+                            mock_user,
+                            mock_session.id,
+                            "广州地区有哪些企业所得税税收优惠政策？",
+                        ):
+                            events.append(event)
+
+    assert any(e.get("type") == "status" for e in events)
+    assert captured["messages"][0]["role"] == "system"
+    assert "权威网站" in captured["messages"][0]["content"]
+    user_content = captured["messages"][-1]["content"]
+    assert "国家税务总局公告" in user_content
+    assert "https://www.chinatax.gov.cn/a" in user_content
+    tool_kw = service.save_message.call_args.kwargs
+    assert tool_kw.get("tool_calls", {}).get("tool") == "search_official_policy"

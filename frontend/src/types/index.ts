@@ -153,6 +153,36 @@ export interface LLMTestResult {
   latency_ms: number
 }
 
+export interface ToolConfig {
+  id: string | null
+  tool_name: string
+  label: string
+  description: string
+  provider: string
+  base_url: string | null
+  enabled: boolean
+  timeout_seconds: number
+  max_results: number
+  fetch_pages: number
+  fetch_max_chars: number
+  has_api_key: boolean
+  api_key_masked: string | null
+  source: 'db' | 'env'
+  updated_at: string | null
+}
+
+export interface ToolCatalogItem {
+  key: string
+  label: string
+  description: string
+  providers: Array<{
+    key: string
+    label: string
+    default_base_url: string
+    api_key_help: string
+  }>
+}
+
 export interface KbDocument {
   id: string
   title: string
@@ -202,6 +232,7 @@ export interface KbIndexSettings {
 // SSE 事件类型
 export type StreamEvent =
   | { type: 'text'; content: string; session_id?: string }
+  | { type: 'status'; message: string }
   | {
       type: 'sidepanel'
       payload: {

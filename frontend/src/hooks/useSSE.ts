@@ -92,16 +92,29 @@ export function useChat() {
       setStreaming(true)
       try {
         for await (const event of streamChat(sessionId, message, fileRef)) {
-          if (event.type === 'text') {
-            accumulated += event.content
-            schedule()
-          } else if (event.type === 'sidepanel') {
-            openSidePanel(event.payload.type, event.payload.data)
-          } else if (event.type === 'done') {
-            break
-          } else if (event.type === 'error') {
-            throw new Error(event.message)
+          switch (event.type) {
+            case 'text':
+              accumulated += event.content
+              schedule()
+              break
+            case 'status':
+              if (!accumulated) {
+                updateMessage(sessionId, assistantMsg.id, { content: event.message })
+              }
+              break
+            case 'sidepanel':
+              openSidePanel(event.payload.type, event.payload.data)
+              break
+            case 'done':
+              break
+            case 'error':
+              throw new Error(event.message)
+            default: {
+              const _exhaustive: never = event
+              void _exhaustive
+            }
           }
+          if (event.type === 'done') break
         }
       } finally {
         if (frame !== 0) cancelAnimationFrame(frame)

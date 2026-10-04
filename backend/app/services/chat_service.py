@@ -23,7 +23,13 @@ from app.services.invoice_document import (
 from app.services.llm_config_service import llm_config_service
 from app.services.llm_service import llm_service
 from app.services.rag_service import rag_service
+from app.services.official_policy_service import (
+    format_official_policy_context,
+    official_policy_service,
+)
 from app.services.session_service import session_service
+from app.services.tool_config_service import tool_config_service
+from app.services.web_search_service import WebSearchRuntime
 
 if TYPE_CHECKING:
     from app.models import Message, Session, User
@@ -32,17 +38,22 @@ logger = logging.getLogger(__name__)
 
 
 # 场景未配置 system_prompt 时的默认人设。
-SYSTEM_PROMPT = """你是企业财务 AI 助手，名叫「¥ 小财」。
+SYSTEM_PROMPT = """你是企业财务 AI 助手，名叫「¥ MoFan」。
 
 你可以帮助用户：
 1. 识别并归档发票（用户上传发票图片/PDF）
 2. 审查合同合规性
-3. 回答企业制度问题（使用 RAG 检索）
+3. 回答企业制度问题（使用知识库检索）
+4. 按财政部、税务总局等权威网站查询最新公开财税政策（不替代企业知识库）
 
 回答要求：
 - 用简洁、专业的中文
 - 不确定的内容明确告知用户
 - 涉及金额、日期、合同条款等关键信息要准确
+- 企业内部标准必须以知识库为准，不得用外网资料冒充本公司制度
+- 公开财税政策必须依据权威网站检索结果，并注明标题、文号与链接；没有检索结果时不要编造
+- 发票真伪、工商登记、裁判文书请引导用户走对应官方平台，不要假装已查验
+- 天气、娱乐等与财务无关的问题可简短说明能力范围后，引导回财税
 - 必要时引导用户提供更具体的上下文
 """
 
@@ -55,6 +66,27 @@ POLICY_SYSTEM_PROMPT = """你是企业财务 AI 助手，负责根据「企业�
 3. 参考资料未覆盖的内容，明确说「知识库暂无相关规定」，不要编造公司内部数字；
 4. 不要用外部「国家机关参考标准」替代本公司知识库已有内容；
 5. 用简洁专业的中文。
+"""
+
+# 公开财税问答：只引用白名单官网，结构化作答并免责
+PUBLIC_TAX_SYSTEM_PROMPT = """你是企业财务 AI 助手，依据「权威网站检索资料」回答最新财税政策、税率、地区优惠、法规文件等问题。
+
+硬性要求：
+1. 只依据下方检索资料与官方原文作答；关键结论必须注明来源标题、文号（若有）和链接；
+2. 优先引用财政部、税务总局、法规库、会计司、会计准则委员会、国家法律法规数据库；税屋等仅作「专业参考平台」补充，不得写成官方原文；
+3. 资料不足或互相矛盾时明确说明，禁止编造税率、优惠幅度、文号；
+4. 必须声明：以下为公开政策信息，是否适用于本公司以企业知识库与主管税务机关为准；
+5. 不要把公开政策写成「本公司报销/补贴标准」；
+6. 回答结构：核心摘要 → 目标与变化 / 范围与时间 / 要点 / 影响与建议 → 开放式追问；
+7. 重大操作问题结尾必须附免责：仅供学习参考，不构成正式财税意见。
+"""
+
+PORTAL_SYSTEM_PROMPT = """用户想使用需要登录或验证码的官方业务系统（发票查验、企业信用公示、裁判文书等）。
+
+硬性要求：
+1. 明确说明你无法在对话里直接查验或登录这些系统；
+2. 给出对应官方入口名称和网址，请用户自行办理；
+3. 不要假装已经查到工商信息、发票真伪或判决书。
 """
 
 # 粗粒度启发：命中则更倾向走制度问答 + RAG
@@ -79,11 +111,128 @@ _POLICY_HINTS = (
 
 
 def _looks_like_policy_query(text: str) -> bool:
-    """用户问题是否像制度/标准查询。"""
+    """用户问题是否像企业内部制度/标准查询。"""
     t = (text or "").strip()
     if not t:
         return False
     return any(k in t for k in _POLICY_HINTS)
+
+
+# 公开财税：走外网检索，而不是企业知识库
+_PUBLIC_TAX_HINTS = (
+    "税率",
+    "增值税",
+    "所得税",
+    "企业所得税",
+    "个人所得税",
+    "个税",
+    "税收优惠",
+    "税务优惠",
+    "加计扣除",
+    "留抵退税",
+    "出口退税",
+    "进项",
+    "销项",
+    "征收率",
+    "印花税",
+    "附加税",
+    "消费税",
+    "税务总局",
+    "国家税务总局",
+    "财政部",
+    "财税",
+    "税总",
+    "汇算清缴",
+    "数电票",
+    "电子发票",
+    "小微企业",
+    "高新",
+    "研发费用",
+    "地区优惠",
+    "大湾区",
+    "税收政策",
+    "税收",
+    "最新政策",
+    "政策法规",
+    "免税",
+    "即征即退",
+    "核定征收",
+    "税务局",
+    "法规库",
+    "会计准则",
+    "新规",
+    "文号",
+    "会计司",
+    "法律法规",
+    "政策文件",
+    "法规",
+)
+
+
+_INTERNAL_REIMBURSE_HINTS = (
+    "差旅",
+    "补贴",
+    "报销",
+    "住宿",
+    "餐补",
+    "怎么报",
+)
+
+
+def _looks_like_internal_reimburse(text: str) -> bool:
+    """是否在问本公司差旅/报销标准（必须走知识库）。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    return any(k in t for k in _INTERNAL_REIMBURSE_HINTS)
+
+
+def _looks_like_public_tax_query(text: str) -> bool:
+    """用户问题是否像公开财税政策/税率/法规查询。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if _looks_like_official_portal_query(t):
+        return False
+    return any(k in t for k in _PUBLIC_TAX_HINTS)
+
+
+def _should_use_official_search(text: str) -> bool:
+    """公开财税检索优先于弱相关知识库命中。
+
+    「政策」会出现在制度启发里，差旅文档也常被召回；
+    问广州税收政策时不能因此锁进「知识库暂无」。
+    """
+    if not _looks_like_public_tax_query(text):
+        return False
+    if not _looks_like_internal_reimburse(text):
+        return True
+    return any(
+        k in text
+        for k in ("税率", "税收政策", "税收优惠", "最新政策", "新规", "税务总局", "财政部")
+    )
+
+
+_PORTAL_HINTS = (
+    "发票真伪",
+    "查验发票",
+    "验真",
+    "工商信息",
+    "信用公示",
+    "企业公示",
+    "裁判文书",
+    "gsxt",
+    "wenshu",
+    "inv-veri",
+)
+
+
+def _looks_like_official_portal_query(text: str) -> bool:
+    """是否在要发票查验/公示/文书等官方业务入口，而不是政策检索。"""
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    return any(k in t for k in _PORTAL_HINTS)
 
 
 def _format_rag_context(hits: list[dict]) -> str:
@@ -367,10 +516,12 @@ class ChatService:
             rag_hits = []
 
         best_score = float(rag_hits[0]["score"]) if rag_hits else 0.0
-        # 相关分足够，或问题像制度查询且有任意召回
-        use_policy = bool(rag_hits) and (
-            best_score >= 0.35 or _looks_like_policy_query(display_msg)
+        prefer_official = _should_use_official_search(display_msg)
+        # 相关分足够，或问题像内部报销且有召回；公开财税不走这条
+        use_policy = (not prefer_official) and bool(rag_hits) and (
+            best_score >= 0.35 or _looks_like_internal_reimburse(display_msg)
         )
+        search_trace: dict | None = None
 
         if use_policy:
             scene = "policy_query"
@@ -396,6 +547,75 @@ class ChatService:
                 "chat policy_query rag hits=%s best_score=%.3f",
                 len(rag_hits),
                 best_score,
+            )
+        elif _looks_like_official_portal_query(display_msg):
+            scene = "chitchat"
+            base_prompt = await self._effective_system_prompt(
+                db, user.tenant_id, scene
+            )
+            if base_prompt.strip() == SYSTEM_PROMPT.strip():
+                system_prompt = PORTAL_SYSTEM_PROMPT
+            else:
+                system_prompt = f"{base_prompt.strip()}\n\n{PORTAL_SYSTEM_PROMPT}"
+            user_content = (
+                f"{display_msg}\n\n"
+                "请引导用户前往对应官方平台自行办理，并给出准确网站名称与网址："
+                "全国增值税发票查验平台 https://inv-veri.chinatax.gov.cn ；"
+                "国家企业信用信息公示系统 https://www.gsxt.gov.cn ；"
+                "中国裁判文书网 https://wenshu.court.gov.cn ；"
+                "12366 纳税服务平台 https://12366.chinatax.gov.cn 。"
+                "不要假装已经完成查验。"
+            )
+        elif prefer_official:
+            # 公开财税：只查权威站点白名单，必要时抓取原文
+            scene = "chitchat"
+            base_prompt = await self._effective_system_prompt(
+                db, user.tenant_id, scene
+            )
+            if base_prompt.strip() == SYSTEM_PROMPT.strip():
+                system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
+            else:
+                system_prompt = (
+                    f"{base_prompt.strip()}\n\n"
+                    "补充约束：回答最新公开财税政策时，必须依据下方权威网站资料，"
+                    "注明标题、文号（若有）与链接；税屋等非官网须标明为专业参考平台；"
+                    "资料不足时明确说明，禁止编造；公开政策不得写成公司内部制度；"
+                    "重大操作须附免责声明。"
+                )
+            yield {"type": "status", "message": "正在按财政部、税务总局等权威网站检索…"}
+            try:
+                runtime = await tool_config_service.resolve_web_search(
+                    db, user.tenant_id
+                )
+            except Exception:
+                logger.exception("resolve web search config failed, fall back to env")
+                runtime = WebSearchRuntime.from_settings()
+            search_result = await official_policy_service.search_and_fetch(
+                display_msg, runtime=runtime
+            )
+            search_trace = {
+                "tool": "search_official_policy",
+                "query": search_result.get("query"),
+                "provider": search_result.get("provider"),
+                "ok": search_result.get("ok"),
+                "hit_count": len(search_result.get("hits") or []),
+                "fetched_count": len(search_result.get("pages") or []),
+                "error": search_result.get("error"),
+            }
+            context = format_official_policy_context(search_result)
+            user_content = (
+                f"【权威网站检索资料】\n{context}\n\n"
+                f"【用户问题】\n{display_msg}\n\n"
+                "请先用一两句说明正在依据权威网站列表查询的结果，再按"
+                "核心摘要 → 要点分述 → 影响与建议 作答；关键信息加粗；"
+                "结尾开放追问，并附免责声明。"
+            )
+            logger.info(
+                "chat official_policy search ok=%s hits=%s fetched=%s provider=%s",
+                search_result.get("ok"),
+                search_trace["hit_count"],
+                search_trace["fetched_count"],
+                search_result.get("provider"),
             )
         else:
             scene = "chitchat"
@@ -433,13 +653,23 @@ class ChatService:
             yield {"type": "error", "message": f"AI 调用失败：{exc}"}
             if assistant_content:
                 await self.save_message(
-                    db, session_id, user.tenant_id, "assistant", assistant_content
+                    db,
+                    session_id,
+                    user.tenant_id,
+                    "assistant",
+                    assistant_content,
+                    tool_calls=search_trace,
                 )
             return
 
         if assistant_content.strip():
             await self.save_message(
-                db, session_id, user.tenant_id, "assistant", assistant_content
+                db,
+                session_id,
+                user.tenant_id,
+                "assistant",
+                assistant_content,
+                tool_calls=search_trace,
             )
             if not history or len(history) <= 1:
                 await self.auto_title(db, session, display_msg)

@@ -11,6 +11,7 @@ import {
   BookOpen,
   Users,
   Cpu,
+  Wrench,
   ShieldCheck,
   Search,
   Bell,
@@ -42,6 +43,7 @@ const NAV_ITEMS = [
   { to: '/admin/kb', label: '知识库', icon: BookOpen, end: false },
   { to: '/admin/users', label: '用户管理', icon: Users, end: false },
   { to: '/admin/llm', label: 'LLM 设置', icon: Cpu, end: false },
+  { to: '/admin/tools', label: '工具配置', icon: Wrench, end: false },
 ]
 
 const ROLE_LABEL: Record<string, string> = {

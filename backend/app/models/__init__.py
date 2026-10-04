@@ -351,6 +351,33 @@ class LlmConfig(Base):
     )
 
 
+# ================ 工具配置（检索等外部工具） ================
+
+class ToolConfig(Base):
+    """租户级工具配置。API Key 加密存储，与 LLM 场景配置分离。"""
+
+    __tablename__ = "tool_configs"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(50))
+    api_key_encrypted: Mapped[str | None] = mapped_column(Text)
+    base_url: Mapped[str | None] = mapped_column(String(300))
+    extra_params: Mapped[dict | None] = mapped_column(JSONB)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "tool_name", name="uk_tool_tenant_name"),
+    )
+
+
 # ================ 审计日志 ================
 
 class AuditLog(Base):
@@ -390,6 +417,7 @@ __all__ = [
     "KbDocument",
     "KbChunk",
     "LlmConfig",
+    "ToolConfig",
     "AuditLog",
     "UserRole",
     "InvoiceType",

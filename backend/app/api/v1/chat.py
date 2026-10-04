@@ -54,6 +54,7 @@ async def chat_stream(
 
     SSE 事件：
     - {type: "text", content}             增量文本（模型流式返回 / 思考中间步骤）
+    - {type: "status", message}           中间状态（如正在检索公开财税信息）
     - {type: "sidepanel", payload}        结构化数据 ready 时右侧持久栏触发
     - {type: "done"}                      流结束
     - {type: "error", message}            错误
