@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.agent.router import Intent, IntentDecision, IntentSource
-from app.services.chat_service import ChatService, SYSTEM_PROMPT
+from app.services.chat_service import (
+    ChatService,
+    SYSTEM_PROMPT,
+    _user_type_mismatch_instruction,
+)
 
 
 def _intent(intent: Intent, confidence: float = 0.9) -> IntentDecision:
@@ -355,3 +359,24 @@ async def test_stream_invoice_intent_without_file_asks_upload(
 
     assert "没有附件" in captured["messages"][-1]["content"]
     assert "上传" in captured["messages"][-1]["content"]
+
+
+def test_mismatch_invoice_called_contract():
+    """口称合同、实为发票时，回复提示要求先纠正。"""
+    hint = _user_type_mismatch_instruction("识别这个合同", "invoice")
+    assert "不是合同" in hint
+    assert "发票" in hint
+    assert "不要按合同审查" in hint
+
+
+def test_mismatch_contract_called_invoice():
+    """口称发票、实为合同时，审查提示要求先纠正。"""
+    hint = _user_type_mismatch_instruction("帮我识别这张发票", "contract")
+    assert "不是发票" in hint
+    assert "合同" in hint
+
+
+def test_mismatch_skipped_when_user_asks_which_type():
+    """同时提到发票和合同时不强制单边纠正。"""
+    assert _user_type_mismatch_instruction("这是发票还是合同？", "invoice") == ""
+    assert _user_type_mismatch_instruction("请识别发票", "invoice") == ""

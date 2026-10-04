@@ -226,6 +226,34 @@ def _format_result_for_prompt(fields: dict[str, Any], source: str) -> str:
     return "\n".join(lines)
 
 
+def _user_type_mismatch_instruction(user_message: str, actual: str) -> str:
+    """用户口头类型与系统判定不一致时，要求回复先纠正再办事。
+
+    actual 仅为 invoice / contract。两边都点名时不纠正，避免「发票还是合同」被误伤。
+    """
+    text = (user_message or "").strip()
+    if not text:
+        return ""
+    said_contract = any(k in text.lower() for k in ("合同", "协议", "contract"))
+    said_invoice = any(
+        k in text.lower() for k in ("发票", "专票", "普票", "报销单", "收据", "invoice")
+    )
+    if actual == "invoice" and said_contract and not said_invoice:
+        return (
+            "用户把这份文件叫做合同，但系统已判定为发票。"
+            "请先明确告诉用户：展示的不是合同，而是发票（若能从结果看出票种请点明，"
+            "例如增值税专用发票），然后再汇报识别字段。"
+            "不要按合同审查来写，不要假装已完成合同审查。"
+        )
+    if actual == "contract" and said_invoice and not said_contract:
+        return (
+            "用户把这份文件叫做发票，但系统已判定为合同。"
+            "请先明确告诉用户：这不是发票，而是合同，然后再做审查说明。"
+            "不要按发票识别字段来写。"
+        )
+    return ""
+
+
 class ChatService:
     """Chat 消息持久化 + 流式响应编排。"""
 
@@ -773,6 +801,9 @@ class ChatService:
             "若正文较短，就基于已有条款做审查，不要讨论文件格式。"
             f"{rules_block}"
         )
+        mismatch = _user_type_mismatch_instruction(user_message, "contract")
+        if mismatch:
+            instruction += f"\n{mismatch}"
         if user_message:
             instruction += f"\n用户补充：{user_message}"
         try:
@@ -794,6 +825,8 @@ class ChatService:
             "审查完成后提醒用户在右侧核对字段并点击确认归档；"
             "不要声称已自动归档。"
         )
+        if mismatch:
+            system_prompt += f"\n{mismatch}"
         try:
             async for chunk in llm_service.stream(
                 [
@@ -1071,9 +1104,12 @@ class ChatService:
 
         # 带着结构化结果让模型回复
         summary = _format_result_for_prompt(fields, source)
+        mismatch = _user_type_mismatch_instruction(user_message, "invoice")
+        mismatch_block = f"{mismatch}\n\n" if mismatch else ""
         reply_user = (
-            f"用户上传了一张发票并说：{user_message or '请帮我识别这张发票'}。\n\n"
-            f"系统已完成识别，结果如下：\n{summary}\n\n"
+            f"用户上传了一份文件并说：{user_message or '请帮我识别这张发票'}。\n\n"
+            f"{mismatch_block}"
+            f"系统已完成发票识别，结果如下：\n{summary}\n\n"
             f"请用简洁中文向用户汇报关键字段，提醒右侧可核对后确认归档；"
             f"对明显可疑或缺字段给出简短提示。不要编造未识别出的数字。"
             f"回复里不要出现 OCR、光学字符识别、回落 OCR 这类字样，识别来源只说大模型。"
