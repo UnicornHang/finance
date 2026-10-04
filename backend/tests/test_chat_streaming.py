@@ -1,6 +1,7 @@
 """ChatService 流式响应测试（纯 mock，隔离数据库与外部依赖）。"""
 
 from types import SimpleNamespace
+from langchain_core.messages import AIMessage
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -257,21 +258,25 @@ async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_ses
                     AsyncMock(return_value=_intent(Intent.PUBLIC_TAX)),
                 ):
                     with patch(
-                        "app.services.chat_service.official_policy_service"
-                    ) as mock_policy:
-                        mock_policy.search_and_fetch = AsyncMock(
-                            return_value=search_payload
-                        )
-                        service = ChatService()
-                        service.save_message = AsyncMock()
-                        events = []
-                        async for event in service.stream_response(
-                            mock_db,
-                            mock_user,
-                            mock_session.id,
-                            "广州地区有哪些企业所得税税收优惠政策？",
-                        ):
-                            events.append(event)
+                        "app.agent.llm_adapter.ChatFinanceLLM.ainvoke",
+                        AsyncMock(return_value=AIMessage(content="", tool_calls=[])),
+                    ):
+                        with patch(
+                            "app.agent.tools.catalog.official_policy_service"
+                        ) as mock_policy:
+                            mock_policy.search_and_fetch = AsyncMock(
+                                return_value=search_payload
+                            )
+                            service = ChatService()
+                            service.save_message = AsyncMock()
+                            events = []
+                            async for event in service.stream_response(
+                                mock_db,
+                                mock_user,
+                                mock_session.id,
+                                "广州地区有哪些企业所得税税收优惠政策？",
+                            ):
+                                events.append(event)
 
     assert any(e.get("type") == "status" for e in events)
     assert captured["messages"][0]["role"] == "system"
@@ -312,17 +317,21 @@ async def test_stream_policy_query_injects_rag(mock_db, mock_user, mock_session)
                     "app.services.chat_service.classify_intent",
                     AsyncMock(return_value=_intent(Intent.POLICY_QUERY)),
                 ):
-                    with patch("app.services.chat_service.rag_service") as mock_rag:
-                        mock_rag.retrieve = AsyncMock(return_value=rag_hits)
-                        service = ChatService()
-                        service.save_message = AsyncMock()
-                        async for _ in service.stream_response(
-                            mock_db,
-                            mock_user,
-                            mock_session.id,
-                            "差旅住宿补贴怎么报？",
-                        ):
-                            pass
+                    with patch(
+                        "app.agent.llm_adapter.ChatFinanceLLM.ainvoke",
+                        AsyncMock(return_value=AIMessage(content="", tool_calls=[])),
+                    ):
+                        with patch("app.agent.tools.catalog.rag_service") as mock_rag:
+                            mock_rag.retrieve = AsyncMock(return_value=rag_hits)
+                            service = ChatService()
+                            service.save_message = AsyncMock()
+                            async for _ in service.stream_response(
+                                mock_db,
+                                mock_user,
+                                mock_session.id,
+                                "差旅住宿补贴怎么报？",
+                            ):
+                                pass
 
     assert captured["scene"] == "policy_query"
     assert "差旅补贴管理办法" in captured["messages"][-1]["content"]

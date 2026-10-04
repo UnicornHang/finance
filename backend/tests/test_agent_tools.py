@@ -1,0 +1,81 @@
+"""只读工具：空库门槛与检索格式化。"""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from app.agent.policy import TOOL_QUERY_POLICY, TOOL_SEARCH_OFFICIAL
+from app.agent.tools.catalog import build_text_tools, pick_tools
+
+
+def _tool(tools, name):
+    return next(t for t in tools if t.name == name)
+
+
+@pytest.mark.asyncio
+async def test_query_policy_high_score():
+    """高相关分返回标题与正文。"""
+    hits = [
+        {
+            "title": "差旅补贴管理办法",
+            "doc_type": "policy",
+            "score": 0.9,
+            "content": "住宿上限 500",
+        }
+    ]
+    trace: dict = {}
+    with patch("app.agent.tools.catalog.rag_service") as mock_rag:
+        mock_rag.retrieve = AsyncMock(return_value=hits)
+        tools = build_text_tools(MagicMock(), "tenant", trace)
+        text = await _tool(tools, TOOL_QUERY_POLICY).ainvoke({"question": "差旅"})
+    assert "差旅补贴管理办法" in text
+    assert "住宿上限 500" in text
+
+
+@pytest.mark.asyncio
+async def test_query_policy_low_score_is_empty():
+    """低分视为未命中，禁止外网口径。"""
+    hits = [{"title": "无关", "doc_type": "policy", "score": 0.1, "content": "chinatax"}]
+    with patch("app.agent.tools.catalog.rag_service") as mock_rag:
+        mock_rag.retrieve = AsyncMock(return_value=hits)
+        tools = build_text_tools(MagicMock(), "tenant", {})
+        text = await _tool(tools, TOOL_QUERY_POLICY).ainvoke({"question": "差旅"})
+    assert "知识库暂无" in text
+    assert "chinatax.gov.cn" not in text
+
+
+@pytest.mark.asyncio
+async def test_search_official_policy_formats_and_traces():
+    """搜索成功写入 trace，并带上标题与链接。"""
+    payload = {
+        "ok": True,
+        "provider": "bocha",
+        "query": "增值税",
+        "hits": [
+            {
+                "title": "总局公告",
+                "url": "https://www.chinatax.gov.cn/a",
+                "snippet": "优惠",
+                "source_kind": "official",
+            }
+        ],
+        "pages": [],
+        "error": None,
+    }
+    trace: dict = {}
+    with patch("app.agent.tools.catalog.tool_config_service") as mock_cfg:
+        mock_cfg.resolve_web_search = AsyncMock(side_effect=RuntimeError("no cfg"))
+        with patch("app.agent.tools.catalog.official_policy_service") as mock_pol:
+            mock_pol.search_and_fetch = AsyncMock(return_value=payload)
+            tools = build_text_tools(MagicMock(), "tenant", trace)
+            text = await _tool(tools, TOOL_SEARCH_OFFICIAL).ainvoke({"query": "增值税"})
+    assert "总局公告" in text
+    assert "https://www.chinatax.gov.cn/a" in text
+    assert trace["search"]["tool"] == TOOL_SEARCH_OFFICIAL
+    assert trace["search"]["ok"] is True
+
+
+def test_pick_tools_filters_allowlist():
+    tools = build_text_tools(MagicMock(), "tenant", {})
+    picked = pick_tools(tools, [TOOL_QUERY_POLICY])
+    assert [t.name for t in picked] == [TOOL_QUERY_POLICY]

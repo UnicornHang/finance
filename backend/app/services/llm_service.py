@@ -159,6 +159,41 @@ def _class_hint(cls_name: str, provider: str, model: str) -> str:
     return f"调用 {provider}/{model} 失败，请查看后端日志获取详细堆栈"
 
 
+def _litellm_tool_calls(message: object) -> list[dict]:
+    """从 litellm 返回的 message 抽出 [{id, name, args}]。"""
+    raw = getattr(message, "tool_calls", None)
+    if raw is None and isinstance(message, dict):
+        raw = message.get("tool_calls")
+    if not raw:
+        return []
+    parsed: list[dict] = []
+    for tc in raw:
+        if isinstance(tc, dict):
+            fn = tc.get("function") or {}
+            name = fn.get("name") or tc.get("name")
+            args_raw = fn.get("arguments") if fn else tc.get("arguments") or tc.get("args")
+            tid = tc.get("id") or name
+        else:
+            fn = getattr(tc, "function", None)
+            name = getattr(fn, "name", None) if fn is not None else getattr(tc, "name", None)
+            args_raw = getattr(fn, "arguments", None) if fn is not None else None
+            tid = getattr(tc, "id", None) or name
+        if not name:
+            continue
+        args: dict = {}
+        if isinstance(args_raw, dict):
+            args = args_raw
+        elif isinstance(args_raw, str) and args_raw.strip():
+            try:
+                obj = json.loads(args_raw)
+                if isinstance(obj, dict):
+                    args = obj
+            except json.JSONDecodeError:
+                args = {}
+        parsed.append({"id": str(tid), "name": str(name), "args": args})
+    return parsed
+
+
 def apply_system_prompt(messages: list[dict], system_prompt: str | None) -> list[dict]:
     """用户配置了场景级提示词时优先使用；未配置则保持调用方原样。
 
@@ -230,13 +265,14 @@ class LLMService:
         if not cfg or not (cfg.get("api_key") or "").strip():
             return self._mock_response(messages)
 
-        return await self.complete_with_config(
+        content, _calls = await self.complete_chat_with_config(
             messages,
             cfg,
             temperature=temperature,
             max_tokens=max_tokens,
             apply_scene_prompt=apply_scene_prompt,
         )
+        return content
 
     async def complete_with_config(
         self,
@@ -246,8 +282,30 @@ class LLMService:
         temperature: float | None = None,
         max_tokens: int | None = None,
         apply_scene_prompt: bool = False,
+        tools: list[dict] | None = None,
     ) -> str:
         """用指定配置调用模型。识别场景不要套用闲聊人设。"""
+        content, _calls = await self.complete_chat_with_config(
+            messages,
+            cfg,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            apply_scene_prompt=apply_scene_prompt,
+            tools=tools,
+        )
+        return content
+
+    async def complete_chat_with_config(
+        self,
+        messages: list[dict],
+        cfg: dict,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        apply_scene_prompt: bool = False,
+        tools: list[dict] | None = None,
+    ) -> tuple[str, list[dict]]:
+        """调用模型并解析可选 tool_calls。返回 (正文, OpenAI 风格工具调用列表)。"""
         from litellm import acompletion
 
         outgoing = (
@@ -256,9 +314,11 @@ class LLMService:
             else messages
         )
         extra: dict = {}
-        # Qwen3.5+ 默认思考，正文会空，结构化抽取需要关掉
         if cfg.get("provider") == "dashscope":
             extra["extra_body"] = {"enable_thinking": False}
+        if tools:
+            extra["tools"] = tools
+            extra["tool_choice"] = "auto"
 
         response = await acompletion(
             model=_resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
@@ -269,8 +329,9 @@ class LLMService:
             max_tokens=max_tokens or cfg.get("max_tokens") or 1500,
             **extra,
         )
-        content = response.choices[0].message.content
-        return content or ""
+        message = response.choices[0].message
+        content = getattr(message, "content", None) or ""
+        return content, _litellm_tool_calls(message)
 
     async def stream(
         self,

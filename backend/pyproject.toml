@@ -41,6 +41,7 @@ dependencies = [
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
     "langchain-community>=0.3.0",
+    "langgraph>=0.2.45",
     "litellm>=1.52.0",
     "openai>=1.54.0",
     "tiktoken>=0.8.0",

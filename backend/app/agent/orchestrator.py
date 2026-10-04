@@ -1,47 +1,252 @@
-"""Agent 编排 - LangChain 集成（占位骨架）。"""
+"""文本 Agent 编排：LangGraph 跑工具循环，再流式生成。"""
 
-from app.agent.context import SessionContext
-from app.agent.router import Intent, route_intent
-from app.services.rag_service import rag_service
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any, AsyncGenerator
+from uuid import UUID
+
+from app.agent.graph import get_text_graph, graph_runtime
+from app.agent.llm_adapter import ChatFinanceLLM, history_to_messages
+from app.agent.policy import status_event_for_tools, tools_for_intent
+from app.agent.router import Intent
+from app.agent.tools.catalog import build_text_tools, pick_tools
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models import Session, User
+    from app.services.chat_service import ChatService
+
+logger = logging.getLogger(__name__)
 
 
 class AgentOrchestrator:
-    """LangChain Agent 编排器（骨架实现）。"""
+    """无附件文本走 LangGraph；不持有跨请求状态。"""
 
-    def __init__(self):
-        # TODO: 初始化 LangChain AgentExecutor、Tool 列表
-        # self.llm = ChatLiteLLM(...)
-        # self.tools = [ocr_tool, contract_tool, rag_tool, archive_tool]
-        # self.executor = AgentExecutor(agent=..., tools=self.tools)
-        pass
+    async def stream_text(
+        self,
+        service: "ChatService",
+        db: "AsyncSession",
+        user: "User",
+        session: "Session",
+        session_id: UUID,
+        *,
+        display_msg: str,
+        history: list[dict],
+        intent: Intent,
+    ) -> AsyncGenerator[dict, None]:
+        """跑图后把最终回复流式输出为 SSE dict。"""
+        # 从 chat_service 取 llm_service，便于测试 patch 同一绑定
+        from app.services.chat_service import llm_service
 
-    async def stream(self, ctx: SessionContext, user_input: str, file=None):
-        """流式处理用户输入。"""
-        # 1. 意图识别
-        intent = await route_intent(user_input, file_type=None)
+        allowed = tools_for_intent(intent)
+        status = status_event_for_tools(allowed)
+        if status:
+            yield status
 
-        # 2. 路由到对应处理
-        if intent == Intent.INVOICE_UPLOAD and file:
-            # 异步触发 OCR 任务
-            yield {
-                "type": "text",
-                "content": "正在识别发票...",
-            }
-            # 实际：触发 Celery 任务，完成后通过 WebSocket 通知
-            yield {
-                "type": "sidepanel",
-                "payload": {"type": "invoice", "data": {}},
-            }
-        elif intent == Intent.POLICY_QUERY:
-            # RAG 检索
-            yield {"type": "text", "content": "正在检索相关制度...\n\n"}
-            # 实际：从 RAG 检索 + LLM 生成
-            yield {"type": "text", "content": "（示例回答）请参考《差旅补贴管理办法》第三条..."}
-        else:
-            # 闲聊
-            yield {"type": "text", "content": "我是企业财务 AI 助手，可以帮你处理发票、查询制度、审查合同。"}
+        system_prompt, user_content, scene = await self._opening_prompt(
+            service, db, user, intent, display_msg
+        )
+        messages = history_to_messages(history, system_prompt, user_content)
+        trace: dict[str, Any] = {}
+        all_tools = build_text_tools(db, str(user.tenant_id), trace)
+        bound = pick_tools(all_tools, allowed)
+        llm = ChatFinanceLLM(
+            scene="chitchat" if scene == "chitchat" else scene,
+            db=db,
+            tenant_id=str(user.tenant_id),
+        )
+        graph = get_text_graph()
+        token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+        try:
+            final = await graph.ainvoke(
+                {
+                    "intent": intent.value,
+                    "display_msg": display_msg,
+                    "messages": messages,
+                    "allowed_tools": allowed,
+                    "tool_round": 0,
+                    "pending_calls": [],
+                    "tool_result": "",
+                }
+            )
+        finally:
+            graph_runtime.reset(token)
+        tool_result = (final.get("tool_result") or "").strip()
+        openai_messages, scene = await self._closing_messages(
+            service,
+            db,
+            user,
+            intent,
+            display_msg,
+            history,
+            tool_result,
+            system_prompt,
+            user_content,
+        )
+        search_trace = trace.get("search")
 
+        assistant_content = ""
+        try:
+            async for chunk in llm_service.stream(
+                openai_messages,
+                scene=scene,
+                db=db,
+                tenant_id=str(user.tenant_id),
+            ):
+                assistant_content += chunk
+                yield {"type": "text", "content": chunk}
+        except Exception as exc:
+            logger.exception("graph LLM stream failed")
+            yield {"type": "error", "message": f"AI 调用失败：{exc}"}
+            if assistant_content:
+                await service.save_message(
+                    db,
+                    session_id,
+                    user.tenant_id,
+                    "assistant",
+                    assistant_content,
+                    tool_calls=search_trace,
+                )
+            return
+
+        if assistant_content.strip():
+            await service.save_message(
+                db,
+                session_id,
+                user.tenant_id,
+                "assistant",
+                assistant_content,
+                tool_calls=search_trace,
+            )
+            if not history or len(history) <= 1:
+                await service.auto_title(db, session, display_msg)
         yield {"type": "done"}
+
+    async def _opening_prompt(
+        self,
+        service: "ChatService",
+        db: "AsyncSession",
+        user: "User",
+        intent: Intent,
+        display_msg: str,
+    ) -> tuple[str, str, str]:
+        """图运行前的 system / user / scene。"""
+        from app.services.chat_service import (
+            POLICY_SYSTEM_PROMPT,
+            PORTAL_SYSTEM_PROMPT,
+            PUBLIC_TAX_SYSTEM_PROMPT,
+        )
+
+        if intent in (Intent.INVOICE_UPLOAD, Intent.CONTRACT_UPLOAD):
+            kind = "发票" if intent == Intent.INVOICE_UPLOAD else "合同"
+            system_prompt = await service._effective_system_prompt(
+                db, user.tenant_id, "chitchat"
+            )
+            user_content = (
+                f"{display_msg}\n\n"
+                f"用户想处理{kind}但本轮没有附件。"
+                f"请引导对方在对话框上传{kind}文件后再继续，不要假装已经识别或审查完成。"
+            )
+            return system_prompt, user_content, "chitchat"
+        if intent == Intent.OFFICIAL_PORTAL:
+            user_content = (
+                f"{display_msg}\n\n"
+                "请引导用户前往对应官方平台自行办理，并给出准确网站名称与网址："
+                "全国增值税发票查验平台 https://inv-veri.chinatax.gov.cn ；"
+                "国家企业信用信息公示系统 https://www.gsxt.gov.cn ；"
+                "中国裁判文书网 https://wenshu.court.gov.cn ；"
+                "12366 纳税服务平台 https://12366.chinatax.gov.cn 。"
+                "不要假装已经完成查验。"
+            )
+            return PORTAL_SYSTEM_PROMPT, user_content, "chitchat"
+        if intent == Intent.POLICY_QUERY:
+            return (
+                POLICY_SYSTEM_PROMPT,
+                (
+                    f"{display_msg}\n\n"
+                    "请调用 query_policy 查询企业知识库后再答；"
+                    "若工具表明暂无规定，明确告知知识库暂无，禁止用外网冒充公司制度。"
+                ),
+                "policy_query",
+            )
+        if intent == Intent.PUBLIC_TAX:
+            return (
+                PUBLIC_TAX_SYSTEM_PROMPT,
+                (
+                    f"{display_msg}\n\n"
+                    "请调用 search_official_policy 按权威网站列表检索后再答；"
+                    "用「我根据常用的权威网站列表查了一下」过渡。"
+                ),
+                "chitchat",
+            )
+        system_prompt = await service._effective_system_prompt(
+            db, user.tenant_id, "chitchat"
+        )
+        return system_prompt, display_msg, "chitchat"
+
+    async def _closing_messages(
+        self,
+        service: "ChatService",
+        db: "AsyncSession",
+        user: "User",
+        intent: Intent,
+        display_msg: str,
+        history: list[dict],
+        tool_result: str,
+        opening_system: str,
+        opening_user: str,
+    ) -> tuple[list[dict], str]:
+        """根据工具结果组装最终流式消息（与 A 管道约束对齐）。"""
+        from app.services.chat_service import POLICY_SYSTEM_PROMPT, PUBLIC_TAX_SYSTEM_PROMPT
+
+        if intent == Intent.POLICY_QUERY:
+            empty = (not tool_result) or ("知识库暂无" in tool_result[:200])
+            if empty:
+                system_prompt = await service._effective_system_prompt(
+                    db, user.tenant_id, "chitchat"
+                )
+                system_prompt = (
+                    f"{system_prompt}\n\n"
+                    "用户在问企业制度/补贴标准，但当前知识库未召回足够相关内容。"
+                    "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
+                    "不要用外部机关参考标准冒充本公司规定。"
+                )
+                user_content = display_msg
+                scene = "chitchat"
+            else:
+                system_prompt = POLICY_SYSTEM_PROMPT
+                user_content = (
+                    f"【知识库参考资料】\n{tool_result}\n\n"
+                    f"【用户问题】\n{display_msg}\n\n"
+                    "请基于参考资料作答；若资料不足以回答，请直接说明知识库暂无相关规定。"
+                )
+                scene = "policy_query"
+        elif intent == Intent.PUBLIC_TAX:
+            system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
+            context = tool_result or "（未检索到资料）"
+            user_content = (
+                f"【权威网站检索资料】\n{context}\n\n"
+                f"【用户问题】\n{display_msg}\n\n"
+                "请用「我根据常用的权威网站列表查了一下」自然过渡，再按"
+                "核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
+                "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
+            )
+            scene = "chitchat"
+        else:
+            system_prompt = opening_system
+            user_content = opening_user
+            scene = "chitchat"
+
+        return (
+            [
+                {"role": "system", "content": system_prompt},
+                *history[-20:],
+                {"role": "user", "content": user_content},
+            ],
+            scene,
+        )
 
 
 agent_orchestrator = AgentOrchestrator()

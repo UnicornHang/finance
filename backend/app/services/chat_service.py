@@ -424,16 +424,32 @@ class ChatService:
             db=db,
             tenant_id=str(user.tenant_id),
         )
-        async for event in self._stream_text_intent(
-            db,
-            user,
-            session,
-            session_id,
-            display_msg=display_msg,
-            history=history,
-            intent=decision.intent,
-        ):
-            yield event
+        try:
+            from app.agent.orchestrator import agent_orchestrator
+
+            async for event in agent_orchestrator.stream_text(
+                self,
+                db,
+                user,
+                session,
+                session_id,
+                display_msg=display_msg,
+                history=history,
+                intent=decision.intent,
+            ):
+                yield event
+        except Exception:
+            logger.exception("LangGraph 文本编排失败，回退 A 管道")
+            async for event in self._stream_text_intent(
+                db,
+                user,
+                session,
+                session_id,
+                display_msg=display_msg,
+                history=history,
+                intent=decision.intent,
+            ):
+                yield event
 
     async def _stream_text_intent(
         self,

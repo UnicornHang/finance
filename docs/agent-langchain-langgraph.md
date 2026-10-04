@@ -2,7 +2,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 状态 | 方案（未实施） |
+| 状态 | 实施中（B1 代码已接入 ChatService 文本入口） |
 | 范围 | B1：无附件文本对话 |
 | 前置 | A 已落地：`classify_intent` + 既有业务管道 |
 | 关联 | `docs/PRD.md` 能力路由与会话隔离；`docs/TD.md` §5 Agent 编排（本文替代其中的 AgentExecutor 示例） |
