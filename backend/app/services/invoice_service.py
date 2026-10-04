@@ -21,6 +21,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.memory.entities import mark_invoice_archived
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.services.audit_service import write_audit_log
 from app.services.storage_service import storage_service
@@ -401,6 +402,7 @@ class InvoiceService:
             after=_serialize_snapshot(inv),
         )
         await db.commit()
+        await mark_invoice_archived(db, inv.id)
         return inv
 
     # ================ 软删 ================

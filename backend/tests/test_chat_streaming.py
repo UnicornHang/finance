@@ -218,8 +218,10 @@ async def test_stream_uses_custom_system_prompt(mock_db, mock_user, mock_session
                         pass
 
     assert captured["messages"][0]["role"] == "system"
-    assert captured["messages"][0]["content"] == "你叫MoFan，是魔方财务科技顾问。"
-    assert "小财" not in captured["messages"][0]["content"]
+    content = captured["messages"][0]["content"]
+    assert content.startswith("你叫MoFan，是魔方财务科技顾问。")
+    assert "[会话摘要]" in content
+    assert "小财" not in content
 
 
 @pytest.mark.asyncio

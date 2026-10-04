@@ -18,6 +18,7 @@ from uuid import UUID
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.memory.entities import mark_contract_archived
 from app.core.exceptions import BusinessError, ConflictError, ForbiddenError, NotFoundError
 from app.services.audit_service import write_audit_log
 
@@ -431,6 +432,7 @@ class ContractService:
         )
         await db.commit()
         logger.info("contract confirmed id=%s hash=%s", row.id, (row.file_hash or "")[:12])
+        await mark_contract_archived(db, row.id)
         return row
 
     async def soft_delete(

@@ -283,4 +283,6 @@ B1 **不启用** Graph persist / checkpointer。
 
 ## 11. 与后续 B2 的边界
 
-B2 可考虑（需单独方案）：发票/合同作为**有人确认中断**的子图、会话摘要节点、Langfuse、闲聊有限开放工具。B1 的 State 与白名单表应保持可扩展，但 **B1 不得提前实现归档 Tool**。
+B2 单独方案见 **[docs/agent-b2.md](agent-b2.md)**：会话摘要与 pending 实体（B2-1）、短追问继承白名单（B2-2）、单据子图但仍用侧栏/REST 确认（B2-3）、可选 Langfuse（B2-4）。
+
+B2 **不得**把归档做成模型 Tool，也不得用 Graph interrupt 替换现有确认归档 API。历史消息全量向量 RAG、多 Agent 不在 B2。

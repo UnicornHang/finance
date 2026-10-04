@@ -12,6 +12,10 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.context import SessionContext, attach_memory
+from app.agent.memory import maybe_roll_summary, set_last_intent
+from app.agent.memory.entities import remember_contract_pending, remember_invoice_pending
+from app.agent.policy import effective_intent
 from app.agent.router import Intent, classify_intent
 from app.services.chat_file_service import chat_file_service
 from app.services.invoice_document import (
@@ -419,11 +423,19 @@ class ChatService:
         if history and history[-1]["content"] == display_msg:
             history = history[:-1]
 
+        ctx = await SessionContext.load_safe(
+            session_id,
+            user.id,
+            user.tenant_id,
+            db,
+            fallback_summary=getattr(session, "summary", "") or "",
+        )
         decision = await classify_intent(
             display_msg,
             db=db,
             tenant_id=str(user.tenant_id),
         )
+        intent = effective_intent(decision.intent, ctx.last_intent(), display_msg)
         started = False
         try:
             from app.agent.orchestrator import agent_orchestrator
@@ -436,7 +448,8 @@ class ChatService:
                 session_id,
                 display_msg=display_msg,
                 history=history,
-                intent=decision.intent,
+                intent=intent,
+                ctx=ctx,
             ):
                 started = True
                 yield event
@@ -453,9 +466,12 @@ class ChatService:
                 session_id,
                 display_msg=display_msg,
                 history=history,
-                intent=decision.intent,
+                intent=intent,
+                ctx=ctx,
             ):
                 yield event
+        await set_last_intent(db, session_id, intent.value)
+        await maybe_roll_summary(db, session, history)
 
     async def _stream_text_intent(
         self,
@@ -467,6 +483,7 @@ class ChatService:
         display_msg: str,
         history: list[dict],
         intent: Intent,
+        ctx: SessionContext | None = None,
     ) -> AsyncGenerator[dict, None]:
         """按意图进入制度 / 公开财税 / 门户 / 闲聊管道。"""
         search_trace: dict | None = None
@@ -552,7 +569,7 @@ class ChatService:
             user_content = display_msg
 
         messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": attach_memory(system_prompt, ctx)},
             *history[-20:],
             {"role": "user", "content": user_content},
         ]
@@ -696,6 +713,13 @@ class ChatService:
             return
 
         await chat_file_service.mark(db, file_id, intent=intent)
+        mapped = {
+            "invoice": Intent.INVOICE_UPLOAD.value,
+            "contract": Intent.CONTRACT_UPLOAD.value,
+        }
+        await set_last_intent(
+            db, session_id, mapped.get(intent, Intent.CHITCHAT.value)
+        )
 
         if intent == "invoice":
             async for event in self._stream_invoice_recognize(
@@ -930,6 +954,7 @@ class ChatService:
                 contract_id=pending.id,
                 recognize_error=None,
             )
+            await remember_contract_pending(db, session_id, pending.id)
         except Exception as exc:
             logger.exception("contract create_pending failed")
             await db.rollback()
@@ -1103,6 +1128,7 @@ class ChatService:
             await chat_file_service.mark(
                 db, file_id, recognize_status="succeeded", invoice_id=inv.id, recognize_error=None
             )
+            await remember_invoice_pending(db, session_id, inv.id)
         except Exception as exc:
             logger.exception("create_pending failed")
             await db.rollback()

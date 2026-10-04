@@ -131,6 +131,37 @@ def looks_like_public_tax_query(text: str) -> bool:
     return any(k in t for k in _PUBLIC_TAX_HINTS)
 
 
+_FOLLOWUP_HINTS = (
+    "那",
+    "这个",
+    "这些",
+    "还有",
+    "继续",
+    "刚才",
+    "上面",
+    "一线",
+    "二线",
+    "具体",
+    "呢",
+    "然后",
+    "标准呢",
+)
+
+
+def looks_like_followup(text: str) -> bool:
+    """短追问或省略主语，可能应继承上一轮制度/公开财税白名单。"""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if looks_like_official_portal_query(t):
+        return False
+    if any(k in t for k in _FOLLOWUP_HINTS):
+        return True
+    if len(t) <= 20 and t.endswith(("呢", "吗", "？", "?")):
+        return True
+    return False
+
+
 def should_use_official_search(text: str) -> bool:
     """公开财税检索优先于弱相关知识库命中。
 

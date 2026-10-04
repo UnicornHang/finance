@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, AsyncGenerator
+import re
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Never
 from uuid import UUID
 
+from app.agent.context import SessionContext, attach_memory
 from app.agent.graph import get_text_graph, graph_runtime
 from app.agent.llm_adapter import ChatFinanceLLM, history_to_messages
+from app.agent.memory.entities import remember_policy_title
 from app.agent.policy import status_event_for_tools, tools_for_intent
 from app.agent.router import Intent
 from app.agent.tools.catalog import build_text_tools, pick_tools
@@ -19,6 +22,8 @@ if TYPE_CHECKING:
     from app.services.chat_service import ChatService
 
 logger = logging.getLogger(__name__)
+
+_TITLE_RE = re.compile(r"《([^》]+)》")
 
 
 class AgentOrchestrator:
@@ -35,6 +40,7 @@ class AgentOrchestrator:
         display_msg: str,
         history: list[dict],
         intent: Intent,
+        ctx: SessionContext | None = None,
     ) -> AsyncGenerator[dict, None]:
         """跑图后把最终回复流式输出为 SSE dict。"""
         # 从 chat_service 取 llm_service，便于测试 patch 同一绑定
@@ -48,7 +54,9 @@ class AgentOrchestrator:
         system_prompt, user_content, scene = await self._opening_prompt(
             service, db, user, intent, display_msg
         )
-        messages = history_to_messages(history, system_prompt, user_content)
+        messages = history_to_messages(
+            history, attach_memory(system_prompt, ctx), user_content
+        )
         trace: dict[str, Any] = {}
         all_tools = build_text_tools(db, str(user.tenant_id), trace)
         bound = pick_tools(all_tools, allowed)
@@ -84,6 +92,7 @@ class AgentOrchestrator:
             tool_result,
             system_prompt,
             user_content,
+            ctx,
         )
         search_trace = trace.get("search")
 
@@ -122,6 +131,9 @@ class AgentOrchestrator:
             )
             if not history or len(history) <= 1:
                 await service.auto_title(db, session, display_msg)
+            title = _first_policy_title(tool_result)
+            if intent == Intent.POLICY_QUERY and title:
+                await remember_policy_title(db, session_id, title)
         yield {"type": "done"}
 
     async def _opening_prompt(
@@ -139,52 +151,57 @@ class AgentOrchestrator:
             PUBLIC_TAX_SYSTEM_PROMPT,
         )
 
-        if intent in (Intent.INVOICE_UPLOAD, Intent.CONTRACT_UPLOAD):
-            kind = "发票" if intent == Intent.INVOICE_UPLOAD else "合同"
-            system_prompt = await service._effective_system_prompt(
-                db, user.tenant_id, "chitchat"
-            )
-            user_content = (
-                f"{display_msg}\n\n"
-                f"用户想处理{kind}但本轮没有附件。"
-                f"请引导对方在对话框上传{kind}文件后再继续，不要假装已经识别或审查完成。"
-            )
-            return system_prompt, user_content, "chitchat"
-        if intent == Intent.OFFICIAL_PORTAL:
-            user_content = (
-                f"{display_msg}\n\n"
-                "请引导用户前往对应官方平台自行办理，并给出准确网站名称与网址："
-                "全国增值税发票查验平台 https://inv-veri.chinatax.gov.cn ；"
-                "国家企业信用信息公示系统 https://www.gsxt.gov.cn ；"
-                "中国裁判文书网 https://wenshu.court.gov.cn ；"
-                "12366 纳税服务平台 https://12366.chinatax.gov.cn 。"
-                "不要假装已经完成查验。"
-            )
-            return PORTAL_SYSTEM_PROMPT, user_content, "chitchat"
-        if intent == Intent.POLICY_QUERY:
-            return (
-                POLICY_SYSTEM_PROMPT,
-                (
+        match intent:
+            case Intent.INVOICE_UPLOAD | Intent.CONTRACT_UPLOAD:
+                kind = "发票" if intent == Intent.INVOICE_UPLOAD else "合同"
+                system_prompt = await service._effective_system_prompt(
+                    db, user.tenant_id, "chitchat"
+                )
+                user_content = (
                     f"{display_msg}\n\n"
-                    "请调用 query_policy 查询企业知识库后再答；"
-                    "若工具表明暂无规定，明确告知知识库暂无，禁止用外网冒充公司制度。"
-                ),
-                "policy_query",
-            )
-        if intent == Intent.PUBLIC_TAX:
-            return (
-                PUBLIC_TAX_SYSTEM_PROMPT,
-                (
+                    f"用户想处理{kind}但本轮没有附件。"
+                    f"请引导对方在对话框上传{kind}文件后再继续，不要假装已经识别或审查完成。"
+                )
+                return system_prompt, user_content, "chitchat"
+            case Intent.OFFICIAL_PORTAL:
+                user_content = (
                     f"{display_msg}\n\n"
-                    "请调用 search_official_policy 按权威网站列表检索后再答；"
-                    "用「我根据常用的权威网站列表查了一下」过渡。"
-                ),
-                "chitchat",
-            )
-        system_prompt = await service._effective_system_prompt(
-            db, user.tenant_id, "chitchat"
-        )
-        return system_prompt, display_msg, "chitchat"
+                    "请引导用户前往对应官方平台自行办理，并给出准确网站名称与网址："
+                    "全国增值税发票查验平台 https://inv-veri.chinatax.gov.cn ；"
+                    "国家企业信用信息公示系统 https://www.gsxt.gov.cn ；"
+                    "中国裁判文书网 https://wenshu.court.gov.cn ；"
+                    "12366 纳税服务平台 https://12366.chinatax.gov.cn 。"
+                    "不要假装已经完成查验。"
+                )
+                return PORTAL_SYSTEM_PROMPT, user_content, "chitchat"
+            case Intent.POLICY_QUERY:
+                return (
+                    POLICY_SYSTEM_PROMPT,
+                    (
+                        f"{display_msg}\n\n"
+                        "请调用 query_policy 查询企业知识库后再答；"
+                        "若工具表明暂无规定，明确告知知识库暂无，禁止用外网冒充公司制度。"
+                    ),
+                    "policy_query",
+                )
+            case Intent.PUBLIC_TAX:
+                return (
+                    PUBLIC_TAX_SYSTEM_PROMPT,
+                    (
+                        f"{display_msg}\n\n"
+                        "请调用 search_official_policy 按权威网站列表检索后再答；"
+                        "用「我根据常用的权威网站列表查了一下」过渡。"
+                    ),
+                    "chitchat",
+                )
+            case Intent.CHITCHAT:
+                system_prompt = await service._effective_system_prompt(
+                    db, user.tenant_id, "chitchat"
+                )
+                return system_prompt, display_msg, "chitchat"
+            case _:
+                unreachable: Never = intent
+                raise ValueError(f"unhandled intent: {unreachable}")
 
     async def _closing_messages(
         self,
@@ -197,56 +214,72 @@ class AgentOrchestrator:
         tool_result: str,
         opening_system: str,
         opening_user: str,
+        ctx: SessionContext | None = None,
     ) -> tuple[list[dict], str]:
         """根据工具结果组装最终流式消息（与 A 管道约束对齐）。"""
         from app.services.chat_service import POLICY_SYSTEM_PROMPT, PUBLIC_TAX_SYSTEM_PROMPT
 
-        if intent == Intent.POLICY_QUERY:
-            empty = (not tool_result) or ("知识库暂无" in tool_result[:200])
-            if empty:
-                system_prompt = await service._effective_system_prompt(
-                    db, user.tenant_id, "chitchat"
-                )
-                system_prompt = (
-                    f"{system_prompt}\n\n"
-                    "用户在问企业制度/补贴标准，但当前知识库未召回足够相关内容。"
-                    "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
-                    "不要用外部机关参考标准冒充本公司规定。"
-                )
-                user_content = display_msg
-                scene = "chitchat"
-            else:
-                system_prompt = POLICY_SYSTEM_PROMPT
+        match intent:
+            case Intent.POLICY_QUERY:
+                empty = (not tool_result) or ("知识库暂无" in tool_result[:200])
+                if empty:
+                    system_prompt = await service._effective_system_prompt(
+                        db, user.tenant_id, "chitchat"
+                    )
+                    system_prompt = (
+                        f"{system_prompt}\n\n"
+                        "用户在问企业制度/补贴标准，但当前知识库未召回足够相关内容。"
+                        "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
+                        "不要用外部机关参考标准冒充本公司规定。"
+                    )
+                    user_content = display_msg
+                    scene = "chitchat"
+                else:
+                    system_prompt = POLICY_SYSTEM_PROMPT
+                    user_content = (
+                        f"【知识库参考资料】\n{tool_result}\n\n"
+                        f"【用户问题】\n{display_msg}\n\n"
+                        "请基于参考资料作答；若资料不足以回答，请直接说明知识库暂无相关规定。"
+                    )
+                    scene = "policy_query"
+            case Intent.PUBLIC_TAX:
+                system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
+                context = tool_result or "（未检索到资料）"
                 user_content = (
-                    f"【知识库参考资料】\n{tool_result}\n\n"
+                    f"【权威网站检索资料】\n{context}\n\n"
                     f"【用户问题】\n{display_msg}\n\n"
-                    "请基于参考资料作答；若资料不足以回答，请直接说明知识库暂无相关规定。"
+                    "请用「我根据常用的权威网站列表查了一下」自然过渡，再按"
+                    "核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
+                    "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
                 )
-                scene = "policy_query"
-        elif intent == Intent.PUBLIC_TAX:
-            system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
-            context = tool_result or "（未检索到资料）"
-            user_content = (
-                f"【权威网站检索资料】\n{context}\n\n"
-                f"【用户问题】\n{display_msg}\n\n"
-                "请用「我根据常用的权威网站列表查了一下」自然过渡，再按"
-                "核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
-                "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
-            )
-            scene = "chitchat"
-        else:
-            system_prompt = opening_system
-            user_content = opening_user
-            scene = "chitchat"
+                scene = "chitchat"
+            case (
+                Intent.CHITCHAT
+                | Intent.OFFICIAL_PORTAL
+                | Intent.INVOICE_UPLOAD
+                | Intent.CONTRACT_UPLOAD
+            ):
+                system_prompt = opening_system
+                user_content = opening_user
+                scene = "chitchat"
+            case _:
+                unreachable: Never = intent
+                raise ValueError(f"unhandled intent: {unreachable}")
 
         return (
             [
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": attach_memory(system_prompt, ctx)},
                 *history[-20:],
                 {"role": "user", "content": user_content},
             ],
             scene,
         )
+
+
+def _first_policy_title(tool_result: str) -> str:
+    """从知识库工具结果里取第一个书名号标题。"""
+    match = _TITLE_RE.search(tool_result or "")
+    return match.group(1).strip() if match else ""
 
 
 agent_orchestrator = AgentOrchestrator()
