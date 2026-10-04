@@ -21,8 +21,8 @@ def _intent(intent: Intent, confidence: float = 0.9) -> IntentDecision:
     )
 
 
-def _make_msg(role="assistant", content=None):
-    return SimpleNamespace(role=role, content=content)
+def _make_msg(role="assistant", content=None, id=None):
+    return SimpleNamespace(role=role, content=content, id=id or role)
 
 
 @pytest.fixture
@@ -73,7 +73,15 @@ async def test_load_recent_messages_excludes_empty(mock_db):
     mock_db._scalars_mock.all = MagicMock(return_value=msgs)
 
     service = ChatService()
-    result = await service.load_recent_messages(mock_db, "session-id")
+    with patch(
+        "app.services.chat_service.chat_file_service.list_by_message_ids",
+        AsyncMock(return_value={}),
+    ):
+        with patch(
+            "app.services.chat_service.chat_file_service.prompt_hint",
+            return_value="",
+        ):
+            result = await service.load_recent_messages(mock_db, "session-id")
 
     assert len(result) == 2
     # 反转后：时间正序（user 在前，assistant 在后）
@@ -368,6 +376,46 @@ async def test_stream_invoice_intent_without_file_asks_upload(
 
     assert "没有附件" in captured["messages"][-1]["content"]
     assert "上传" in captured["messages"][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_stream_official_portal_has_no_search(mock_db, mock_user, mock_session):
+    """发票查验只给官网入口，不调检索工具。"""
+    captured: dict = {}
+
+    async def mock_llm_stream(messages, scene, **kwargs):
+        captured["messages"] = messages
+        yield "请前往"
+
+    with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
+        mock_cfg_svc.resolve = AsyncMock(return_value=None)
+        with patch("app.services.chat_service.llm_service") as mock_llm:
+            mock_llm.stream = mock_llm_stream
+            with patch("app.services.chat_service.session_service") as mock_session_svc:
+                mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
+                with patch(
+                    "app.services.chat_service.classify_intent",
+                    AsyncMock(return_value=_intent(Intent.OFFICIAL_PORTAL)),
+                ):
+                    with patch(
+                        "app.agent.tools.catalog.official_policy_service"
+                    ) as mock_policy:
+                        mock_policy.search_and_fetch = AsyncMock()
+                        service = ChatService()
+                        service.save_message = AsyncMock()
+                        events = []
+                        async for event in service.stream_response(
+                            mock_db,
+                            mock_user,
+                            mock_session.id,
+                            "帮我查验这张发票真伪",
+                        ):
+                            events.append(event)
+
+    mock_policy.search_and_fetch.assert_not_called()
+    assert not any(e.get("type") == "status" for e in events)
+    assert "inv-veri.chinatax.gov.cn" in captured["messages"][-1]["content"]
+    assert "不要假装已经完成查验" in captured["messages"][-1]["content"]
 
 
 def test_mismatch_invoice_called_contract():

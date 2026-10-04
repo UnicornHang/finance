@@ -424,6 +424,7 @@ class ChatService:
             db=db,
             tenant_id=str(user.tenant_id),
         )
+        started = False
         try:
             from app.agent.orchestrator import agent_orchestrator
 
@@ -437,9 +438,14 @@ class ChatService:
                 history=history,
                 intent=decision.intent,
             ):
+                started = True
                 yield event
         except Exception:
-            logger.exception("LangGraph 文本编排失败，回退 A 管道")
+            logger.exception("LangGraph 文本编排失败")
+            if started:
+                yield {"type": "error", "message": "编排中断，请重试。"}
+                yield {"type": "done"}
+                return
             async for event in self._stream_text_intent(
                 db,
                 user,

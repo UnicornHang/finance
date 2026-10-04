@@ -470,71 +470,37 @@ class SessionContext:
 
 ---
 
-## 5. Agent 编排方案（LangChain）
+## 5. Agent 编排方案（LangChain + LangGraph）
+
+文本对话的现行实现见 **[docs/agent-langchain-langgraph.md](agent-langchain-langgraph.md)**。此处不再使用 `AgentExecutor`。
 
 ### 5.1 技术栈
 
 | 项 | 选型 | 理由 |
 |---|---|---|
-| 编排框架 | LangChain 0.3+ | 生态成熟 |
-| 意图识别 | LangChain + Few-shot | 简单有效 |
-| Tool 调用 | LangChain Tool / Function Calling | 标准 |
-| 流式 | LangChain Streaming | 原生支持 |
-| 可观测 | Langfuse | 调试与追踪 |
+| 意图分类 | `classify_intent`（LLM JSON + 启发回退） | 与关键字 if-else 解耦 |
+| 工具协议 | LangChain `StructuredTool` | OpenAI function schema |
+| 文本状态图 | LangGraph `StateGraph`（无 checkpointer） | 白名单绑工具、最多补调，禁止自由 Agent |
+| 对话/视觉模型 | 现有 `llm_service` + LiteLLM | 租户场景配置、DashScope thinking 关闭 |
+| 流式 | ChatService SSE | 协议不变：`text` / `status` / `sidepanel` / `done` / `error` |
 
-### 5.2 Agent 架构
+### 5.2 Agent 架构（B1）
+
+无附件：`ChatService` → `classify_intent` → `AgentOrchestrator.stream_text` → LangGraph（`gate` → `agent` → `tools` → `finalize`）→ `llm_service.stream`。
+
+- 意图白名单：`policy_query` 仅 `query_policy`；`public_tax` 仅 `search_official_policy`；门户 / 闲聊 / 无附件单据无工具。
+- 模型不返回 tool_calls 时，对有白名单的意图强制补调一次，避免演示模式漏检索。
+- 非法工具名丢弃。图失败且尚未向客户端推事件时，回退 `_stream_text_intent`。
+- 有附件：不进本图，仍 `_dispatch_upload`（发票识别 / 合同审查 / 普通文件）。**禁止** Agent 直接归档。
 
 ```python
-# agent/orchestrator.py
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_core.prompts import ChatPromptTemplate
-
-class AgentOrchestrator:
-    def __init__(self, llm_service, tools):
-        self.llm_service = llm_service
-        self.tools = tools
-        self.executor = self._build_executor()
-    
-    def _build_executor(self):
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("placeholder", "{chat_history}"),
-            ("human", "{input}"),
-            ("placeholder", "{agent_scratchpad}"),
-        ])
-        agent = create_tool_calling_agent(self.llm_service.llm, self.tools, prompt)
-        return AgentExecutor(agent=agent, tools=self.tools, verbose=True)
-    
-    async def stream(self, ctx: SessionContext, user_input: str):
-        # 1. RAG 检索历史相关片段
-        rag_snippets = await rag_service.retrieve(
-            ctx.session_id, user_input, top_k=3
-        )
-        
-        # 2. 组装 prompt
-        prompt_messages = ctx.build_prompt(user_input, rag_snippets)
-        
-        # 3. 流式调用
-        async for event in self.executor.astream_events(
-            {"input": user_input, "chat_history": prompt_messages},
-            version="v2",
-        ):
-            if event["event"] == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
-                if content:
-                    yield {"type": "text", "content": content}
-            
-            elif event["event"] == "on_tool_end":
-                # 工具返回结构化数据，触发侧弹窗
-                tool_name = event["name"]
-                output = event["data"]["output"]
-                if tool_name == "ocr_invoice":
-                    yield {"type": "sidepanel", "payload": {"type": "invoice", "data": output}}
-                elif tool_name == "review_contract":
-                    yield {"type": "sidepanel", "payload": {"type": "contract", "data": output}}
-        
-        # 4. 写回消息
-        await ctx.append({"role": "assistant", "content": "..."})
+# 入口示意（实现以代码为准）
+decision = await classify_intent(display_msg, db=db, tenant_id=str(user.tenant_id))
+async for event in agent_orchestrator.stream_text(
+    self, db, user, session, session_id,
+    display_msg=display_msg, history=history, intent=decision.intent,
+):
+    yield event
 ```
 
 ### 5.3 意图识别路由

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from app.services.llm_service import llm_service
 
@@ -19,8 +20,6 @@ logger = logging.getLogger(__name__)
 
 def tools_to_openai(tools: Sequence[BaseTool]) -> list[dict]:
     """StructuredTool → OpenAI tools 参数。"""
-    from langchain_core.utils.function_calling import convert_to_openai_tool
-
     return [convert_to_openai_tool(t) for t in tools]
 
 

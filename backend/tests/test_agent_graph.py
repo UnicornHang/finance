@@ -25,18 +25,42 @@ class _FakeLLM:
         return self.message
 
 
+def _query_tool(mock: AsyncMock, result: str) -> StructuredTool:
+    """真实 coroutine，避免 StructuredTool 解析 AsyncMock。"""
+
+    async def query_policy(question: str) -> str:
+        await mock(question)
+        return result
+
+    return StructuredTool.from_function(
+        coroutine=query_policy,
+        name=TOOL_QUERY_POLICY,
+        description="查询企业制度",
+    )
+
+
+def _search_tool(mock: AsyncMock, result: str) -> StructuredTool:
+    """真实 coroutine，供白名单测试。"""
+
+    async def search_official_policy(query: str) -> str:
+        await mock(query)
+        return result
+
+    return StructuredTool.from_function(
+        coroutine=search_official_policy,
+        name=TOOL_SEARCH_OFFICIAL,
+        description="检索公开财税",
+    )
+
+
 @pytest.mark.asyncio
 async def test_graph_policy_forces_query_tool():
     """制度意图无 tool_calls 时强制 query_policy。"""
-    query = AsyncMock(return_value="《差旅》住宿 500")
-    search = AsyncMock(return_value="SHOULD_NOT")
+    query_mock = AsyncMock()
+    search_mock = AsyncMock()
     bound = [
-        StructuredTool.from_function(
-            coroutine=query, name=TOOL_QUERY_POLICY, description="q"
-        ),
-        StructuredTool.from_function(
-            coroutine=search, name=TOOL_SEARCH_OFFICIAL, description="s"
-        ),
+        _query_tool(query_mock, "《差旅》住宿 500"),
+        _search_tool(search_mock, "SHOULD_NOT"),
     ]
     llm = _FakeLLM(AIMessage(content="", tool_calls=[]))
     token = graph_runtime.set({"llm": llm, "bound_tools": bound})
@@ -54,22 +78,47 @@ async def test_graph_policy_forces_query_tool():
     finally:
         graph_runtime.reset(token)
     assert "差旅" in (final.get("tool_result") or "")
-    query.assert_awaited()
-    search.assert_not_awaited()
+    query_mock.assert_awaited()
+    search_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_graph_public_tax_forces_search_tool():
+    """公开财税意图强制 search_official_policy，不碰知识库。"""
+    query_mock = AsyncMock()
+    search_mock = AsyncMock()
+    bound = [
+        _query_tool(query_mock, "库内"),
+        _search_tool(search_mock, "总局公告"),
+    ]
+    llm = _FakeLLM(AIMessage(content="", tool_calls=[]))
+    token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+    try:
+        final = await get_text_graph().ainvoke(
+            {
+                "intent": Intent.PUBLIC_TAX.value,
+                "display_msg": "广州企业所得税优惠",
+                "messages": [HumanMessage(content="广州企业所得税优惠")],
+                "tool_round": 0,
+                "pending_calls": [],
+                "tool_result": "",
+            }
+        )
+    finally:
+        graph_runtime.reset(token)
+    assert "总局公告" in (final.get("tool_result") or "")
+    search_mock.assert_awaited()
+    query_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_graph_drops_illegal_search_on_policy():
     """制度意图下搜索 call 被丢弃，改强制知识库工具。"""
-    query = AsyncMock(return_value="库内制度")
-    search = AsyncMock(return_value="外网")
+    query_mock = AsyncMock()
+    search_mock = AsyncMock()
     bound = [
-        StructuredTool.from_function(
-            coroutine=query, name=TOOL_QUERY_POLICY, description="q"
-        ),
-        StructuredTool.from_function(
-            coroutine=search, name=TOOL_SEARCH_OFFICIAL, description="s"
-        ),
+        _query_tool(query_mock, "库内制度"),
+        _search_tool(search_mock, "外网"),
     ]
     llm = _FakeLLM(
         AIMessage(
@@ -97,8 +146,8 @@ async def test_graph_drops_illegal_search_on_policy():
         )
     finally:
         graph_runtime.reset(token)
-    search.assert_not_awaited()
-    query.assert_awaited()
+    search_mock.assert_not_awaited()
+    query_mock.assert_awaited()
     assert "库内制度" in (final.get("tool_result") or "")
 
 
@@ -115,12 +164,8 @@ def test_after_agent_routes_pending():
 @pytest.mark.asyncio
 async def test_tools_node_skips_name_not_in_allowlist():
     """二次校验：不在白名单的工具不执行。"""
-    search = AsyncMock(return_value="外网")
-    bound = [
-        StructuredTool.from_function(
-            coroutine=search, name=TOOL_SEARCH_OFFICIAL, description="s"
-        ),
-    ]
+    search_mock = AsyncMock()
+    bound = [_search_tool(search_mock, "外网")]
     token = graph_runtime.set(
         {"llm": MagicMock(spec=ChatFinanceLLM), "bound_tools": bound}
     )
@@ -138,5 +183,5 @@ async def test_tools_node_skips_name_not_in_allowlist():
         )
     finally:
         graph_runtime.reset(token)
-    search.assert_not_awaited()
+    search_mock.assert_not_awaited()
     assert out["tool_result"] == ""
