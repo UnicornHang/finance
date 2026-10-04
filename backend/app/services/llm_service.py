@@ -291,7 +291,9 @@ class LLMService:
 
         from litellm import acompletion
 
-        outgoing = apply_system_prompt(messages, cfg.get("system_prompt"))
+        outgoing = messages
+        if not any(m.get("role") == "system" for m in messages):
+            outgoing = apply_system_prompt(messages, cfg.get("system_prompt"))
         try:
             response = await acompletion(
                 model=_resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
@@ -374,7 +376,7 @@ class LLMService:
                 break
 
         response = (
-            f"👋 你好！我是企业财务 AI 助手 **¥ 小财**。\n\n"
+            f"👋 你好！我是魔方财务科技财税顾问 **MoFan**。\n\n"
             f"你刚才说：「{user_msg}」\n\n"
             f"---\n\n"
             f"⚠️ **当前为演示模式**\n\n"

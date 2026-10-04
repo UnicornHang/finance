@@ -159,7 +159,8 @@ async def test_auto_title_truncates_long_message():
 
 def test_system_prompt_contains_brand():
     """系统提示词包含品牌标识。"""
-    assert "小财" in SYSTEM_PROMPT
+    assert "MoFan" in SYSTEM_PROMPT
+    assert "魔方财务科技" in SYSTEM_PROMPT
     assert "财务" in SYSTEM_PROMPT
 
 
