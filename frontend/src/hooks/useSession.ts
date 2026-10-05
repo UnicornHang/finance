@@ -5,9 +5,9 @@ import { sessionApi } from '@/api/chat'
 /**
  * 会话管理 hook
  * - 挂载时拉取当前用户的活跃会话
+ * - 当前会话必须属于本次拉取的列表；换账号后丢弃上一账号的 sessionId
  * - 若列表为空，自动建一个新会话并切换过去
- * - 若列表非空且无当前会话，自动选最近更新的会话
- * - 保留用户在 list 加载期间手动创建的会话（不被 setSessions 覆盖丢失）
+ * - 若列表非空且当前会话无效，自动选最近更新的会话
  *
  * StrictMode 兼容性说明：
  * - useRef 在同一次组件挂载内跨 cleanup→remount 是稳定的，因此 initRef 可以扛过
@@ -33,32 +33,20 @@ export function useSessions() {
     const ensureActiveSession = async () => {
       try {
         const list = await sessionApi.list()
-
-        // 捕获 setSessions 之前的状态：用户可能在此期间已经手动创建/切换了会话
-        const before = useSessionStore.getState()
-
         setSessions(list)
 
-        // 1) 若用户在 list 加载期间手动创建了会话（currentSessionId 指向它但服务端
-        //    list 里没有），把它重新插到最前面 —— 避免被 setSessions 覆盖丢失
-        if (
-          before.currentSessionId &&
-          !list.some((s) => s.id === before.currentSessionId)
-        ) {
-          const manual = before.sessions.find(
-            (s) => s.id === before.currentSessionId,
-          )
-          if (manual) {
-            setSessions([manual, ...list])
-          }
-        }
-
-        // 2) 仍未选中会话：根据列表是否为空决定行为
+        // 仅当 currentSessionId 属于本次拉取的列表时才保留。
+        // 换账号后若仍指向上一账号会话，会用新 token 去拉旧消息 → 401 → 被踢回登录页。
         const after = useSessionStore.getState()
-        if (after.currentSessionId) return
+        const currentStillValid =
+          !!after.currentSessionId &&
+          after.sessions.some((s) => s.id === after.currentSessionId)
+
+        if (currentStillValid) return
+
+        if (after.currentSessionId) switchSession(null)
 
         if (after.sessions.length > 0) {
-          // 列表非空：选最近更新的会话（updated_at 倒序）
           const sorted = [...after.sessions].sort(
             (a, b) =>
               new Date(b.updated_at || 0).getTime() -
@@ -66,7 +54,6 @@ export function useSessions() {
           )
           switchSession(sorted[0].id)
         } else {
-          // 列表为空：建一个新会话
           const session = await sessionApi.create()
           addSession(session)
           switchSession(session.id)

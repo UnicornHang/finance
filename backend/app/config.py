@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 15
     jwt_refresh_token_expire_days: int = 7
     encryption_key: str = "change-me-base64-key"
+    # 连续密码错误达到该次数后锁定账号
+    login_max_failed_attempts: int = 5
+    # 登录锁定时长（分钟）
+    login_lockout_minutes: int = 30
 
     # ---- LLM ----
     llm_chitchat_model: str = "gpt-4o-mini"

@@ -41,7 +41,7 @@ interface SessionState {
   removeSession: (id: string) => void
   updateSession: (id: string, data: Partial<Session>) => void
 
-  switchSession: (id: string) => void
+  switchSession: (id: string | null) => void
   setMessages: (sessionId: string, messages: Message[]) => void
   appendMessage: (sessionId: string, message: Message) => void
   updateMessage: (
@@ -50,6 +50,8 @@ interface SessionState {
     patch: Partial<Message>,
   ) => void
   clearMessages: (sessionId: string) => void
+  /** 退出登录时清空，避免下一账号沿用上一账号的 sessionId */
+  reset: () => void
 
   enterSelectionMode: (initialId?: string) => void
   exitSelectionMode: () => void
@@ -98,6 +100,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     })),
 
   switchSession: (id) => set({ currentSessionId: id }),
+
+  reset: () =>
+    set({
+      sessions: [],
+      currentSessionId: null,
+      messages: {},
+      selectionMode: false,
+      selectedIds: [],
+    }),
 
   setMessages: (sessionId, messages) =>
     set((state) => ({ messages: { ...state.messages, [sessionId]: messages } })),

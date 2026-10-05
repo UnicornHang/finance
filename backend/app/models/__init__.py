@@ -78,6 +78,10 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     dept: Mapped[str | None] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(20), default="active")
+    # 连续密码错误次数；登录成功或锁定过期后清零
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 登录锁定截止时间（UTC）；未锁定为 None
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
 
 

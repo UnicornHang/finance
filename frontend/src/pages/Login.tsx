@@ -16,6 +16,7 @@ import loginContent from '@/assets/image/login_content.png'
 import logoPng from '@/assets/image/logo.png'
 
 export function Login() {
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
   const isAuthed = useAuthStore((s) => !!s.token)
   const { login, isLoading } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
@@ -26,6 +27,7 @@ export function Login() {
     defaultValues: { account: '', password: '' },
   })
 
+  if (!hasHydrated) return null
   if (isAuthed) return <Navigate to="/chat" replace />
 
   return (

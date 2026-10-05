@@ -14,7 +14,9 @@ import { ToolSettings } from '@/components/admin/ToolSettings'
 import { useAuthStore } from '@/stores/authStore'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
   const isAuthed = useAuthStore((s) => !!s.token)
+  if (!hasHydrated) return null
   if (!isAuthed) return <Navigate to="/login" replace />
   return <>{children}</>
 }

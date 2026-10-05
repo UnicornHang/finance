@@ -46,6 +46,12 @@ class RateLimitError(BusinessError):
     http_status = status.HTTP_429_TOO_MANY_REQUESTS
 
 
+class AccountLockedError(RateLimitError):
+    """登录失败次数过多导致的临时锁定。"""
+
+    code = "ACCOUNT_LOCKED"
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """注册全局异常处理。"""
 

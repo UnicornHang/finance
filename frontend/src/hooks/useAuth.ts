@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 
 import { apiClient } from '@/api/client'
+import { resetClientState } from '@/lib/resetClientState'
 import { useAuthStore } from '@/stores/authStore'
 import type { User } from '@/types'
 
@@ -40,11 +41,10 @@ export function useAuth() {
       return data
     },
     onSuccess: (data) => {
-      localStorage.setItem('access_token', data.access_token)
-      localStorage.setItem('refresh_token', data.refresh_token)
+      resetClientState()
       setAuth(data.access_token, data.refresh_token, data.user)
       toast.success(`欢迎回来，${data.user.name}`)
-      navigate('/chat')
+      navigate('/chat', { replace: true })
     },
     onError: (err: any) => {
       const message =
@@ -57,8 +57,9 @@ export function useAuth() {
     login: loginMutation.mutate,
     isLoading: loginMutation.isPending,
     logout: () => {
+      resetClientState()
       logout()
-      navigate('/login')
+      navigate('/login', { replace: true })
     },
   }
 }
