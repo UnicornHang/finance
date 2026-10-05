@@ -83,3 +83,11 @@ export function formatCurrency(n: number | null | undefined): string {
     currency: 'CNY',
   }).format(n)
 }
+
+/** 从 Axios 风格错误中提取后端业务文案。 */
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  return (
+    (error as { response?: { data?: { message?: string } } })?.response?.data
+      ?.message || fallback
+  )
+}

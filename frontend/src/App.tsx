@@ -21,6 +21,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
+  const role = useAuthStore((s) => s.user?.role)
+  if (role !== 'admin') return <Navigate to="/admin" replace />
+  return <>{children}</>
+}
+
 export default function App() {
   return (
     <Routes>
@@ -46,7 +52,14 @@ export default function App() {
         <Route path="contracts" element={<ContractArchive />} />
         <Route path="kb" element={<KnowledgeBase />} />
         <Route path="kb/:id" element={<KnowledgeBaseDetail />} />
-        <Route path="users" element={<UserManage />} />
+        <Route
+          path="users"
+          element={
+            <AdminOnlyRoute>
+              <UserManage />
+            </AdminOnlyRoute>
+          }
+        />
         <Route path="llm" element={<LLMSettings />} />
         <Route path="tools" element={<ToolSettings />} />
       </Route>

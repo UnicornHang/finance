@@ -37,13 +37,13 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 
 const NAV_ITEMS = [
-  { to: '/admin', label: '数据概览', icon: LayoutDashboard, end: true },
-  { to: '/admin/invoices', label: '发票归档', icon: Receipt, end: false },
-  { to: '/admin/contracts', label: '合同归档', icon: FileText, end: false },
-  { to: '/admin/kb', label: '知识库', icon: BookOpen, end: false },
-  { to: '/admin/users', label: '用户管理', icon: Users, end: false },
-  { to: '/admin/llm', label: 'LLM 设置', icon: Cpu, end: false },
-  { to: '/admin/tools', label: '工具配置', icon: Wrench, end: false },
+  { to: '/admin', label: '数据概览', icon: LayoutDashboard, end: true, adminOnly: false },
+  { to: '/admin/invoices', label: '发票归档', icon: Receipt, end: false, adminOnly: false },
+  { to: '/admin/contracts', label: '合同归档', icon: FileText, end: false, adminOnly: false },
+  { to: '/admin/kb', label: '知识库', icon: BookOpen, end: false, adminOnly: false },
+  { to: '/admin/users', label: '用户管理', icon: Users, end: false, adminOnly: true },
+  { to: '/admin/llm', label: 'LLM 设置', icon: Cpu, end: false, adminOnly: false },
+  { to: '/admin/tools', label: '工具配置', icon: Wrench, end: false, adminOnly: false },
 ]
 
 const ROLE_LABEL: Record<string, string> = {
@@ -67,6 +67,7 @@ export function Admin() {
   }
 
   const role = user?.role || 'employee'
+  const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || role === 'admin')
 
   return (
     <div className="flex h-screen flex-col bg-canvas text-ink">
@@ -79,7 +80,7 @@ export function Admin() {
 
         {/* 中：Admin 内部分页快速切换 */}
         <nav className="flex flex-1 items-center justify-center gap-1 overflow-hidden">
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -193,7 +194,7 @@ export function Admin() {
           )}
         >
           <nav className="flex-1 space-y-0.5 overflow-y-auto px-2">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}

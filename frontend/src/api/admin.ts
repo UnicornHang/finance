@@ -12,15 +12,35 @@ import type {
   KbIndexSettings,
 } from '@/types'
 
+export interface UserCreatePayload {
+  name: string
+  account: string
+  password: string
+  role: User['role']
+  dept?: string | null
+}
+
+export interface UserUpdatePayload {
+  name?: string
+  role?: User['role']
+  dept?: string | null
+  status?: 'active' | 'disabled'
+}
+
+export interface PasswordResetResult {
+  user_id: string
+  temporary_password: string
+}
+
 export const userApi = {
   list: () => apiClient.get<User[]>('/users/').then((r) => r.data),
-  create: (data: Partial<User> & { password: string }) =>
+  create: (data: UserCreatePayload) =>
     apiClient.post<User>('/users/', data).then((r) => r.data),
-  update: (id: string, data: Partial<User>) =>
+  update: (id: string, data: UserUpdatePayload) =>
     apiClient.patch<User>(`/users/${id}`, data).then((r) => r.data),
   resetPassword: (id: string) =>
-    apiClient.post(`/users/${id}/reset-password`).then((r) => r.data),
-  remove: (id: string) => apiClient.delete(`/users/${id}`),
+    apiClient.post<PasswordResetResult>(`/users/${id}/reset-password`).then((r) => r.data),
+  remove: (id: string) => apiClient.delete<User>(`/users/${id}`).then((r) => r.data),
 }
 
 export interface LlmConfigPayload {

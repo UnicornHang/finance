@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ================ 通用 ================
 
@@ -27,19 +27,84 @@ class TokenResponse(BaseModel):
 
 # ================ 用户 ================
 
+_USER_ROLES = frozenset({"employee", "finance", "admin"})
+_USER_STATUSES = frozenset({"active", "disabled"})
+
+
+def _normalize_optional_text(value: str | None) -> str | None:
+    """空白部门视为未填写。"""
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 class UserCreate(BaseModel):
-    name: str
-    account: str
-    password: str = Field(min_length=10)
+    name: str = Field(min_length=1, max_length=100)
+    account: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=10, max_length=72)
     role: str
-    dept: str | None = None
+    dept: str | None = Field(default=None, max_length=100)
+
+    @field_validator("name", "account")
+    @classmethod
+    def strip_required(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        if value not in _USER_ROLES:
+            raise ValueError("角色必须是 employee / finance / admin")
+        return value
+
+    @field_validator("dept")
+    @classmethod
+    def validate_dept(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value)
 
 
 class UserUpdate(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=100)
     role: str | None = None
-    dept: str | None = None
+    dept: str | None = Field(default=None, max_length=100)
     status: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("姓名不能为空")
+        return stripped
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in _USER_ROLES:
+            raise ValueError("角色必须是 employee / finance / admin")
+        return value
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value not in _USER_STATUSES:
+            raise ValueError("状态必须是 active / disabled")
+        return value
+
+    @field_validator("dept")
+    @classmethod
+    def validate_dept(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value)
 
 
 class UserOut(BaseSchema):
@@ -50,6 +115,13 @@ class UserOut(BaseSchema):
     dept: str | None
     status: str
     created_at: datetime
+
+
+class PasswordResetOut(BaseModel):
+    """重置密码后仅返回一次临时密码。"""
+
+    user_id: UUID
+    temporary_password: str
 
 
 # ================ 会话 ================
