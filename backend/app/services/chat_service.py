@@ -18,6 +18,7 @@ from app.agent.memory.entities import remember_contract_pending, remember_invoic
 from app.agent.observe import record
 from app.agent.policy import effective_intent
 from app.agent.router import Intent, classify_intent
+from app.agent.tools.catalog import policy_retrieve_trace
 from app.services.chat_file_service import chat_file_service
 from app.services.invoice_document import (
     DocumentUnreadableError,
@@ -569,7 +570,7 @@ class ChatService:
                 search_result.get("provider"),
             )
         elif intent == Intent.POLICY_QUERY:
-            scene, system_prompt, user_content = await self._build_policy_turn(
+            scene, system_prompt, user_content, search_trace = await self._build_policy_turn(
                 db, user, display_msg
             )
         elif intent == Intent.CHITCHAT:
@@ -633,7 +634,7 @@ class ChatService:
 
     async def _build_policy_turn(
         self, db: AsyncSession, user: "User", display_msg: str
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str, dict | None]:
         """企业制度：检索知识库；弱召回或空库则禁止编造。"""
         rag_hits: list[dict] = []
         try:
@@ -647,6 +648,7 @@ class ChatService:
             logger.exception("chat RAG retrieve failed, treat as empty knowledge")
             rag_hits = []
 
+        rag_trace = policy_retrieve_trace(display_msg, rag_hits)
         best_score = float(rag_hits[0]["score"]) if rag_hits else 0.0
         usable = bool(rag_hits) and best_score >= _POLICY_RAG_MIN_SCORE
         if usable:
@@ -664,6 +666,7 @@ class ChatService:
                     f"【用户问题】\n{display_msg}\n\n"
                     "请基于参考资料作答；若资料不足以回答，请直接说明知识库暂无相关规定。"
                 ),
+                rag_trace,
             )
 
         system_prompt = await self._effective_system_prompt(
@@ -675,7 +678,7 @@ class ChatService:
             "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
             "不要用外部机关参考标准冒充本公司规定。"
         )
-        return "chitchat", system_prompt, display_msg
+        return "chitchat", system_prompt, display_msg, rag_trace
 
     async def _stream_confirm_pending(
         self,

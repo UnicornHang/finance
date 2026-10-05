@@ -2,7 +2,19 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, chat, contracts, files, invoices, kb, llm, sessions, tools, users
+from app.api.v1 import (
+    auth,
+    chat,
+    contracts,
+    dashboard,
+    files,
+    invoices,
+    kb,
+    llm,
+    sessions,
+    tools,
+    users,
+)
 
 api_router = APIRouter()
 
@@ -14,5 +26,6 @@ api_router.include_router(contracts.router, prefix="/contracts", tags=["contract
 api_router.include_router(files.router, prefix="/files", tags=["files"])
 api_router.include_router(kb.router, prefix="/kb", tags=["kb"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(llm.router, prefix="/llm", tags=["llm"])
 api_router.include_router(tools.router, prefix="/tools", tags=["tools"])

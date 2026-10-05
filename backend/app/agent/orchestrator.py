@@ -15,7 +15,7 @@ from app.agent.memory.entities import remember_policy_title
 from app.agent.observe import record
 from app.agent.policy import status_event_for_tools, tools_for_intent
 from app.agent.router import Intent
-from app.agent.tools.catalog import build_text_tools, pick_tools
+from app.agent.tools.catalog import build_text_tools, persistable_tool_calls, pick_tools
 from app.agent.upload_graph import get_upload_graph, upload_runtime
 from app.services.chat_file_service import chat_file_service
 from app.services.invoice_vision_service import invoice_vision_service
@@ -112,7 +112,7 @@ class AgentOrchestrator:
             scene=scene,
             tenant_id=str(user.tenant_id),
         )
-        search_trace = trace.get("search")
+        search_trace = persistable_tool_calls(trace)
 
         assistant_content = ""
         try:

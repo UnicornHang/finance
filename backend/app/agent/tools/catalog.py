@@ -20,6 +20,31 @@ from app.services.web_search_service import WebSearchRuntime
 logger = logging.getLogger(__name__)
 
 
+def policy_retrieve_trace(question: str, hits: list[dict]) -> dict[str, Any]:
+    """制度检索落库痕迹，供数据概览「本月检索」统计。"""
+    best = float(hits[0]["score"]) if hits else 0.0
+    return {
+        "tool": TOOL_QUERY_POLICY,
+        "query": (question or "")[:200],
+        "hit_count": len(hits),
+        "best_score": round(best, 3),
+        "usable": bool(hits) and best >= POLICY_RAG_MIN_SCORE,
+    }
+
+
+def persistable_tool_calls(trace: dict[str, Any] | None) -> dict[str, Any] | None:
+    """合并本轮制度检索 / 公开检索痕迹，写入 messages.tool_calls。"""
+    if not trace:
+        return None
+    policy = trace.get("policy")
+    search = trace.get("search")
+    if not policy and not search:
+        return None
+    if policy and search:
+        return {**policy, "search": search}
+    return policy or search
+
+
 def build_text_tools(
     db: AsyncSession,
     tenant_id: str,
@@ -36,6 +61,7 @@ def build_text_tools(
         except Exception:
             logger.exception("query_policy retrieve failed")
             hits = []
+        trace["policy"] = policy_retrieve_trace(question, hits)
         best = float(hits[0]["score"]) if hits else 0.0
         if not hits or best < POLICY_RAG_MIN_SCORE:
             return "知识库暂无相关规定。请明确告知用户，不要用外网或国家机关标准冒充本公司制度。"

@@ -23,6 +23,7 @@ from app.core.database import get_db
 from app.core.exceptions import BusinessError, ForbiddenError
 from app.deps import get_current_user
 from app.models import User
+from app.services.audit_service import write_audit_log
 from app.services.kb_service import kb_service
 from app.services.rag_service import rag_service
 
@@ -165,6 +166,15 @@ async def test_retrieve(
         top_k=body.top_k,
         doc_type=body.doc_type,
     )
+    await write_audit_log(
+        db,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        operation_type="kb.test_retrieve",
+        target_type="kb",
+        after={"hit_count": len(hits), "question": body.question[:200]},
+    )
+    await db.commit()
     return {
         "question": body.question,
         "total": len(hits),

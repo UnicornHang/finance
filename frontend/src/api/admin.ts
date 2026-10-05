@@ -10,6 +10,7 @@ import type {
   KbDocument,
   KbDocumentDetail,
   KbIndexSettings,
+  DashboardOverview,
 } from '@/types'
 
 export interface UserCreatePayload {
@@ -125,4 +126,9 @@ export const kbApi = {
     apiClient
       .post('/kb/test-retrieve', { question, top_k: topK })
       .then((r) => r.data),
+}
+
+export const dashboardApi = {
+  overview: (days: 7 | 30 = 7) =>
+    apiClient.get<DashboardOverview>('/dashboard/overview', { params: { days } }).then((r) => r.data),
 }

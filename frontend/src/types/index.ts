@@ -280,6 +280,74 @@ export interface KbIndexSettings {
   max_upload_bytes: number
 }
 
+/** 后台数据概览 */
+export interface DashboardKpi {
+  value: number
+  previous: number | null
+  delta_pct: number | null
+}
+
+export interface DashboardTrendPoint {
+  date: string
+  label: string
+  weekday: string
+  invoices: number
+  contracts: number
+}
+
+export interface DashboardRiskContract {
+  id: string
+  title: string
+  amount: number
+  risk_level: 'high' | 'medium' | 'low' | string
+}
+
+export interface DashboardRecentArchive {
+  id: string
+  kind: 'invoice' | 'contract' | string
+  title: string
+  amount: number | null
+  operator_name: string | null
+  created_at: string | null
+}
+
+export interface DashboardOverview {
+  timezone: string
+  generated_at: string
+  days: number
+  kpis: {
+    today_archived: DashboardKpi
+    month_invoice_amount: DashboardKpi
+    month_contracts: DashboardKpi
+    high_risk_contracts: DashboardKpi
+  }
+  trend: {
+    points: DashboardTrendPoint[]
+    delta_pct: number | null
+  }
+  risk_contracts: DashboardRiskContract[]
+  recent_archives: DashboardRecentArchive[]
+  activity: {
+    active_users: number
+    invoices_uploaded: number
+    policy_queries: number
+    contract_reviews: number
+  }
+  finance: {
+    amount_excl_tax: number
+    tax_amount: number
+    input_tax: number
+    amount_incl_tax: number
+  }
+  knowledge: {
+    document_count: number
+    chunk_count: number
+    month_retrieves: number
+    all_indexed: boolean
+    pending_or_failed: number
+  }
+}
+
 // SSE 事件类型
 export type StreamEvent =
   | { type: 'text'; content: string; session_id?: string }
