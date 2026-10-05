@@ -305,6 +305,9 @@ class KbDocument(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, default=1)
     uploaded_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id"))
+    chunk_strategy: Mapped[str | None] = mapped_column(String(32))
+    chunk_strategy_effective: Mapped[str | None] = mapped_column(String(32))
+    chunk_params: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()")
@@ -320,6 +323,10 @@ class KbChunk(Base):
     )
     tenant_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), default="leaf")
+    parent_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    section_path: Mapped[str | None] = mapped_column(String(500))
+    embeddable: Mapped[bool] = mapped_column(Boolean, default=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # 空格分词（中文 bigram + 西文词），供 simple 全文检索
     search_tokens: Mapped[str | None] = mapped_column(Text)

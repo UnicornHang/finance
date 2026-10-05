@@ -194,6 +194,36 @@ export interface KbDocument {
   error_message?: string | null
   source_file?: string | null
   tenant_id?: string | null
+  chunk_strategy?: string | null
+  chunk_strategy_effective?: string | null
+  chunk_params?: {
+    child_size?: number
+    parent_size?: number
+    overlap?: number
+    inner_strategy?: string
+    semantic_threshold?: number
+    fallback_reason?: string
+    split_stats?: {
+      stored_chunks: number
+      retrieval_chunks: number
+      parent_chunks: number
+      child_chunks: number
+      leaf_chunks: number
+      min_chars: number
+      max_chars: number
+      avg_chars: number
+      section_paths: number
+    }
+  } | null
+}
+
+/** 上传或重新索引时使用的切分配置。 */
+export interface KbChunkConfig {
+  chunkStrategy: string
+  chunkSize: number
+  chunkOverlap: number
+  parentSize: number
+  semanticThreshold: number
 }
 
 /** 文档预览详情 */
@@ -206,6 +236,10 @@ export interface KbDocumentDetail extends KbDocument {
     chunk_index: number
     content: string
     token_count?: number | null
+    role?: string
+    parent_id?: string | null
+    section_path?: string | null
+    embeddable?: boolean
   }>
 }
 
@@ -213,6 +247,20 @@ export interface KbDocumentDetail extends KbDocument {
 export interface KbIndexSettings {
   chunk_size: number
   chunk_overlap: number
+  parent_size?: number
+  chunk_strategy?: string
+  semantic_threshold?: number
+  chunk_strategies?: Array<{
+    value: string
+    label: string
+    recommended?: boolean
+    suited?: string
+    how?: string
+    example?: string
+    cost_hint?: string
+    visual?: string[]
+    description?: string
+  }>
   embedding_model: string
   embedding_dimension: number
   embedding_base_url: string

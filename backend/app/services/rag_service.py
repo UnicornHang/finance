@@ -20,6 +20,7 @@ from app.services.providers import PROVIDERS
 from app.services.rag_hybrid import (
     channel_source,
     display_score,
+    expand_parents,
     load_chunks,
     reciprocal_rank_fusion,
     sparse_search,
@@ -272,8 +273,13 @@ class RAGService:
             key=lambda x: (x.get("rrf_score") or 0.0, x.get("score") or 0.0),
             reverse=True,
         )
-        cand_n = max(top_k, min(settings.rag_rerank_candidates, len(ranked)))
-        candidates = ranked[:cand_n]
+        # 先把同父块的多个子命中合并，再截取 Rerank 候选，避免 Top-K 被同一父块占满。
+        expanded = await expand_parents(db, ranked)
+        cand_n = max(
+            top_k,
+            min(settings.rag_rerank_candidates, len(expanded)),
+        )
+        candidates = expanded[:cand_n]
         candidates = await self._apply_rerank(q, candidates)
         return candidates[:top_k]
 
@@ -335,6 +341,9 @@ class RAGService:
                 if vh and vh.get("score") is not None
                 else None,
                 "sparse_score": (sh or {}).get("sparse_score"),
+                "role": (sh or {}).get("role") or meta.get("role") or "leaf",
+                "parent_id": (sh or {}).get("parent_id") or meta.get("parent_id"),
+                "section_path": (sh or {}).get("section_path") or meta.get("section_path"),
                 "source": channel_source(vh is not None, sh is not None),
             }
         return merged
@@ -392,6 +401,7 @@ class RAGService:
             JOIN kb_documents d ON d.id = c.doc_id
             WHERE d.status = 'active'
               AND c.embedding IS NOT NULL
+              AND (c.embeddable IS NULL OR c.embeddable = true)
               AND (c.tenant_id = CAST(:tenant_id AS uuid) OR c.tenant_id IS NULL)
               {type_clause}
             ORDER BY c.embedding <=> :emb::vector

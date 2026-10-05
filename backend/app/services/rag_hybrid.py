@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chunking.types import PARENT_INJECT_MAX_CHARS
 from app.models import KbChunk, KbDocument
 from app.services.rag_tokenize import keyword_terms, query_tokens, to_or_tsquery
 
@@ -95,6 +96,9 @@ async def load_chunks(
             KbChunk.id,
             KbChunk.doc_id,
             KbChunk.content,
+            KbChunk.role,
+            KbChunk.parent_id,
+            KbChunk.section_path,
             KbDocument.title,
             KbDocument.doc_type,
         )
@@ -108,6 +112,9 @@ async def load_chunks(
             "content": row.content,
             "title": row.title,
             "doc_type": row.doc_type,
+            "role": row.role or "leaf",
+            "parent_id": str(row.parent_id) if row.parent_id else None,
+            "section_path": row.section_path,
         }
     return out
 
@@ -135,6 +142,8 @@ def _tenant_type_sql(doc_type: str | None) -> str:
         JOIN kb_documents d ON d.id = c.doc_id
         WHERE d.status = 'active'
           AND (c.tenant_id = CAST(:tenant_id AS uuid) OR c.tenant_id IS NULL)
+          AND (c.embeddable IS NULL OR c.embeddable = true)
+          AND (c.role IS NULL OR c.role IN ('child', 'leaf'))
           {extra}
     """
 
@@ -159,7 +168,8 @@ async def _fts_search(
         params["doc_type"] = doc_type
     sql = text(
         f"""
-        SELECT c.id, c.doc_id, c.content, d.title, d.doc_type,
+        SELECT c.id, c.doc_id, c.content, c.role, c.parent_id, c.section_path,
+               d.title, d.doc_type,
                ts_rank_cd(c.search_tsv, to_tsquery('simple', :q)) AS rank
         {_tenant_type_sql(doc_type)}
           AND c.search_tsv @@ to_tsquery('simple', :q)
@@ -196,7 +206,8 @@ async def _ilike_search(
         like_params["doc_type"] = doc_type
     sql = text(
         f"""
-        SELECT c.id, c.doc_id, c.content, d.title, d.doc_type,
+        SELECT c.id, c.doc_id, c.content, c.role, c.parent_id, c.section_path,
+               d.title, d.doc_type,
                0.5 AS rank
         {_tenant_type_sql(doc_type)}
           AND ({' OR '.join(like_clauses)})
@@ -222,8 +233,69 @@ def _rows_to_sparse_hits(rows: list[Any]) -> list[dict[str, Any]]:
                 "title": row.title,
                 "doc_type": row.doc_type,
                 "content": row.content,
+                "role": getattr(row, "role", None) or "leaf",
+                "parent_id": str(row.parent_id) if getattr(row, "parent_id", None) else None,
+                "section_path": getattr(row, "section_path", None),
                 "sparse_rank": float(row.rank or 0.0),
                 "sparse_score": rank_to_unit_score(i),
             }
         )
     return hits
+
+
+async def expand_parents(db: AsyncSession, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """命中 child 后换成父块正文；同父去重，保留先到的高相关分。"""
+    parent_ids: list[UUID] = []
+    for h in hits:
+        pid = h.get("parent_id")
+        if pid:
+            parent_ids.append(UUID(str(pid)))
+    parents = await load_chunks(db, parent_ids)
+    out: list[dict[str, Any]] = []
+    seen_parent: set[str] = set()
+    for h in hits:
+        item = dict(h)
+        pid = item.get("parent_id")
+        path = item.get("section_path")
+        if path:
+            item["section_path"] = path
+        if pid and pid in seen_parent:
+            continue
+        if pid and pid in parents:
+            parent = parents[pid]
+            child_content = item.get("content") or ""
+            body = _parent_window(
+                parent.get("content") or "",
+                child_content,
+                PARENT_INJECT_MAX_CHARS,
+            )
+            item["child_content"] = child_content
+            item["content"] = body or child_content
+            item["expanded"] = True
+            seen_parent.add(pid)
+        else:
+            item["expanded"] = False
+        out.append(item)
+    return out
+
+
+def _parent_window(parent: str, child: str, max_chars: int) -> str:
+    """围绕命中的子块截取父块，保证实际命中条款不会被父块前缀挤掉。"""
+    if len(parent) <= max_chars:
+        return parent
+    position = parent.find(child) if child else -1
+    if position < 0:
+        if not child:
+            return parent[:max_chars]
+        context_size = max(max_chars - len(child) - 1, 0)
+        context = parent[:context_size]
+        return f"{child}\n{context}".strip()[:max_chars]
+    child_end = position + len(child)
+    context = max(max_chars - len(child), 0)
+    start = max(position - context // 2, 0)
+    end = min(start + max_chars, len(parent))
+    start = max(end - max_chars, 0)
+    if child_end > end:
+        end = min(child_end, len(parent))
+        start = max(end - max_chars, 0)
+    return parent[start:end]

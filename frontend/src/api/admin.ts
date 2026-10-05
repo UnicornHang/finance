@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type {
+  KbChunkConfig,
   User,
   LLMConfig,
   LLMProvider,
@@ -90,8 +91,16 @@ export const kbApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then((r) => r.data),
   remove: (id: string) => apiClient.delete(`/kb/documents/${id}`),
-  reindex: (id: string) =>
-    apiClient.post(`/kb/documents/${id}/reindex`).then((r) => r.data),
+  reindex: (id: string, config: KbChunkConfig) =>
+    apiClient
+      .post(`/kb/documents/${id}/reindex`, {
+        chunk_strategy: config.chunkStrategy,
+        chunk_size: config.chunkSize,
+        chunk_overlap: config.chunkOverlap,
+        parent_size: config.parentSize,
+        semantic_threshold: config.semanticThreshold,
+      })
+      .then((r) => r.data),
   testRetrieve: (question: string, topK = 5) =>
     apiClient
       .post('/kb/test-retrieve', { question, top_k: topK })

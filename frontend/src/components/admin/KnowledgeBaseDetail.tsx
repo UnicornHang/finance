@@ -11,6 +11,7 @@ import { InvoiceListPager } from '@/components/admin/InvoiceListPager'
 import {
   KB_STATUS_LABEL,
   KB_STATUS_TONE,
+  chunkStrategyLabel,
   kbDocTypeLabel,
 } from '@/components/admin/kbMeta'
 import { kbApi } from '@/api/admin'
@@ -139,10 +140,22 @@ export function KnowledgeBaseDetail() {
                           key={c.id}
                           className="rounded-md border border-line-subtle bg-canvas px-4 py-3"
                         >
-                          <div className="mb-2 flex items-center gap-2 text-label-sm text-ink-tertiary">
+                          <div className="mb-2 flex flex-wrap items-center gap-2 text-label-sm text-ink-tertiary">
                             <span className="rounded bg-primary-tint px-1.5 py-0.5 font-medium text-primary">
                               块 #{c.chunk_index}
                             </span>
+                            {c.role && (
+                              <span className="rounded bg-canvas px-1.5 py-0.5">
+                                {c.role === 'parent'
+                                  ? '父块'
+                                  : c.role === 'child'
+                                    ? '子块'
+                                    : '检索块'}
+                              </span>
+                            )}
+                            {c.section_path && (
+                              <span className="truncate">{c.section_path}</span>
+                            )}
                             {c.token_count != null && (
                               <span className="tabular-nums">
                                 {c.token_count} 字
@@ -201,11 +214,95 @@ export function KnowledgeBaseDetail() {
                     }
                   />
                   <MetaRow
-                    label="切分块数"
+                    label="实际切分策略"
+                    value={chunkStrategyLabel(
+                      data.chunk_strategy_effective || data.chunk_strategy,
+                    )}
+                  />
+                  {data.chunk_strategy &&
+                    data.chunk_strategy_effective &&
+                    data.chunk_strategy !== data.chunk_strategy_effective && (
+                      <MetaRow
+                        label="原请求策略"
+                        value={chunkStrategyLabel(data.chunk_strategy)}
+                      />
+                    )}
+                  {data.chunk_params?.fallback_reason && (
+                    <MetaRow
+                      label="实际切分"
+                      value={
+                        data.chunk_params.fallback_reason ===
+                        'semantic_embed_unavailable'
+                          ? '向量服务不可用，已按长度切开'
+                          : data.chunk_params.fallback_reason ===
+                              'semantic_embed_failed'
+                            ? '向量计算失败，已按长度切开'
+                            : '话题切分无结果，已按长度切开'
+                      }
+                    />
+                  )}
+                  <MetaRow
+                    label="检索块数"
                     value={
                       <span className="tabular-nums">{data.chunk_count}</span>
                     }
                   />
+                  {data.chunk_params?.split_stats && (
+                    <>
+                      <MetaRow
+                        label="实际存储块"
+                        value={
+                          <span className="tabular-nums">
+                            {data.chunk_params.split_stats.stored_chunks}
+                          </span>
+                        }
+                      />
+                      <MetaRow
+                        label="角色分布"
+                        value={
+                          <span>
+                            父块 {data.chunk_params.split_stats.parent_chunks}
+                            {' · '}子块{' '}
+                            {data.chunk_params.split_stats.child_chunks}
+                            {' · '}普通块{' '}
+                            {data.chunk_params.split_stats.leaf_chunks}
+                          </span>
+                        }
+                      />
+                      <MetaRow
+                        label="检索块字数"
+                        value={
+                          <span>
+                            {data.chunk_params.split_stats.min_chars}–
+                            {data.chunk_params.split_stats.max_chars}
+                            {' · '}平均{' '}
+                            {data.chunk_params.split_stats.avg_chars}
+                          </span>
+                        }
+                      />
+                      <MetaRow
+                        label="识别章节数"
+                        value={
+                          <span className="tabular-nums">
+                            {data.chunk_params.split_stats.section_paths}
+                          </span>
+                        }
+                      />
+                    </>
+                  )}
+                  {data.chunk_params && (
+                    <MetaRow
+                      label="切分参数"
+                      value={
+                        <span>
+                          块 {data.chunk_params.child_size ?? '—'}
+                          {' · '}重叠 {data.chunk_params.overlap ?? '—'}
+                          {data.chunk_strategy === 'parent_child' &&
+                            ` · 父块 ${data.chunk_params.parent_size ?? '—'}`}
+                        </span>
+                      }
+                    />
+                  )}
                   <MetaRow
                     label="版本"
                     value={<span className="tabular-nums">v{data.version}</span>}

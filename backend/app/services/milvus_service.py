@@ -156,6 +156,28 @@ class MilvusKbStore:
                 code="MILVUS_DELETE_FAILED",
             ) from exc
 
+    def delete_by_chunk_ids(self, chunk_ids: list[UUID | str]) -> None:
+        """精确删除指定切块向量，用于无中断替换和失败补偿。"""
+        if not self.enabled or not chunk_ids:
+            return
+        try:
+            col = self._collection()
+            values = [str(chunk_id) for chunk_id in chunk_ids]
+            for start in range(0, len(values), 500):
+                batch = values[start : start + 500]
+                quoted = ", ".join(f'"{value}"' for value in batch)
+                col.delete(f"chunk_id in [{quoted}]")
+            col.flush()
+            logger.info("milvus deleted chunk_ids=%s", len(values))
+        except BusinessError:
+            raise
+        except Exception as exc:
+            logger.exception("milvus chunk delete failed count=%s", len(chunk_ids))
+            raise BusinessError(
+                f"Milvus 删除旧切块向量失败：{exc}",
+                code="MILVUS_DELETE_FAILED",
+            ) from exc
+
     def search(
         self,
         embedding: list[float],

@@ -3,74 +3,34 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.chunking import (
+    CHILD_SIZE_DEFAULT,
+    OVERLAP_DEFAULT,
+    PARENT_SIZE_DEFAULT,
+    RECURSIVE_SIZE_DEFAULT,
+    SEMANTIC_THRESHOLD_DEFAULT,
+    SplitConfig,
+    chunk_strategy_catalog,
+    config_to_params,
+    normalize_split_config,
+)
 from app.config import settings
 from app.core.exceptions import BusinessError, ForbiddenError, NotFoundError
+from app.models import KbChunk, KbDocument, User
 from app.services.invoice_document import _extract_file_text, _guess_mime
+from app.services.kb_indexing import index_kb_document
 from app.services.milvus_service import milvus_kb_store
-from app.services.rag_service import rag_service
-from app.services.rag_tokenize import to_search_tokens
 
-if TYPE_CHECKING:
-    from app.models import KbDocument, User
-
-logger = logging.getLogger(__name__)
-
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
+CHUNK_SIZE = RECURSIVE_SIZE_DEFAULT
+CHUNK_OVERLAP = OVERLAP_DEFAULT
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 ALLOWED_SUFFIXES = {".txt", ".md", ".markdown", ".pdf", ".docx", ".doc"}
-
-
-def recursive_split(
-    content: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP
-) -> list[str]:
-    """按段落优先切分，控制块长与重叠。"""
-    text = (content or "").strip()
-    if not text:
-        return []
-    if len(text) <= chunk_size:
-        return [text]
-
-    parts = re.split(r"\n\s*\n", text)
-    if len(parts) == 1:
-        parts = text.split("\n")
-    if len(parts) == 1:
-        parts = re.split(r"(?<=[。！？；.!?])\s*", text)
-
-    chunks: list[str] = []
-    buf = ""
-    for part in parts:
-        piece = part.strip()
-        if not piece:
-            continue
-        candidate = f"{buf}\n{piece}".strip() if buf else piece
-        if len(candidate) <= chunk_size:
-            buf = candidate
-            continue
-        if buf:
-            chunks.append(buf)
-        if len(piece) <= chunk_size:
-            buf = piece
-            continue
-        start = 0
-        while start < len(piece):
-            end = min(start + chunk_size, len(piece))
-            chunks.append(piece[start:end])
-            if end >= len(piece):
-                break
-            start = max(end - overlap, start + 1)
-        buf = ""
-    if buf:
-        chunks.append(buf)
-    return chunks
 
 
 def extract_document_text(
@@ -112,11 +72,12 @@ def extract_document_text(
 class KbService:
     """知识库 CRUD + 索引。"""
 
-    def _assert_admin(self, user: "User") -> None:
+    def _assert_admin(self, user: User) -> None:
         if user.role != "admin":
             raise ForbiddenError("仅管理员可管理知识库", code="KB_FORBIDDEN")
 
-    def _serialize(self, row: "KbDocument") -> dict[str, Any]:
+    def _serialize(self, row: KbDocument) -> dict[str, Any]:
+        params = row.chunk_params if isinstance(row.chunk_params, dict) else {}
         return {
             "id": str(row.id),
             "title": row.title,
@@ -127,6 +88,9 @@ class KbService:
             "error_message": row.error_message,
             "source_file": row.source_file,
             "tenant_id": str(row.tenant_id) if row.tenant_id else None,
+            "chunk_strategy": row.chunk_strategy,
+            "chunk_strategy_effective": row.chunk_strategy_effective,
+            "chunk_params": params,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
@@ -140,14 +104,13 @@ class KbService:
     ) -> dict[str, Any]:
         """文档预览：元数据 + 全文 + 切分块列表。"""
         self._assert_admin(user)
-        from app.models import KbChunk
 
         row = await self.get_document(db, user=user, doc_id=doc_id)
         result = await db.execute(
             select(KbChunk)
             .where(KbChunk.doc_id == row.id)
             .order_by(KbChunk.chunk_index.asc())
-            .limit(200)
+            .limit(400)
         )
         chunks = [
             {
@@ -155,6 +118,10 @@ class KbService:
                 "chunk_index": c.chunk_index,
                 "content": c.content,
                 "token_count": c.token_count,
+                "role": c.role or "leaf",
+                "parent_id": str(c.parent_id) if c.parent_id else None,
+                "section_path": c.section_path,
+                "embeddable": bool(c.embeddable),
             }
             for c in result.scalars().all()
         ]
@@ -172,7 +139,6 @@ class KbService:
     ) -> list[dict[str, Any]]:
         """当前租户文档 + 通用文档。"""
         self._assert_admin(user)
-        from app.models import KbDocument
 
         result = await db.execute(
             select(KbDocument)
@@ -193,10 +159,8 @@ class KbService:
         *,
         user: "User",
         doc_id: UUID,
-    ) -> "KbDocument":
+    ) -> KbDocument:
         """读取单份文档并校验可见性。"""
-        from app.models import KbDocument
-
         row = await db.get(KbDocument, doc_id)
         if row is None:
             raise NotFoundError("文档不存在", code="KB_NOT_FOUND")
@@ -207,8 +171,12 @@ class KbService:
     def get_index_settings(self) -> dict[str, Any]:
         """返回上传弹窗用的默认索引参数。"""
         return {
-            "chunk_size": CHUNK_SIZE,
-            "chunk_overlap": CHUNK_OVERLAP,
+            "chunk_size": CHILD_SIZE_DEFAULT,
+            "chunk_overlap": OVERLAP_DEFAULT,
+            "parent_size": PARENT_SIZE_DEFAULT,
+            "chunk_strategy": "parent_child",
+            "semantic_threshold": SEMANTIC_THRESHOLD_DEFAULT,
+            "chunk_strategies": chunk_strategy_catalog(),
             "embedding_model": settings.embedding_model,
             "embedding_dimension": settings.embedding_dimension,
             "embedding_base_url": settings.embedding_base_url,
@@ -239,26 +207,29 @@ class KbService:
         self,
         db: AsyncSession,
         *,
-        user: "User",
+        user: User,
         file_bytes: bytes,
         filename: str | None,
         content_type: str | None,
         title: str | None = None,
         doc_type: str | None = None,
         is_global: bool = False,
-        chunk_size: int = CHUNK_SIZE,
-        chunk_overlap: int = CHUNK_OVERLAP,
+        chunk_strategy: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+        parent_size: int | None = None,
+        semantic_threshold: float | None = None,
     ) -> dict[str, Any]:
         """上传并同步完成切分向量化。"""
         self._assert_admin(user)
-        from app.models import KbDocument
-
-        size = int(chunk_size) if chunk_size else CHUNK_SIZE
-        overlap = int(chunk_overlap) if chunk_overlap else CHUNK_OVERLAP
-        if size < 100 or size > 4000:
-            raise BusinessError("分段长度须在 100–4000 之间", code="KB_CHUNK_SIZE_INVALID")
-        if overlap < 0 or overlap >= size:
-            raise BusinessError("重叠长度须 ≥0 且小于分段长度", code="KB_CHUNK_OVERLAP_INVALID")
+        cfg = normalize_split_config(
+            strategy=chunk_strategy,
+            filename=filename,
+            child_size=chunk_size,
+            parent_size=parent_size,
+            overlap=chunk_overlap,
+            semantic_threshold=semantic_threshold,
+        )
 
         text = extract_document_text(
             file_bytes, filename=filename, content_type=content_type
@@ -275,24 +246,19 @@ class KbService:
             error_message=None,
             version=1,
             uploaded_by=user.id,
+            chunk_strategy=cfg.strategy,
+            chunk_strategy_effective=cfg.strategy,
+            chunk_params=config_to_params(cfg),
         )
         db.add(row)
         await db.flush()
-        try:
-            await self._index_document(
-                db,
-                row,
-                bump_version=False,
-                embed_tenant_id=user.tenant_id,
-                chunk_size=size,
-                chunk_overlap=overlap,
-            )
-        except BusinessError:
-            # 保留 failed 记录，便于前端看到错误后点重索引
-            await db.commit()
-            await db.refresh(row)
-            return self._serialize(row)
-        await db.commit()
+        await index_kb_document(
+            db,
+            row,
+            bump_version=False,
+            embed_tenant_id=user.tenant_id,
+            config=cfg,
+        )
         await db.refresh(row)
         return self._serialize(row)
 
@@ -300,26 +266,55 @@ class KbService:
         self,
         db: AsyncSession,
         *,
-        user: "User",
+        user: User,
         doc_id: UUID,
+        chunk_strategy: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+        parent_size: int | None = None,
+        semantic_threshold: float | None = None,
     ) -> dict[str, Any]:
-        """重新切分并向量化；失败也会落库 failed 状态。"""
+        """按请求中的新配置重新切分；未传字段沿用文档原配置。"""
         self._assert_admin(user)
         row = await self.get_document(db, user=user, doc_id=doc_id)
         if not (row.content or "").strip():
             raise BusinessError("文档正文为空，无法索引", code="KB_EMPTY_CONTENT")
+        params = row.chunk_params if isinstance(row.chunk_params, dict) else {}
+        cfg = normalize_split_config(
+            strategy=chunk_strategy or row.chunk_strategy or "parent_child",
+            filename=row.source_file,
+            child_size=(
+                chunk_size
+                if chunk_size is not None
+                else params.get("child_size")
+            ),
+            parent_size=(
+                parent_size
+                if parent_size is not None
+                else params.get("parent_size")
+            ),
+            overlap=(
+                chunk_overlap
+                if chunk_overlap is not None
+                else params.get("overlap")
+            ),
+            inner_strategy=params.get("inner_strategy"),
+            semantic_threshold=(
+                semantic_threshold
+                if semantic_threshold is not None
+                else params.get("semantic_threshold")
+            ),
+        )
         row.status = "indexing"
         row.error_message = None
         await db.flush()
-        try:
-            await self._index_document(
-                db, row, bump_version=True, embed_tenant_id=user.tenant_id
-            )
-        except BusinessError:
-            await db.commit()
-            await db.refresh(row)
-            return self._serialize(row)
-        await db.commit()
+        await index_kb_document(
+            db,
+            row,
+            bump_version=True,
+            embed_tenant_id=user.tenant_id,
+            config=cfg,
+        )
         await db.refresh(row)
         return self._serialize(row)
 
@@ -327,7 +322,7 @@ class KbService:
         self,
         db: AsyncSession,
         *,
-        user: "User",
+        user: User,
         doc_id: UUID,
     ) -> None:
         """删除文档：先清 Milvus，再删 Postgres（级联 chunks）。"""
@@ -337,96 +332,5 @@ class KbService:
             await asyncio.to_thread(milvus_kb_store.delete_by_doc_id, row.id)
         await db.delete(row)
         await db.commit()
-
-    async def _index_document(
-        self,
-        db: AsyncSession,
-        row: "KbDocument",
-        *,
-        bump_version: bool,
-        embed_tenant_id: UUID,
-        chunk_size: int = CHUNK_SIZE,
-        chunk_overlap: int = CHUNK_OVERLAP,
-    ) -> None:
-        """切分 → Embedding → Postgres 正文/稀疏词 → Milvus 向量。"""
-        from app.models import KbChunk
-
-        try:
-            chunks = recursive_split(
-                row.content or "", chunk_size=chunk_size, overlap=chunk_overlap
-            )
-            if not chunks:
-                raise BusinessError("切分结果为空", code="KB_EMPTY_CONTENT")
-
-            # 先清旧向量与旧块
-            if milvus_kb_store.enabled:
-                await asyncio.to_thread(milvus_kb_store.delete_by_doc_id, row.id)
-            await db.execute(delete(KbChunk).where(KbChunk.doc_id == row.id))
-
-            # 通用文档 tenant_id 为空，Embedding 密钥仍按操作者租户解析
-            embeddings = await rag_service.embed_batch(
-                chunks, db=db, tenant_id=embed_tenant_id
-            )
-            if len(embeddings) != len(chunks):
-                raise BusinessError("向量化结果数量不匹配", code="KB_EMBED_MISMATCH")
-
-            chunk_rows: list[KbChunk] = []
-            for idx, (chunk_text, emb) in enumerate(zip(chunks, embeddings)):
-                # 企业主路径向量在 Milvus；PG embedding 可空，仅作降级备份可选写入
-                chunk = KbChunk(
-                    doc_id=row.id,
-                    tenant_id=row.tenant_id,
-                    chunk_index=idx,
-                    content=chunk_text,
-                    search_tokens=to_search_tokens(chunk_text, title=row.title),
-                    embedding=emb if settings.kb_store_pg_embedding else None,
-                    token_count=len(chunk_text),
-                    metadata_={"title": row.title, "doc_type": row.doc_type},
-                )
-                db.add(chunk)
-                chunk_rows.append(chunk)
-            await db.flush()
-            milvus_rows = [
-                {
-                    "chunk_id": chunk.id,
-                    "doc_id": row.id,
-                    "tenant_id": row.tenant_id,
-                    "doc_type": row.doc_type or "policy",
-                    "embedding": emb,
-                }
-                for chunk, emb in zip(chunk_rows, embeddings)
-            ]
-
-            if milvus_kb_store.enabled:
-                await asyncio.to_thread(milvus_kb_store.upsert_chunks, milvus_rows)
-            elif not settings.kb_store_pg_embedding:
-                raise BusinessError(
-                    "Milvus 未启用且未开启 PG 向量备份，无法完成索引",
-                    code="KB_VECTOR_STORE_REQUIRED",
-                )
-
-            row.chunk_count = len(chunks)
-            row.embedding_model = settings.embedding_model
-            row.status = "active"
-            row.error_message = None
-            if bump_version:
-                row.version = (row.version or 1) + 1
-            await db.flush()
-            logger.info(
-                "kb indexed id=%s chunks=%s milvus=%s",
-                row.id,
-                len(chunks),
-                milvus_kb_store.enabled,
-            )
-        except Exception as exc:
-            logger.exception("kb index failed id=%s", row.id)
-            row.status = "failed"
-            row.error_message = str(exc)[:1000]
-            row.chunk_count = 0
-            await db.flush()
-            if isinstance(exc, BusinessError):
-                raise
-            raise BusinessError(f"向量化失败：{exc}", code="KB_INDEX_FAILED") from exc
-
 
 kb_service = KbService()

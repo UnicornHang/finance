@@ -38,6 +38,20 @@ class TestRetrieveRequest(BaseModel):
     doc_type: str | None = None
 
 
+class ReindexRequest(BaseModel):
+    """重新索引时可覆盖原切分配置。"""
+
+    chunk_strategy: str | None = None
+    chunk_size: int | None = Field(default=None, ge=100, le=4000)
+    chunk_overlap: int | None = Field(default=None, ge=0, le=3999)
+    parent_size: int | None = Field(default=None, ge=200, le=8000)
+    semantic_threshold: float | None = Field(
+        default=None,
+        ge=0.15,
+        le=0.85,
+    )
+
+
 @router.get("/settings")
 async def kb_settings(
     user: Annotated[User, Depends(get_current_user)],
@@ -65,8 +79,11 @@ async def upload_document(
     title: Annotated[str | None, Form()] = None,
     doc_type: Annotated[str | None, Form()] = None,
     is_global: Annotated[str, Form()] = "false",
-    chunk_size: Annotated[int, Form()] = 500,
+    chunk_size: Annotated[int, Form()] = 400,
     chunk_overlap: Annotated[int, Form()] = 50,
+    parent_size: Annotated[int, Form()] = 1200,
+    chunk_strategy: Annotated[str, Form()] = "parent_child",
+    semantic_threshold: Annotated[float, Form()] = 0.45,
 ):
     """上传知识库文档并同步切分向量化。"""
     raw = await file.read()
@@ -82,8 +99,11 @@ async def upload_document(
         title=title,
         doc_type=doc_type,
         is_global=global_flag,
+        chunk_strategy=chunk_strategy,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
+        parent_size=parent_size,
+        semantic_threshold=semantic_threshold,
     )
 
 
@@ -113,9 +133,20 @@ async def reindex_document(
     doc_id: UUID,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    body: ReindexRequest | None = None,
 ):
-    """重新向量化（种子文档首次索引也走这里）。"""
-    return await kb_service.reindex(db, user=user, doc_id=doc_id)
+    """重新切分并向量化，可同时切换策略。"""
+    request = body or ReindexRequest()
+    return await kb_service.reindex(
+        db,
+        user=user,
+        doc_id=doc_id,
+        chunk_strategy=request.chunk_strategy,
+        chunk_size=request.chunk_size,
+        chunk_overlap=request.chunk_overlap,
+        parent_size=request.parent_size,
+        semantic_threshold=request.semantic_threshold,
+    )
 
 
 @router.post("/test-retrieve")

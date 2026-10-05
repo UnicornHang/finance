@@ -12,7 +12,6 @@ import logging
 import re
 import zipfile
 from io import BytesIO
-from xml.etree import ElementTree
 
 try:
     from pypdf import PdfReader
@@ -23,6 +22,11 @@ try:
     import pypdfium2 as pdfium
 except ImportError:
     pdfium = None  # type: ignore[assignment]
+
+from app.services.contract_overview import (
+    extract_contract_overview as _extract_contract_overview,
+)
+from app.services.docx_text import extract_docx_text
 
 logger = logging.getLogger(__name__)
 
@@ -135,39 +139,9 @@ def _zip_has_docx(file_bytes: bytes) -> bool:
         return False
 
 
-def _xml_visible_text(xml: bytes) -> str:
-    """取出 XML 里的文本节点。Word 正文在 w:t 中。"""
-    root = ElementTree.fromstring(xml)
-    parts = [node.text.strip() for node in root.iter() if node.text and node.text.strip()]
-    return "\n".join(parts)
-
-
-def _docx_part_names(names: list[str]) -> list[str]:
-    """正文在前，页眉页脚和批注在后。样式表不算正文。"""
-    body = [name for name in names if name == "word/document.xml"]
-    extras = sorted(
-        name
-        for name in names
-        if name.startswith("word/")
-        and name.endswith(".xml")
-        and (
-            name.startswith("word/header")
-            or name.startswith("word/footer")
-            or name in {"word/footnotes.xml", "word/endnotes.xml", "word/comments.xml"}
-        )
-    )
-    return body + extras
-
-
 def _docx_text(file_bytes: bytes) -> str:
-    """从 docx 的正文、页眉页脚和批注抽出纯文本。"""
-    try:
-        with zipfile.ZipFile(BytesIO(file_bytes)) as zf:
-            names = _docx_part_names(zf.namelist())
-            chunks = [_xml_visible_text(zf.read(name)) for name in names]
-    except (zipfile.BadZipFile, KeyError, ElementTree.ParseError, OSError):
-        return ""
-    return "\n".join(chunk for chunk in chunks if chunk)
+    """从 DOCX 抽正文并保留可供结构切分使用的标题层级。"""
+    return extract_docx_text(file_bytes)
 
 
 def _doc_text(file_bytes: bytes) -> str:
@@ -492,76 +466,6 @@ def _as_llm_message_content(parts: list[dict]) -> str | list[dict]:
     if len(parts) == 1 and parts[0].get("type") == "text":
         return str(parts[0].get("text") or "")
     return parts
-
-
-def _match_labeled_value(text: str, labels: tuple[str, ...]) -> str | None:
-    """按「标签：值」抓第一处非空内容，值取到行尾。"""
-    for label in labels:
-        pattern = rf"{re.escape(label)}\s*[（(][^）)]*[）)]?\s*[:：]\s*(.+)$"
-        matched = re.search(pattern, text, re.MULTILINE)
-        if matched:
-            value = matched.group(1).strip()
-            if value:
-                return value
-        pattern = rf"{re.escape(label)}\s*[:：]\s*(.+)$"
-        matched = re.search(pattern, text, re.MULTILINE)
-        if matched:
-            value = matched.group(1).strip()
-            if value:
-                return value
-    return None
-
-
-def _parse_money_amount(text: str) -> float | None:
-    """从正文里找第一个像金额的数字（优先带 ¥/￥ 的）。"""
-    for pattern in (
-        r"[¥￥]\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)",
-        r"(?:人民币|金额|价款|转让价)[^\n]{0,24}?"
-        r"([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)\s*元",
-    ):
-        matched = re.search(pattern, text)
-        if not matched:
-            continue
-        try:
-            return float(matched.group(1).replace(",", ""))
-        except ValueError:
-            continue
-    return None
-
-
-def _parse_sign_date(text: str) -> str | None:
-    """抓签字/签署日期，返回 YYYY-MM-DD。"""
-    matched = re.search(
-        r"(?:日期|签署日期|签订日期|签约日期)\s*[:：]?\s*"
-        r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日",
-        text,
-    )
-    if not matched:
-        matched = re.search(r"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", text)
-    if not matched:
-        return None
-    year, month, day = matched.groups()
-    return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
-
-
-def _extract_contract_overview(text: str) -> dict:
-    """从已抽出的正文里填侧栏字段。抓不到就空着，不臆造。"""
-    if not text.strip():
-        return {}
-    overview: dict = {}
-    party_a = _match_labeled_value(text, ("甲方", "转让方", "出卖人", "卖方"))
-    party_b = _match_labeled_value(text, ("乙方", "受让方", "买受人", "买方"))
-    if party_a:
-        overview["party_a"] = party_a
-    if party_b:
-        overview["party_b"] = party_b
-    amount = _parse_money_amount(text)
-    if amount is not None:
-        overview["amount"] = amount
-    sign_date = _parse_sign_date(text)
-    if sign_date:
-        overview["sign_date"] = sign_date
-    return overview
 
 
 def _media_content(
