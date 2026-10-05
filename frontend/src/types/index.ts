@@ -224,6 +224,9 @@ export interface KbIndexSettings {
     disabled?: boolean
   }>
   retrieve_top_k: number
+  hybrid_enabled?: boolean
+  rerank_enabled?: boolean
+  rerank_model?: string
   milvus_enabled: boolean
   allowed_suffixes: string[]
   max_upload_bytes: number

@@ -8,6 +8,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
+    Computed,
     Date,
     DateTime,
     ForeignKey,
@@ -19,7 +20,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -320,6 +321,15 @@ class KbChunk(Base):
     tenant_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # 空格分词（中文 bigram + 西文词），供 simple 全文检索
+    search_tokens: Mapped[str | None] = mapped_column(Text)
+    search_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('simple', coalesce(search_tokens, ''))",
+            persisted=True,
+        ),
+    )
     # 企业主路径向量在 Milvus；此列可空，仅作可选降级备份
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
     token_count: Mapped[int | None] = mapped_column(Integer)

@@ -98,6 +98,22 @@ class Settings(BaseSettings):
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_dimension: int = 1536
 
+    # ---- RAG 混合检索 / Rerank ----
+    rag_hybrid_enabled: bool = True
+    # 每路召回条数 = top_k * multiplier，融合后再截断
+    rag_retrieve_multiplier: int = 4
+    rag_rrf_k: int = 60
+    rag_rerank_enabled: bool = True
+    rag_rerank_candidates: int = 20
+    rerank_provider: Literal["dashscope", "cohere", "jina", "openai_compatible"] = (
+        "dashscope"
+    )
+    rerank_model: str = "qwen3.7-text-rerank"
+    rerank_api_key: str = ""
+    rerank_base_url: str = ""
+    rerank_timeout: int = 15
+    rerank_max_doc_chars: int = 4000
+
     # ---- Milvus（企业级向量库，知识库主路径）----
     milvus_enabled: bool = True
     milvus_host: str = "127.0.0.1"

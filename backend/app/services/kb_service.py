@@ -16,6 +16,7 @@ from app.core.exceptions import BusinessError, ForbiddenError, NotFoundError
 from app.services.invoice_document import _extract_file_text, _guess_mime
 from app.services.milvus_service import milvus_kb_store
 from app.services.rag_service import rag_service
+from app.services.rag_tokenize import to_search_tokens
 
 if TYPE_CHECKING:
     from app.models import KbDocument, User
@@ -215,8 +216,8 @@ class KbService:
             "index_modes": [
                 {
                     "value": "high_quality",
-                    "label": "高质量（向量）",
-                    "description": "切分后调用 Embedding，写入 Milvus 语义检索",
+                    "label": "高质量（混合检索）",
+                    "description": "切分后 Embedding 入 Milvus，并写稀疏词供 RRF + Rerank",
                 },
                 {
                     "value": "economy",
@@ -226,6 +227,9 @@ class KbService:
                 },
             ],
             "retrieve_top_k": 5,
+            "hybrid_enabled": settings.rag_hybrid_enabled,
+            "rerank_enabled": settings.rag_rerank_enabled,
+            "rerank_model": settings.rerank_model,
             "milvus_enabled": milvus_kb_store.enabled,
             "allowed_suffixes": sorted(ALLOWED_SUFFIXES),
             "max_upload_bytes": MAX_UPLOAD_BYTES,
@@ -344,7 +348,7 @@ class KbService:
         chunk_size: int = CHUNK_SIZE,
         chunk_overlap: int = CHUNK_OVERLAP,
     ) -> None:
-        """切分 → Embedding → Postgres 存正文 → Milvus 存向量。"""
+        """切分 → Embedding → Postgres 正文/稀疏词 → Milvus 向量。"""
         from app.models import KbChunk
 
         try:
@@ -374,6 +378,7 @@ class KbService:
                     tenant_id=row.tenant_id,
                     chunk_index=idx,
                     content=chunk_text,
+                    search_tokens=to_search_tokens(chunk_text, title=row.title),
                     embedding=emb if settings.kb_store_pg_embedding else None,
                     token_count=len(chunk_text),
                     metadata_={"title": row.title, "doc_type": row.doc_type},

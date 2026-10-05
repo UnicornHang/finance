@@ -1,10 +1,9 @@
-"""RAG 检索服务：Embedding + Milvus 向量检索 + Postgres 关键词补充。"""
+"""RAG 检索服务：Embedding + 混合召回（向量/稀疏/RRF）+ Rerank。"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Any
 from uuid import UUID
 
@@ -15,8 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.exceptions import BusinessError
 from app.core.security import decrypt_field
+from app.models import LlmConfig
 from app.services.milvus_service import milvus_kb_store
 from app.services.providers import PROVIDERS
+from app.services.rag_hybrid import (
+    channel_source,
+    display_score,
+    load_chunks,
+    reciprocal_rank_fusion,
+    sparse_search,
+)
+from app.services.rerank_service import rerank_service
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +84,6 @@ class RAGService:
 
         if not api_key and db is not None and tenant_id is not None:
             # 直接查「有密钥且启用」的配置，避免同 scene 多行时拿到空 key 的旧 openai 行
-            from app.models import LlmConfig
-
             tid = UUID(str(tenant_id))
             result = await db.execute(
                 select(LlmConfig)
@@ -213,123 +219,156 @@ class RAGService:
         top_k: int = 5,
         doc_type: str | None = None,
     ) -> list[dict]:
-        """检索最相关片段：Milvus 向量召回 + Postgres 关键词补充。"""
+        """向量 + 稀疏混合召回，RRF 融合后再 Rerank 截断到 top_k。"""
         q = (question or "").strip()
-        if not q:
+        if not q or top_k <= 0:
             return []
 
+        recall_k = max(top_k, top_k * max(1, settings.rag_retrieve_multiplier))
         q_emb = await self.embed(q, db=db, tenant_id=tenant_id)
-        merged: dict[str, dict] = {}
 
-        # 1) Milvus 向量检索
+        vector_task = self._vector_search(db, q_emb, tenant_id, recall_k, doc_type)
+        if settings.rag_hybrid_enabled:
+            vec_raw, sparse_raw = await asyncio.gather(
+                vector_task,
+                sparse_search(db, q, tenant_id, recall_k, doc_type),
+                return_exceptions=True,
+            )
+            if isinstance(vec_raw, BaseException):
+                raise vec_raw
+            vector_hits = vec_raw
+            if isinstance(sparse_raw, BaseException):
+                logger.error("sparse retrieve failed", exc_info=sparse_raw)
+                sparse_hits = []
+            else:
+                sparse_hits = sparse_raw
+        else:
+            vector_hits = await vector_task
+            sparse_hits = []
+
+        merged = await self._merge_channels(db, vector_hits, sparse_hits)
+        if not merged:
+            return []
+
+        rrf_k = max(1, settings.rag_rrf_k)
+        rrf = reciprocal_rank_fusion(
+            [
+                [h["chunk_id"] for h in vector_hits],
+                [h["chunk_id"] for h in sparse_hits],
+            ],
+            k=rrf_k,
+        )
+        for cid, item in merged.items():
+            item["rrf_score"] = rrf.get(cid, 0.0)
+            item["score"] = display_score(
+                vector_score=item.get("vector_score"),
+                sparse_score=item.get("sparse_score"),
+                rerank_score=None,
+            )
+            item["reranked"] = False
+
+        ranked = sorted(
+            merged.values(),
+            key=lambda x: (x.get("rrf_score") or 0.0, x.get("score") or 0.0),
+            reverse=True,
+        )
+        cand_n = max(top_k, min(settings.rag_rerank_candidates, len(ranked)))
+        candidates = ranked[:cand_n]
+        candidates = await self._apply_rerank(q, candidates)
+        return candidates[:top_k]
+
+    async def _vector_search(
+        self,
+        db: AsyncSession,
+        q_emb: list[float],
+        tenant_id: str,
+        top_k: int,
+        doc_type: str | None,
+    ) -> list[dict]:
+        """Milvus 向量召回，失败则 pgvector。"""
         try:
-            vector_hits = await asyncio.to_thread(
+            return await asyncio.to_thread(
                 milvus_kb_store.search,
                 q_emb,
                 tenant_id=tenant_id,
-                top_k=top_k * 2,
+                top_k=top_k,
                 doc_type=doc_type,
             )
         except BusinessError:
             logger.exception("milvus retrieve failed, try pgvector fallback")
-            vector_hits = await self._pgvector_search(
-                db, q_emb, tenant_id, top_k * 2, doc_type
-            )
+            return await self._pgvector_search(db, q_emb, tenant_id, top_k, doc_type)
 
-        chunk_ids = [UUID(h["chunk_id"]) for h in vector_hits if h.get("chunk_id")]
-        content_map = await self._load_chunks(db, chunk_ids)
-        for hit in vector_hits:
-            cid = hit["chunk_id"]
-            meta = content_map.get(cid)
-            if not meta:
+    async def _merge_channels(
+        self,
+        db: AsyncSession,
+        vector_hits: list[dict],
+        sparse_hits: list[dict],
+    ) -> dict[str, dict]:
+        """按 chunk_id 合并两路命中并回表补正文。"""
+        vector_map = {h["chunk_id"]: h for h in vector_hits if h.get("chunk_id")}
+        sparse_map = {h["chunk_id"]: h for h in sparse_hits if h.get("chunk_id")}
+        all_ids = list(dict.fromkeys([*vector_map.keys(), *sparse_map.keys()]))
+        need_load: list[UUID] = []
+        for cid in all_ids:
+            sparse = sparse_map.get(cid)
+            if not sparse or not sparse.get("content"):
+                need_load.append(UUID(cid))
+        content_map = await load_chunks(db, need_load)
+
+        merged: dict[str, dict] = {}
+        for cid in all_ids:
+            vh = vector_map.get(cid)
+            sh = sparse_map.get(cid)
+            meta = content_map.get(cid) or {}
+            content = (sh or {}).get("content") or meta.get("content")
+            if not content:
                 continue
             merged[cid] = {
                 "chunk_id": cid,
-                "doc_id": meta["doc_id"],
-                "title": meta["title"],
-                "doc_type": meta["doc_type"],
-                "content": meta["content"],
-                "score": float(hit["score"]),
-                "source": "vector",
+                "doc_id": (sh or {}).get("doc_id")
+                or meta.get("doc_id")
+                or (vh or {}).get("doc_id"),
+                "title": (sh or {}).get("title") or meta.get("title"),
+                "doc_type": (sh or {}).get("doc_type") or meta.get("doc_type"),
+                "content": content,
+                "vector_score": float(vh["score"])
+                if vh and vh.get("score") is not None
+                else None,
+                "sparse_score": (sh or {}).get("sparse_score"),
+                "source": channel_source(vh is not None, sh is not None),
             }
+        return merged
 
-        # 2) 关键词补充（Postgres 全文简单 ILIKE）
-        keywords = self._keywords(q)
-        if keywords:
-            like_params: dict = {"tenant_id": tenant_id, "top_k": top_k}
-            like_clauses = []
-            for i, kw in enumerate(keywords[:4]):
-                key = f"kw{i}"
-                like_clauses.append(f"c.content ILIKE :{key}")
-                like_params[key] = f"%{kw}%"
-            type_sql = "AND d.doc_type = :doc_type" if doc_type else ""
-            if doc_type:
-                like_params["doc_type"] = doc_type
-            kw_sql = text(
-                f"""
-                SELECT c.id, c.doc_id, c.content, d.title, d.doc_type
-                FROM kb_chunks c
-                JOIN kb_documents d ON d.id = c.doc_id
-                WHERE d.status = 'active'
-                  AND (c.tenant_id = CAST(:tenant_id AS uuid) OR c.tenant_id IS NULL)
-                  AND ({' OR '.join(like_clauses)})
-                  {type_sql}
-                LIMIT :top_k
-                """
+    async def _apply_rerank(self, query: str, candidates: list[dict]) -> list[dict]:
+        """有密钥则交叉编码精排；失败保持 RRF 顺序。"""
+        if not candidates or not rerank_service.available():
+            return candidates
+        max_chars = max(200, settings.rerank_max_doc_chars)
+        docs: list[str] = []
+        for item in candidates:
+            title = (item.get("title") or "").strip()
+            body = (item.get("content") or "").strip()
+            blob = f"{title}\n{body}".strip() if title else body
+            docs.append(blob[:max_chars])
+        ranked = await rerank_service.rerank(query, docs, top_n=len(docs))
+        if not ranked:
+            return candidates
+        by_idx = {idx: score for idx, score in ranked}
+        ordered: list[dict] = []
+        for idx, score in ranked:
+            item = dict(candidates[idx])
+            item["rerank_score"] = score
+            item["score"] = display_score(
+                vector_score=item.get("vector_score"),
+                sparse_score=item.get("sparse_score"),
+                rerank_score=score,
             )
-            try:
-                kw_rows = (await db.execute(kw_sql, like_params)).fetchall()
-            except Exception:
-                logger.exception("keyword retrieve failed")
-                kw_rows = []
-            for row in kw_rows:
-                cid = str(row.id)
-                if cid in merged:
-                    merged[cid]["source"] = "hybrid"
-                    merged[cid]["score"] = max(merged[cid]["score"], 0.55)
-                else:
-                    merged[cid] = {
-                        "chunk_id": cid,
-                        "doc_id": str(row.doc_id),
-                        "title": row.title,
-                        "doc_type": row.doc_type,
-                        "content": row.content,
-                        "score": 0.5,
-                        "source": "keyword",
-                    }
-
-        ranked = sorted(merged.values(), key=lambda x: x["score"], reverse=True)
-        return ranked[:top_k]
-
-    async def _load_chunks(
-        self, db: AsyncSession, chunk_ids: list[UUID]
-    ) -> dict[str, dict]:
-        """按 id 批量取正文与标题。"""
-        if not chunk_ids:
-            return {}
-        from app.models import KbChunk, KbDocument
-
-        result = await db.execute(
-            select(
-                KbChunk.id,
-                KbChunk.doc_id,
-                KbChunk.content,
-                KbDocument.title,
-                KbDocument.doc_type,
-                KbDocument.status,
-            )
-            .join(KbDocument, KbDocument.id == KbChunk.doc_id)
-            .where(KbChunk.id.in_(chunk_ids), KbDocument.status == "active")
-        )
-        out: dict[str, dict] = {}
-        for row in result.all():
-            out[str(row.id)] = {
-                "doc_id": str(row.doc_id),
-                "content": row.content,
-                "title": row.title,
-                "doc_type": row.doc_type,
-            }
-        return out
+            item["reranked"] = True
+            ordered.append(item)
+        for i, item in enumerate(candidates):
+            if i not in by_idx:
+                ordered.append(item)
+        return ordered
 
     async def _pgvector_search(
         self,
@@ -373,17 +412,6 @@ class RAGService:
             }
             for row in rows
         ]
-
-    def _keywords(self, question: str) -> list[str]:
-        """粗抽检索词。"""
-        parts = re.findall(r"[\u4e00-\u9fff]{2,}|[A-Za-z][A-Za-z0-9_-]{1,}", question)
-        seen: set[str] = set()
-        out: list[str] = []
-        for p in parts:
-            if p not in seen:
-                seen.add(p)
-                out.append(p)
-        return out
 
     async def retrieve_rules(self, db: AsyncSession, tenant_id: str) -> list[str]:
         """检索合规规则片段。"""

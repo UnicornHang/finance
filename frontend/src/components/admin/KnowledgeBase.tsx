@@ -52,6 +52,7 @@ type RetrieveHit = {
   content: string
   score: number
   source?: string
+  reranked?: boolean
 }
 
 /** 管理端知识库：上传弹窗 / 列表 / 重索引 / 删除 / 检索测试。 */
@@ -256,6 +257,12 @@ export function KnowledgeBase() {
                       <>
                         <span>·</span>
                         <span>{h.source}</span>
+                      </>
+                    )}
+                    {h.reranked && (
+                      <>
+                        <span>·</span>
+                        <span>rerank</span>
                       </>
                     )}
                   </div>
