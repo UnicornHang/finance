@@ -73,7 +73,7 @@ def _args_to_json(args: object) -> str:
 def history_to_messages(history: list[dict], system_prompt: str, user_content: str) -> list[BaseMessage]:
     """会话历史 + 本轮 user 组装为 LangChain 消息。"""
     msgs: list[BaseMessage] = [SystemMessage(content=system_prompt)]
-    for item in history[-20:]:
+    for item in history:
         role = item.get("role")
         content = item.get("content") or ""
         if role == "user":

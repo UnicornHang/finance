@@ -18,6 +18,16 @@ def test_history_to_messages_order():
     assert msgs[-1].content == "下一问"
 
 
+def test_history_to_messages_does_not_drop_extra_items():
+    """裁剪由调用方完成，适配器保留全部传入历史。"""
+    history = [{"role": "user", "content": str(i)} for i in range(21)]
+    msgs = history_to_messages(history, "人设", "下一问")
+    # system + 21 条历史 + 本轮
+    assert len(msgs) == 23
+    assert msgs[1].content == "0"
+    assert msgs[-2].content == "20"
+
+
 def test_messages_to_openai_tool_calls():
     """AIMessage.tool_calls 转 OpenAI 结构。"""
     ai = AIMessage(

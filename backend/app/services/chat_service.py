@@ -14,8 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.context import SessionContext, attach_memory
-from app.agent.memory import maybe_roll_summary, set_last_intent
+from app.agent.memory import set_last_intent
+from app.agent.memory.assemble import assemble_context
 from app.agent.memory.entities import remember_contract_pending, remember_invoice_pending
+from app.agent.memory.history_index import schedule_message_index
 from app.agent.observe import record
 from app.agent.policy import effective_intent
 from app.agent.router import Intent, classify_intent
@@ -316,6 +318,8 @@ class ChatService:
         db.add(msg)
         await db.commit()
         await db.refresh(msg)
+        # 不 await：嵌入失败不能回滚已经落库的消息，也不能挡住首个 token
+        schedule_message_index(msg.id, session_id, tenant_id, role, content)
         return msg
 
     async def load_recent_messages(
@@ -447,16 +451,12 @@ class ChatService:
                 file_url=file_url,
                 file_hash=file_hash,
                 file_meta=file_meta or {},
+                exclude_message_id=saved.id,
             ):
                 yield event
             return
 
-        # 无附件：LLM 意图分类后再进入既有管道
-        history = await self.load_recent_messages(db, session_id, limit=20)
-        history = [m for m in history if not (m["role"] == "user" and m["content"] == display_msg)]
-        if history and history[-1]["content"] == display_msg:
-            history = history[:-1]
-
+        # 无附件：先得到有效意图，再组装窗口。折叠在 assemble_context 内部、召回之前
         ctx = await SessionContext.load_safe(
             session_id,
             user.id,
@@ -476,6 +476,17 @@ class ChatService:
             effective=intent.value,
             tenant_id=str(user.tenant_id),
         )
+        assembled = await assemble_context(
+            db,
+            session_id,
+            saved.id,
+            session,
+            question=display_msg,
+            intent=intent.value,
+        )
+        history = assembled.history
+        # load_safe 早于折叠，记忆块要用折完后的摘要
+        ctx.summary = getattr(session, "summary", "") or ""
         started = False
         try:
             from app.agent.orchestrator import agent_orchestrator
@@ -490,6 +501,7 @@ class ChatService:
                 history=history,
                 intent=intent,
                 ctx=ctx,
+                related_history=assembled.related_history,
             ):
                 started = True
                 yield event
@@ -508,10 +520,10 @@ class ChatService:
                 history=history,
                 intent=intent,
                 ctx=ctx,
+                related_history=assembled.related_history,
             ):
                 yield event
         await set_last_intent(db, session_id, intent.value)
-        await maybe_roll_summary(db, session, history)
 
     async def _stream_text_intent(
         self,
@@ -524,6 +536,7 @@ class ChatService:
         history: list[dict],
         intent: Intent,
         ctx: SessionContext | None = None,
+        related_history: str = "",
     ) -> AsyncGenerator[dict, None]:
         """按意图进入制度 / 公开财税 / 门户 / 闲聊管道。"""
         if intent == Intent.CONFIRM_PENDING:
@@ -617,8 +630,8 @@ class ChatService:
             user_content = display_msg
 
         messages = [
-            {"role": "system", "content": attach_memory(system_prompt, ctx)},
-            *history[-20:],
+            {"role": "system", "content": attach_memory(system_prompt, ctx, related_history)},
+            *history,
             {"role": "user", "content": user_content},
         ]
 
@@ -809,6 +822,7 @@ class ChatService:
         file_url: str,
         file_hash: str,
         file_meta: dict,
+        exclude_message_id: UUID,
     ) -> AsyncGenerator[dict, None]:
         """兼容入口：转发到附件子图编排。"""
         from app.agent.orchestrator import agent_orchestrator
@@ -824,6 +838,7 @@ class ChatService:
             file_url=file_url,
             file_hash=file_hash,
             file_meta=file_meta,
+            exclude_message_id=exclude_message_id,
         ):
             yield event
 

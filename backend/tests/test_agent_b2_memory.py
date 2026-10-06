@@ -55,3 +55,13 @@ def test_last_intent_parse():
     ctx = SessionContext.empty(uuid4(), uuid4(), uuid4())
     ctx.entities = {"last_intent": {"value": "policy_query"}}
     assert ctx.last_intent() == Intent.POLICY_QUERY
+
+
+def test_memory_block_related_history_is_optional():
+    """无召回时不出现相关历史标题。"""
+    ctx = SessionContext.empty(uuid4(), uuid4(), uuid4(), summary="（无）")
+    assert "[相关历史]" not in ctx.memory_block()
+    block = ctx.memory_block("2026-10-06 10:00 assistant：税额 10 元")
+    assert "[相关历史]" in block
+    assert "税额 10 元" in block
+    assert "以当前窗口和当前状态为准" in block

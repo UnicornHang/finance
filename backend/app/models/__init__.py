@@ -96,6 +96,11 @@ class Session(Base):
     user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(200))
     summary: Mapped[str | None] = mapped_column(Text)
+    summary_until_message_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(String(20), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(
@@ -190,17 +195,26 @@ class SessionMemory(Base):
 # ================ 消息向量 ================
 
 class MessageEmbedding(Base):
+    """会话消息分段向量；同一 message 的多段由 chunk_index 区分。"""
+
     __tablename__ = "message_embeddings"
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
     session_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
     )
     message_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
     )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(1536))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+
+    __table_args__ = (
+        UniqueConstraint("message_id", "chunk_index", name="uq_message_embeddings_message_chunk"),
+    )
 
 
 # ================ 发票 ================

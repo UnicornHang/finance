@@ -1,6 +1,7 @@
 """ChatService 流式响应测试（纯 mock，隔离数据库与外部依赖）。"""
 
 from types import SimpleNamespace
+from uuid import uuid4
 from langchain_core.messages import AIMessage
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -110,7 +111,7 @@ async def test_stream_response_yields_events(mock_db, mock_user, mock_session):
                     AsyncMock(return_value=_intent(Intent.CHITCHAT)),
                 ):
                     service = ChatService()
-                    service.save_message = AsyncMock()
+                    service.save_message = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
 
                     events = []
                     async for event in service.stream_response(
@@ -151,7 +152,7 @@ async def test_stream_response_handles_llm_error(mock_db, mock_user, mock_sessio
                     AsyncMock(return_value=_intent(Intent.CHITCHAT)),
                 ):
                     service = ChatService()
-                    service.save_message = AsyncMock()
+                    service.save_message = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
 
                     events = []
                     async for event in service.stream_response(
@@ -211,7 +212,7 @@ async def test_stream_uses_custom_system_prompt(mock_db, mock_user, mock_session
                     AsyncMock(return_value=_intent(Intent.CHITCHAT)),
                 ):
                     service = ChatService()
-                    service.save_message = AsyncMock()
+                    service.save_message = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
                     async for _ in service.stream_response(
                         mock_db, mock_user, mock_session.id, "你是谁？"
                     ):
@@ -293,7 +294,7 @@ async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_ses
                                 return_value=search_payload
                             )
                             service = ChatService()
-                            service.save_message = AsyncMock()
+                            service.save_message = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
                             events = []
                             async for event in service.stream_response(
                                 mock_db,
@@ -371,7 +372,7 @@ async def test_stream_policy_query_injects_rag(mock_db, mock_user, mock_session)
                         with patch("app.agent.tools.catalog.rag_service") as mock_rag:
                             mock_rag.retrieve = AsyncMock(return_value=rag_hits)
                             service = ChatService()
-                            service.save_message = AsyncMock()
+                            service.save_message = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
                             async for _ in service.stream_response(
                                 mock_db,
                                 mock_user,
@@ -407,7 +408,7 @@ async def test_stream_invoice_intent_without_file_asks_upload(
                     AsyncMock(return_value=_intent(Intent.INVOICE_UPLOAD)),
                 ):
                     service = ChatService()
-                    service.save_message = AsyncMock()
+                    service.save_message = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
                     async for _ in service.stream_response(
                         mock_db, mock_user, mock_session.id, "帮我识别发票"
                     ):
@@ -441,7 +442,7 @@ async def test_stream_official_portal_has_no_search(mock_db, mock_user, mock_ses
                     ) as mock_policy:
                         mock_policy.search_and_fetch = AsyncMock()
                         service = ChatService()
-                        service.save_message = AsyncMock()
+                        service.save_message = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
                         events = []
                         async for event in service.stream_response(
                             mock_db,

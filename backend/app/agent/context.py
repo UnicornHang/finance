@@ -146,8 +146,8 @@ class SessionContext:
             return pid or None
         return None
 
-    def memory_block(self) -> str:
-        """注入 system 的摘要与待办块。"""
+    def memory_block(self, related_history: str = "") -> str:
+        """注入 system 的摘要、待办，以及可选的相关历史。"""
         pending = self.entities.get(PENDING_TASK)
         kind = _pending_kind(pending) or "none"
         pending_id = ""
@@ -161,7 +161,7 @@ class SessionContext:
             raw = policies.get("titles") or []
             if isinstance(raw, list):
                 titles = [str(x) for x in raw][-5:]
-        return (
+        block = (
             "[会话摘要]\n"
             f"{(self.summary or '').strip() or '（无）'}\n\n"
             "[当前状态]\n"
@@ -171,6 +171,13 @@ class SessionContext:
             f"uploaded_contracts: {', '.join(contract_ids) or '（无）'}\n"
             f"queried_policies: {', '.join(titles) or '（无）'}"
         )
+        if related_history.strip():
+            block += (
+                "\n\n[相关历史]\n"
+                f"{related_history.strip()}\n"
+                "相关历史是本会话更早的原话片段；若与当前窗口或「当前状态」不一致，以当前窗口和当前状态为准。"
+            )
+        return block
 
     def build_prompt(self, user_input: str, rag_snippets: list[str] | None = None) -> list[dict]:
         """组装 LLM prompt。"""
@@ -189,11 +196,15 @@ class SessionContext:
         ]
 
 
-def attach_memory(system_prompt: str, ctx: SessionContext | None) -> str:
-    """人设在前，记忆块在后。"""
+def attach_memory(
+    system_prompt: str,
+    ctx: SessionContext | None,
+    related_history: str = "",
+) -> str:
+    """人设在前，记忆块在后。无召回时不追加相关历史。"""
     if ctx is None:
         return system_prompt
-    return f"{system_prompt}\n\n{ctx.memory_block()}"
+    return f"{system_prompt}\n\n{ctx.memory_block(related_history)}"
 
 
 def _pending_kind(raw: object) -> str | None:

@@ -11,6 +11,7 @@ from app.agent.context import SessionContext, attach_memory
 from app.agent.graph import get_text_graph, graph_runtime
 from app.agent.llm_adapter import ChatFinanceLLM, history_to_messages
 from app.agent.memory import set_last_intent
+from app.agent.memory.assemble import assemble_context
 from app.agent.memory.entities import remember_policy_title
 from app.agent.observe import record
 from app.agent.policy import (
@@ -50,6 +51,7 @@ class AgentOrchestrator:
         history: list[dict],
         intent: Intent,
         ctx: SessionContext | None = None,
+        related_history: str = "",
     ) -> AsyncGenerator[dict, None]:
         """跑图后把最终回复流式输出为 SSE dict。"""
         # 从 chat_service 取 llm_service，便于测试 patch 同一绑定
@@ -71,7 +73,7 @@ class AgentOrchestrator:
             service, db, user, intent, display_msg
         )
         messages = history_to_messages(
-            history, attach_memory(system_prompt, ctx), user_content
+            history, attach_memory(system_prompt, ctx, related_history), user_content
         )
         trace: dict[str, Any] = {}
         all_tools = build_text_tools(db, str(user.tenant_id), trace)
@@ -109,6 +111,7 @@ class AgentOrchestrator:
             system_prompt,
             user_content,
             ctx,
+            related_history,
         )
         record(
             "llm_scene",
@@ -260,6 +263,7 @@ class AgentOrchestrator:
         opening_system: str,
         opening_user: str,
         ctx: SessionContext | None = None,
+        related_history: str = "",
     ) -> tuple[list[dict], str]:
         """根据工具结果组装最终流式消息（与 A 管道约束对齐）。"""
         from app.services.chat_service import (
@@ -414,8 +418,8 @@ class AgentOrchestrator:
 
         return (
             [
-                {"role": "system", "content": attach_memory(system_prompt, ctx)},
-                *history[-20:],
+                {"role": "system", "content": attach_memory(system_prompt, ctx, related_history)},
+                *history,
                 {"role": "user", "content": user_content},
             ],
             scene,
@@ -434,119 +438,124 @@ class AgentOrchestrator:
         file_url: str,
         file_hash: str,
         file_meta: dict,
+        exclude_message_id: UUID,
     ) -> AsyncGenerator[dict, None]:
         """附件子图分类后，调用现有识别/审查/文件闲聊并流式 SSE。"""
-        hit = await service.lookup_archived_upload(db, user, file_hash)
-        if hit is not None:
-            kind, row = hit
+        try:
+            hit = await service.lookup_archived_upload(db, user, file_hash)
+            if hit is not None:
+                kind, row = hit
+                record(
+                    "upload_archived_reuse",
+                    file_kind=kind,
+                    tenant_id=str(user.tenant_id),
+                )
+                async for event in service._stream_archived_reuse(
+                    db, user, session_id, file_id=file_id, kind=kind, row=row
+                ):
+                    yield event
+                return
+
+            # 避免与 ChatService 模块循环：下载函数定义在 chat_service
+            from app.services.chat_service import _download_bytes
+
+            yield {"type": "text", "content": "正在判断这份文件…\n\n"}
+            try:
+                file_bytes = _download_bytes(file_url)
+            except Exception as exc:
+                logger.exception("download upload failed")
+                await chat_file_service.mark(
+                    db, file_id, recognize_status="failed", recognize_error=str(exc)
+                )
+                yield {"type": "error", "message": f"下载文件失败：{exc}"}
+                yield {"type": "done"}
+                return
+
+            token = upload_runtime.set(
+                {
+                    "classify": invoice_vision_service.classify,
+                    "file_bytes": file_bytes,
+                    "content_type": file_meta.get("content_type"),
+                    "filename": file_meta.get("original_filename"),
+                    "user_message": user_message,
+                    "db": db,
+                    "tenant_id": str(user.tenant_id),
+                }
+            )
+            try:
+                final = await get_upload_graph().ainvoke(
+                    {"user_message": user_message or "", "file_kind": "", "error": ""}
+                )
+            finally:
+                upload_runtime.reset(token)
+
+            kind = final.get("file_kind") or "chat"
+            error = (final.get("error") or "").strip()
+            if kind == "error":
+                await chat_file_service.mark(
+                    db, file_id, recognize_status="failed", recognize_error=error
+                )
+                yield {"type": "error", "message": error}
+                yield {"type": "done"}
+                return
+
+            await chat_file_service.mark(db, file_id, intent=kind)
+            mapped = {
+                "invoice": Intent.INVOICE_UPLOAD.value,
+                "contract": Intent.CONTRACT_UPLOAD.value,
+            }
+            await set_last_intent(
+                db, session_id, mapped.get(kind, Intent.CHITCHAT.value)
+            )
             record(
-                "upload_archived_reuse",
+                "upload_route",
                 file_kind=kind,
                 tenant_id=str(user.tenant_id),
             )
-            async for event in service._stream_archived_reuse(
-                db, user, session_id, file_id=file_id, kind=kind, row=row
-            ):
-                yield event
-            return
 
-        # 避免与 ChatService 模块循环：下载函数定义在 chat_service
-        from app.services.chat_service import _download_bytes
-
-        yield {"type": "text", "content": "正在判断这份文件…\n\n"}
-        try:
-            file_bytes = _download_bytes(file_url)
-        except Exception as exc:
-            logger.exception("download upload failed")
-            await chat_file_service.mark(
-                db, file_id, recognize_status="failed", recognize_error=str(exc)
-            )
-            yield {"type": "error", "message": f"下载文件失败：{exc}"}
-            yield {"type": "done"}
-            return
-
-        token = upload_runtime.set(
-            {
-                "classify": invoice_vision_service.classify,
-                "file_bytes": file_bytes,
-                "content_type": file_meta.get("content_type"),
-                "filename": file_meta.get("original_filename"),
-                "user_message": user_message,
-                "db": db,
-                "tenant_id": str(user.tenant_id),
-            }
-        )
-        try:
-            final = await get_upload_graph().ainvoke(
-                {"user_message": user_message or "", "file_kind": "", "error": ""}
-            )
+            match kind:
+                case "invoice":
+                    async for event in service._stream_invoice_recognize(
+                        db,
+                        user,
+                        session,
+                        session_id,
+                        user_message=user_message,
+                        file_id=file_id,
+                        file_url=file_url,
+                        file_hash=file_hash,
+                        file_meta=file_meta,
+                    ):
+                        yield event
+                case "contract":
+                    async for event in service._stream_contract_review(
+                        db,
+                        user,
+                        session_id,
+                        user_message=user_message,
+                        file_id=file_id,
+                        file_url=file_url,
+                        file_hash=file_hash,
+                        file_bytes=file_bytes,
+                        filename=file_meta.get("original_filename"),
+                        content_type=file_meta.get("content_type"),
+                    ):
+                        yield event
+                case _:
+                    async for event in service._stream_file_chat(
+                        db,
+                        user,
+                        session_id,
+                        user_message=user_message,
+                        file_id=file_id,
+                        file_bytes=file_bytes,
+                        filename=file_meta.get("original_filename"),
+                        content_type=file_meta.get("content_type"),
+                    ):
+                        yield event
         finally:
-            upload_runtime.reset(token)
-
-        kind = final.get("file_kind") or "chat"
-        error = (final.get("error") or "").strip()
-        if kind == "error":
-            await chat_file_service.mark(
-                db, file_id, recognize_status="failed", recognize_error=error
-            )
-            yield {"type": "error", "message": error}
-            yield {"type": "done"}
-            return
-
-        await chat_file_service.mark(db, file_id, intent=kind)
-        mapped = {
-            "invoice": Intent.INVOICE_UPLOAD.value,
-            "contract": Intent.CONTRACT_UPLOAD.value,
-        }
-        await set_last_intent(
-            db, session_id, mapped.get(kind, Intent.CHITCHAT.value)
-        )
-        record(
-            "upload_route",
-            file_kind=kind,
-            tenant_id=str(user.tenant_id),
-        )
-
-        match kind:
-            case "invoice":
-                async for event in service._stream_invoice_recognize(
-                    db,
-                    user,
-                    session,
-                    session_id,
-                    user_message=user_message,
-                    file_id=file_id,
-                    file_url=file_url,
-                    file_hash=file_hash,
-                    file_meta=file_meta,
-                ):
-                    yield event
-            case "contract":
-                async for event in service._stream_contract_review(
-                    db,
-                    user,
-                    session_id,
-                    user_message=user_message,
-                    file_id=file_id,
-                    file_url=file_url,
-                    file_hash=file_hash,
-                    file_bytes=file_bytes,
-                    filename=file_meta.get("original_filename"),
-                    content_type=file_meta.get("content_type"),
-                ):
-                    yield event
-            case _:
-                async for event in service._stream_file_chat(
-                    db,
-                    user,
-                    session_id,
-                    user_message=user_message,
-                    file_id=file_id,
-                    file_bytes=file_bytes,
-                    filename=file_meta.get("original_filename"),
-                    content_type=file_meta.get("content_type"),
-                ):
-                    yield event
+            # 只为折叠窗口外摘要；不把 history 传给识别、审查或文件闲聊
+            await assemble_context(db, session_id, exclude_message_id, session)
 
 
 def _first_policy_title(tool_result: str) -> str:
