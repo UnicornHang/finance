@@ -9,8 +9,17 @@ import type { Invoice } from '@/types'
  */
 export type InvoiceSidePanelData =
   | { status: 'processing'; file_url: string; file_hash: string }
-  | ({ status: 'ready'; invoice_id: string } & Partial<Invoice>)
-  | (Partial<Invoice> & { invoice_id?: string; status?: string })
+  | ({
+      status: 'ready'
+      invoice_id: string
+      /** pending=待确认归档；archived=已归档。UI 的 status 固定为 ready，入库态走此字段。 */
+      archive_status?: 'pending' | 'archived' | string | null
+    } & Partial<Invoice>)
+  | (Partial<Invoice> & {
+      invoice_id?: string
+      status?: string
+      archive_status?: 'pending' | 'archived' | string | null
+    })
 
 /**
  * 全局 sidePanelData 类型：宽松 any 以兼容多类侧弹窗（合同/发票）

@@ -120,8 +120,24 @@ class ChatFileService:
             grouped.setdefault(row.message_id, []).append(row)
         return grouped
 
-    def to_attachment(self, row: ChatFile) -> dict[str, Any]:
+    def to_attachment(
+        self,
+        row: ChatFile,
+        *,
+        invoice_code: str | None = None,
+        invoice_number: str | None = None,
+    ) -> dict[str, Any]:
         """消息接口里的附件结构，字段与气泡展示一致。"""
+        extract = row.extract_result if isinstance(row.extract_result, dict) else None
+        code = invoice_code
+        number = invoice_number
+        if extract:
+            if not code:
+                raw = extract.get("invoice_code")
+                code = raw if isinstance(raw, str) else None
+            if not number:
+                raw = extract.get("invoice_number")
+                number = raw if isinstance(raw, str) else None
         return {
             "id": str(row.id),
             "file_url": row.file_url,
@@ -135,8 +151,26 @@ class ChatFileService:
             "recognize_error": row.recognize_error,
             "extract_result": row.extract_result,
             "invoice_id": str(row.invoice_id) if row.invoice_id else None,
+            "invoice_code": code,
+            "invoice_number": number,
             "contract_id": str(row.contract_id) if row.contract_id else None,
         }
+
+    async def invoice_code_numbers(
+        self, db: AsyncSession, rows: list[ChatFile]
+    ) -> dict[UUID, tuple[str | None, str | None]]:
+        """按附件关联的发票档案批量取代码+号码，供同一张发票去重。"""
+        from app.models import Invoice
+
+        ids = [row.invoice_id for row in rows if row.invoice_id]
+        if not ids:
+            return {}
+        result = await db.execute(
+            select(Invoice.id, Invoice.invoice_code, Invoice.invoice_number).where(
+                Invoice.id.in_(ids)
+            )
+        )
+        return {iid: (code, number) for iid, code, number in result.all()}
 
     async def ensure_contract_extract(
         self,

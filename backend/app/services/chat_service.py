@@ -204,8 +204,8 @@ def _result_to_fields(result) -> dict[str, Any]:
     }
 
 
-def _serialize_invoice(inv) -> dict[str, Any]:
-    """侧栏 / SSE 用的发票字典。"""
+def _serialize_invoice(inv, *, archive_status: str | None = None) -> dict[str, Any]:
+    """侧栏 / SSE 用的发票字典。archive_status 由识别后查重写入，避免新 pending 行盖掉「档案已有此票」。"""
     return {
         "id": str(inv.id),
         "invoice_title": inv.invoice_title,
@@ -225,8 +225,14 @@ def _serialize_invoice(inv) -> dict[str, Any]:
         "file_hash": inv.file_hash,
         "ocr_confidence": inv.ocr_confidence,
         "status": inv.status,
-        # 归档状态与附件识别状态分开：pending_review=待归档，active=已归档
-        "archive_status": "pending" if inv.status == "pending_review" else "archived" if inv.status == "active" else inv.status,
+        "archive_status": archive_status
+        or (
+            "pending"
+            if inv.status == "pending_review"
+            else "archived"
+            if inv.status == "active"
+            else inv.status
+        ),
     }
 
 
@@ -1175,8 +1181,17 @@ class ChatService:
                 **fields,
             )
             await db.commit()
+            extract = {
+                "invoice_code": inv.invoice_code,
+                "invoice_number": inv.invoice_number,
+            }
             await chat_file_service.mark(
-                db, file_id, recognize_status="succeeded", invoice_id=inv.id, recognize_error=None
+                db,
+                file_id,
+                recognize_status="succeeded",
+                invoice_id=inv.id,
+                recognize_error=None,
+                extract_result=extract,
             )
             await remember_invoice_pending(db, session_id, inv.id)
         except Exception as exc:
@@ -1190,11 +1205,11 @@ class ChatService:
             return
 
         # 推 ready 侧栏（前端可立刻编辑，不必等轮询）
+        archive_status = await invoice_service.sidepanel_archive_status(db, inv)
         payload = {
-            **_serialize_invoice(inv),
+            **_serialize_invoice(inv, archive_status=archive_status),
             "status": "ready",
             "recognize_status": "succeeded",
-            "archive_status": "pending",
             "invoice_id": str(inv.id),
             "recognition_source": source,
         }
@@ -1204,12 +1219,18 @@ class ChatService:
         summary = _format_result_for_prompt(fields, source)
         mismatch = _user_type_mismatch_instruction(user_message, "invoice")
         mismatch_block = f"{mismatch}\n\n" if mismatch else ""
+        archive_hint = (
+            "该发票代码与号码已在档案中，请明确告知用户「这张发票已经归档了」，"
+            "右侧仅供查看，无需再次确认归档。"
+            if archive_status == "archived"
+            else "提醒右侧可核对后确认归档；对明显可疑或缺字段给出简短提示。"
+        )
         reply_user = (
             f"用户上传了一份文件并说：{user_message or '请帮我识别这张发票'}。\n\n"
             f"{mismatch_block}"
             f"系统已完成发票识别，结果如下：\n{summary}\n\n"
-            f"请用简洁中文向用户汇报关键字段，提醒右侧可核对后确认归档；"
-            f"对明显可疑或缺字段给出简短提示。不要编造未识别出的数字。"
+            f"请用简洁中文向用户汇报关键字段。{archive_hint}"
+            f"不要编造未识别出的数字。"
             f"回复里不要出现 OCR、光学字符识别、回落 OCR 这类字样，识别来源只说大模型。"
         )
         system_prompt = await self._effective_system_prompt(

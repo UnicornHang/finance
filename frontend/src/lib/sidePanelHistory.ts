@@ -30,15 +30,90 @@ function isInFlight(status: string | null | undefined): boolean {
   return status === 'pending' || status === 'running'
 }
 
-/** 同一附件：优先 id，其次 file_hash。 */
-function sameAttachment(a: MessageAttachment, b: MessageAttachment): boolean {
-  if (a.id && b.id) return a.id === b.id
-  return Boolean(a.file_hash && a.file_hash === b.file_hash)
+/**
+ * 把档案入库状态映射成侧栏 archive_status。
+ * 打开侧栏时会把 status 改成 ready，必须单独带归档态，否则已归档单据仍会显示「确定归档」。
+ */
+function archiveStatusFromDb(status: string | null | undefined): 'pending' | 'archived' | string | undefined {
+  if (status === 'active') return 'archived'
+  if (status === 'pending_review') return 'pending'
+  return status ?? undefined
 }
 
 /**
- * 列出本会话全部可查看的发票/合同轮次（时间正序）。
- * 多份合同时右侧栏默认只开最新一份，其余靠点击附件切换。
+ * 侧栏归档态：优先用接口查重后的 archive_status（档案已有相同代码+号码也算已归档）。
+ */
+export function resolveInvoiceArchiveStatus(invoice: {
+  status?: string | null
+  archive_status?: string | null
+}): 'pending' | 'archived' | string | undefined {
+  if (invoice.archive_status === 'archived' || invoice.status === 'active') {
+    return 'archived'
+  }
+  if (invoice.archive_status === 'pending' || invoice.status === 'pending_review') {
+    return 'pending'
+  }
+  return invoice.archive_status ?? archiveStatusFromDb(invoice.status)
+}
+
+/** 附件上的发票代码/号码（接口字段或识别落库的 extract_result）。 */
+function invoiceCodeNumber(attachment: MessageAttachment): { code: string; number: string } | null {
+  const code = (attachment.invoice_code || attachment.extract_result?.invoice_code || '').trim()
+  const number = (attachment.invoice_number || attachment.extract_result?.invoice_number || '').trim()
+  if (!code || !number) return null
+  return { code, number }
+}
+
+/**
+ * 同一张发票 / 同一份合同的稳定键。
+ * 发票优先代码+号码（不同照片也算同一张），其次档案 id、文件哈希。
+ */
+export function documentIdentity(
+  type: 'invoice' | 'contract',
+  attachment: MessageAttachment,
+): string {
+  switch (type) {
+    case 'invoice': {
+      const pair = invoiceCodeNumber(attachment)
+      if (pair) return `invoice:${pair.code}|${pair.number}`
+      if (attachment.invoice_id) return `invoice-id:${attachment.invoice_id}`
+      if (attachment.file_hash) return `invoice-hash:${attachment.file_hash}`
+      return `invoice-att:${attachment.id ?? attachment.file_url}`
+    }
+    case 'contract': {
+      if (attachment.contract_id) return `contract-id:${attachment.contract_id}`
+      if (attachment.file_hash) return `contract-hash:${attachment.file_hash}`
+      return `contract-att:${attachment.id ?? attachment.file_url}`
+    }
+    default: {
+      const unreachable: never = type
+      return unreachable
+    }
+  }
+}
+
+/** 当前侧栏正在看的单据，用来高亮下拉项。 */
+export function panelDocumentIdentity(
+  type: 'invoice' | 'contract' | null,
+  data: unknown,
+): string | null {
+  if (type !== 'invoice' && type !== 'contract') return null
+  if (!data || typeof data !== 'object') return null
+  const rec = data as Record<string, unknown>
+  const attachment: MessageAttachment = {
+    file_url: typeof rec.file_url === 'string' ? rec.file_url : '',
+    file_hash: typeof rec.file_hash === 'string' ? rec.file_hash : '',
+    invoice_id: typeof rec.invoice_id === 'string' ? rec.invoice_id : null,
+    invoice_code: typeof rec.invoice_code === 'string' ? rec.invoice_code : null,
+    invoice_number: typeof rec.invoice_number === 'string' ? rec.invoice_number : null,
+    contract_id: typeof rec.contract_id === 'string' ? rec.contract_id : null,
+  }
+  return documentIdentity(type, attachment)
+}
+
+/**
+ * 列出本会话可查看的发票/合同（时间正序）。
+ * 同一张发票或同一份合同只保留最近一次识别，避免审查结果下拉里重复出现。
  */
 export function listHistoryDocumentTurns(messages: Message[]): HistoryDocumentTurn[] {
   const turns: HistoryDocumentTurn[] = []
@@ -55,7 +130,11 @@ export function listHistoryDocumentTurns(messages: Message[]): HistoryDocumentTu
       turns.push({ type, attachment, reply })
     }
   }
-  return turns
+  const unique = new Map<string, HistoryDocumentTurn>()
+  for (const turn of turns) {
+    unique.set(documentIdentity(turn.type, turn.attachment), turn)
+  }
+  return [...unique.values()]
 }
 
 /**
@@ -67,14 +146,17 @@ export function latestHistorySidePanel(messages: Message[]): HistoryDocumentTurn
   return turns.length ? turns[turns.length - 1] : null
 }
 
-/** 按某个附件找回对应轮次（含紧随其后的助手审查摘要）。 */
+/** 按某个附件找回对应轮次（含紧随其后的助手审查摘要）。同一张发票点任一次上传都打开那条结果。 */
 export function findDocumentTurnForAttachment(
   messages: Message[],
   attachment: MessageAttachment,
 ): HistoryDocumentTurn | null {
+  const type = documentKind(attachment)
+  if (type !== 'invoice' && type !== 'contract') return null
+  const key = documentIdentity(type, attachment)
   return (
-    listHistoryDocumentTurns(messages).find((turn) =>
-      sameAttachment(turn.attachment, attachment),
+    listHistoryDocumentTurns(messages).find(
+      (turn) => documentIdentity(turn.type, turn.attachment) === key,
     ) ?? null
   )
 }
@@ -138,7 +220,12 @@ async function restoreInvoice(
     if (attachment.invoice_id) {
       const invoice = await invoiceApi.get(attachment.invoice_id)
       if (isCancelled()) return
-      openSidePanel('invoice', { ...invoice, status: 'ready', invoice_id: invoice.id })
+      openSidePanel('invoice', {
+        ...invoice,
+        status: 'ready',
+        invoice_id: invoice.id,
+        archive_status: resolveInvoiceArchiveStatus(invoice),
+      })
       return
     }
     if (!fileHash) {
@@ -152,6 +239,7 @@ async function restoreInvoice(
         ...preview.invoice,
         status: 'ready',
         invoice_id: preview.invoice.id,
+        archive_status: resolveInvoiceArchiveStatus(preview.invoice),
       })
       return
     }

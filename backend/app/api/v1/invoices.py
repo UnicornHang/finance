@@ -82,7 +82,7 @@ async def _operator_names(db: AsyncSession, user_ids: set[UUID]) -> dict[UUID, s
     return {str(user_id): name for user_id, name in rows}
 
 
-def _serialize(inv, operator_name: str | None = None) -> dict[str, Any]:
+def _serialize(inv, operator_name: str | None = None, archive_status: str | None = None) -> dict[str, Any]:
     """Invoice → 响应字典。operator_name 是上传该发票的用户姓名。"""
     return {
         "id": str(inv.id),
@@ -103,6 +103,14 @@ def _serialize(inv, operator_name: str | None = None) -> dict[str, Any]:
         "file_hash": inv.file_hash,
         "ocr_confidence": inv.ocr_confidence,
         "status": inv.status,
+        "archive_status": archive_status
+        or (
+            "archived"
+            if inv.status == "active"
+            else "pending"
+            if inv.status == "pending_review"
+            else inv.status
+        ),
         "user_id": str(inv.user_id),
         "operator_name": operator_name,
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
@@ -186,7 +194,11 @@ async def preview_invoice_by_hash(
         # 简化策略：5 秒内的请求视为 processing，超过返回 not_found
         # 这里先返回 processing，让前端继续轮询（最多 30 次）
         return {"status": "processing"}
-    return {"status": "ready", "invoice": _serialize(inv)}
+    archive_status = await invoice_service.sidepanel_archive_status(db, inv)
+    return {
+        "status": "ready",
+        "invoice": _serialize(inv, archive_status=archive_status),
+    }
 
 
 @router.get("/{invoice_id}")
@@ -199,7 +211,8 @@ async def get_invoice(
     inv = await invoice_service.get(
         db, user.tenant_id, invoice_id, user=user, include_deleted=True
     )
-    return _serialize(inv)
+    archive_status = await invoice_service.sidepanel_archive_status(db, inv)
+    return _serialize(inv, archive_status=archive_status)
 
 
 @router.patch("/{invoice_id}")

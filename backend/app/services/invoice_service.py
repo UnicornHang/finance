@@ -178,7 +178,10 @@ class InvoiceService:
         buyer: str | None = None,
         confidence: dict[str, float] | None = None,
     ) -> "Invoice":
-        """识别完成后写入待归档。不在这里做归档去重。"""
+        """识别完成后写入待归档。不在这里做归档去重。
+
+        同一代码+号码若已有待确认记录，覆盖识别字段而不是再插一行。
+        """
         from app.models import Invoice
 
         values = dict(
@@ -201,6 +204,15 @@ class InvoiceService:
             ocr_confidence=confidence,
             status="pending_review",
         )
+        if invoice_code and invoice_number:
+            existing = await self._find_pending_duplicate(
+                db, tenant_id, invoice_code, invoice_number
+            )
+            if existing is not None:
+                return await self._overwrite_pending(
+                    db, existing, values, invoice_code, invoice_number
+                )
+
         inv = Invoice(**values)
         try:
             db.add(inv)
@@ -216,23 +228,36 @@ class InvoiceService:
             )
             if existing is None:
                 raise
-            for key, value in values.items():
-                if key in {"tenant_id", "user_id", "status"}:
-                    continue
-                setattr(existing, key, value)
-            existing.status = "pending_review"
-            await db.flush()
-            await db.refresh(existing)
-            logger.info(
-                "Invoice recognition refreshed (still pending): id=%s code=%s number=%s",
-                existing.id, invoice_code, invoice_number,
+            return await self._overwrite_pending(
+                db, existing, values, invoice_code, invoice_number
             )
-            return existing
         logger.info(
             "Invoice created pending: id=%s tenant=%s code=%s number=%s",
             inv.id, tenant_id, invoice_code, invoice_number,
         )
         return inv
+
+    async def _overwrite_pending(
+        self,
+        db: AsyncSession,
+        existing: "Invoice",
+        values: dict[str, Any],
+        invoice_code: str,
+        invoice_number: str,
+    ) -> "Invoice":
+        """用新识别结果覆盖尚未确认的同一张发票。"""
+        for key, value in values.items():
+            if key in {"tenant_id", "user_id", "status"}:
+                continue
+            setattr(existing, key, value)
+        existing.status = "pending_review"
+        await db.flush()
+        await db.refresh(existing)
+        logger.info(
+            "Invoice recognition refreshed (still pending): id=%s code=%s number=%s",
+            existing.id, invoice_code, invoice_number,
+        )
+        return existing
 
     async def _find_pending_duplicate(
         self, db: AsyncSession, tenant_id: UUID, code: str, number: str
@@ -269,6 +294,22 @@ class InvoiceService:
         if exclude_id is not None:
             stmt = stmt.where(Invoice.id != exclude_id)
         return (await db.execute(stmt)).scalars().first()
+
+    async def sidepanel_archive_status(self, db: AsyncSession, inv: "Invoice") -> str:
+        """识别完成后给侧栏用的归档态：本票已归档，或档案里已有相同代码+号码。"""
+        if inv.status == "active":
+            return "archived"
+        if inv.invoice_code and inv.invoice_number:
+            dup = await self._find_archived_duplicate(
+                db,
+                inv.tenant_id,
+                inv.invoice_code,
+                inv.invoice_number,
+                exclude_id=inv.id,
+            )
+            if dup is not None:
+                return "archived"
+        return "pending"
 
     # ================ 兼容旧 /invoices/archive 接口（直接 JSON 入库） ================
 

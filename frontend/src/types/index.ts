@@ -39,8 +39,13 @@ export interface MessageAttachment {
     party_b?: string | null
     sign_date?: string | null
     amount?: number | null
+    invoice_code?: string | null
+    invoice_number?: string | null
   } | null
   invoice_id?: string | null
+  /** 用于同一张发票去重（代码+号码） */
+  invoice_code?: string | null
+  invoice_number?: string | null
   contract_id?: string | null
 }
 
@@ -73,6 +78,8 @@ export interface Invoice {
   file_hash: string | null
   ocr_confidence: Record<string, number> | null
   status: 'pending_review' | 'active' | 'deleted' | string
+  /** 侧栏归档态：本票已归档，或档案已有相同代码+号码 */
+  archive_status?: 'pending' | 'archived' | string | null
   user_id: string
   /** 上传该发票的用户姓名 */
   operator_name?: string | null

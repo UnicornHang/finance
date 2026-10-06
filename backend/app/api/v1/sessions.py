@@ -108,10 +108,21 @@ async def delete_session(
     return {"message": "deleted", "session_id": str(session_id)}
 
 
-def _message_attachments(message: Message, rows: list) -> list[dict] | None:
+def _message_attachments(
+    message: Message,
+    rows: list,
+    identities: dict,
+) -> list[dict] | None:
     """优先用 chat_files。没有行时再读消息上残留的 JSON。"""
     if rows:
-        return [chat_file_service.to_attachment(row) for row in rows]
+        return [
+            chat_file_service.to_attachment(
+                row,
+                invoice_code=(identities.get(row.invoice_id) or (None, None))[0],
+                invoice_number=(identities.get(row.invoice_id) or (None, None))[1],
+            )
+            for row in rows
+        ]
     stored = message.attachments
     if isinstance(stored, list) and stored:
         return [item for item in stored if isinstance(item, dict)]
@@ -142,6 +153,8 @@ async def list_messages(
     )
     messages = result.scalars().all()
     files_by_message = await chat_file_service.list_by_message_ids(db, [m.id for m in messages])
+    all_files = [row for rows in files_by_message.values() for row in rows]
+    identities = await chat_file_service.invoice_code_numbers(db, all_files)
 
     return [
         {
@@ -149,7 +162,9 @@ async def list_messages(
             "role": m.role,
             "content": m.content,
             "tool_calls": m.tool_calls,
-            "attachments": _message_attachments(m, files_by_message.get(m.id, [])),
+            "attachments": _message_attachments(
+                m, files_by_message.get(m.id, []), identities
+            ),
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in messages

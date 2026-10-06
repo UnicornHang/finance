@@ -27,6 +27,7 @@ import { Field } from '@/components/ui/surface'
 import { Badge } from '@/components/ui/badge'
 import { useUIStore, type InvoiceSidePanelData } from '@/stores/uiStore'
 import { invoiceApi } from '@/api/invoice'
+import { resolveInvoiceArchiveStatus } from '@/lib/sidePanelHistory'
 import { invoiceSchema, type InvoiceInput } from '@/lib/validators'
 import { formatCurrency } from '@/lib/utils'
 
@@ -108,6 +109,14 @@ export function InvoicePanel() {
   const invoiceId =
     isReady && 'invoice_id' in data ? (data.invoice_id as string) : undefined
 
+  /** 已归档只展示核对结果，不再提供「确定归档」。 */
+  const alreadyArchived =
+    data !== null &&
+    typeof data === 'object' &&
+    (('archive_status' in data &&
+      (data as { archive_status?: string | null }).archive_status === 'archived') ||
+      ('status' in data && data.status === 'active'))
+
   const form = useForm<InvoiceInput>({
     resolver: zodResolver(invoiceSchema),
     defaultValues: {},
@@ -139,12 +148,18 @@ export function InvoicePanel() {
           // 注意：r.invoice.status 是原始 DB status（pending_review/active），
           // 这里覆盖为 'ready' 表示「前端 UI 状态」而非入库状态
           // TODO(Phase A+ 后续清理): 用 UI-state 枚举替代字符串复用
+          const archiveStatus = resolveInvoiceArchiveStatus(r.invoice)
           openSidePanel('invoice', {
             ...r.invoice,
             status: 'ready',
             invoice_id: r.invoice.id,
+            archive_status: archiveStatus,
           })
-          toast.success('发票字段识别完成，请核对后归档')
+          if (archiveStatus === 'archived') {
+            toast.info('这张发票已经归档了')
+          } else {
+            toast.success('发票字段识别完成，请核对后归档')
+          }
           return
         }
         if (r.status === 'not_found' || attempts >= POLL_MAX_ATTEMPTS) {
@@ -173,6 +188,7 @@ export function InvoicePanel() {
   if (!data) return null
 
   const onSubmit = async (formData: InvoiceInput) => {
+    if (alreadyArchived) return
     setSubmitting(true)
     setSubmitError(null)
     try {
@@ -218,9 +234,11 @@ export function InvoicePanel() {
             <p className="text-body-sm text-ink-tertiary leading-tight">
               {isProcessing
                 ? 'AI 智能提取字段中'
-                : isReady
-                  ? 'AI 智能提取 · 请核对后归档'
-                  : '手动归档'}
+                : alreadyArchived
+                  ? '已归档 · 可查看字段'
+                  : isReady
+                    ? 'AI 智能提取 · 请核对后归档'
+                    : '手动归档'}
             </p>
           </div>
         </div>
@@ -436,10 +454,16 @@ export function InvoicePanel() {
               <Textarea rows={3} {...form.register('remark')} placeholder="可填写备注信息" />
             </Field>
 
-            {isReady && (
+            {isReady && !alreadyArchived && (
               <div className="flex items-center gap-2 rounded-md bg-success-tint px-3 py-2 text-body-sm text-success">
                 <CheckCircle2 className="h-4 w-4" />
                 <span>识别完成，点击「确定归档」即可保存到档案</span>
+              </div>
+            )}
+            {alreadyArchived && (
+              <div className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-body-sm text-warning">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>这张发票已经归档了，无需再次确认归档</span>
               </div>
             )}
           </form>
@@ -455,15 +479,17 @@ export function InvoicePanel() {
           </Button>
           <div className="flex-1" />
           <Button variant="secondary" onClick={closeSidePanel} type="button">
-            取消
+            {alreadyArchived ? '关闭' : '取消'}
           </Button>
-          <Button
-            onClick={form.handleSubmit(onSubmit)}
-            disabled={submitting}
-            type="button"
-          >
-            {submitting ? '归档中...' : '确定归档'}
-          </Button>
+          {!alreadyArchived && (
+            <Button
+              onClick={form.handleSubmit(onSubmit)}
+              disabled={submitting}
+              type="button"
+            >
+              {submitting ? '归档中...' : '确定归档'}
+            </Button>
+          )}
         </footer>
       )}
     </aside>

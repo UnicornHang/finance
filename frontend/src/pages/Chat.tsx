@@ -17,8 +17,10 @@ import {
 import { useCurrentMessages } from '@/stores/sessionStore'
 import { useUIStore } from '@/stores/uiStore'
 import {
+  documentIdentity,
   listHistoryDocumentTurns,
   openHistoryDocument,
+  panelDocumentIdentity,
   type HistoryDocumentTurn,
 } from '@/lib/sidePanelHistory'
 
@@ -40,8 +42,7 @@ export function Chat() {
   const reopenSidePanel = useUIStore((s) => s.reopenSidePanel)
   const messages = useCurrentMessages()
   const documentTurns = listHistoryDocumentTurns(messages)
-  const activeFileHash =
-    (sidePanelData as { file_hash?: string } | null)?.file_hash ?? null
+  const activeDocKey = panelDocumentIdentity(sidePanelType, sidePanelData)
 
   const rightPaneOpen =
     sidePanelOpen && (sidePanelType === 'invoice' || sidePanelType === 'contract')
@@ -80,10 +81,11 @@ export function Chat() {
         {documentTurns.map((turn) => {
           const name = turn.attachment.original_filename || '未命名文件'
           const selected =
-            sidePanelOpen && turn.attachment.file_hash === activeFileHash
+            sidePanelOpen &&
+            documentIdentity(turn.type, turn.attachment) === activeDocKey
           return (
             <DropdownMenuItem
-              key={`${turn.type}-${turn.attachment.file_hash}-${turn.attachment.id ?? ''}`}
+              key={documentIdentity(turn.type, turn.attachment)}
               onSelect={() => openTurn(turn)}
               className={selected ? 'bg-primary-tint text-primary' : undefined}
             >
