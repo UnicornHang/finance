@@ -7,7 +7,6 @@
 
 import hashlib
 import logging
-import uuid
 from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import unquote
@@ -22,6 +21,7 @@ from app.core.exceptions import BusinessError, ForbiddenError
 from app.deps import get_current_user
 from app.models import User
 from app.services.chat_file_service import chat_file_service
+from app.services.file_gc import resolve_upload_url
 from app.services.session_service import session_service
 from app.services.storage_service import storage_service
 
@@ -54,7 +54,7 @@ async def upload_file(
 
     行为：
     1. 读取 multipart → SHA-256
-    2. 上传到 `settings.minio_bucket_kb`（通用桶；OCR/合同任务自己下载再分发）
+    2. 按文件 hash 复用已有 MinIO 对象；没有才写入 `{tenant}/files/by-hash/{hash}`
     3. 返回 `{file_hash, file_url, original_filename, content_type, size}`
 
     前端拿到 `file_url` + `file_hash` 后把它们作为 JSON 字段随消息一起
@@ -84,15 +84,13 @@ async def upload_file(
     ext = Path(original_filename).suffix.lower() or ".bin"
     content_type = file.content_type or "application/octet-stream"
 
-    # 把所有上传暂存到通用 `files/` 桶；chat_stream 拿到 URL 后续任务
-    # 自行决定分流到 OCR / 合同解析 / RAG。
-    obj_key = f"{user.tenant_id}/files/{uuid.uuid4()}{ext}"
-
     try:
-        file_url = storage_service.upload_file(
-            bucket=settings.minio_bucket_kb,
-            object_name=obj_key,
-            data=content,
+        file_url, reused = await resolve_upload_url(
+            db,
+            tenant_id=user.tenant_id,
+            file_hash=file_hash,
+            content=content,
+            ext=ext,
             content_type=content_type,
         )
     except Exception as exc:
@@ -111,8 +109,14 @@ async def upload_file(
     )
 
     logger.info(
-        "File upload: tenant=%s user=%s key=%s hash=%s bytes=%d name=%s file_id=%s",
-        user.tenant_id, user.id, obj_key, file_hash, len(content), original_filename, row.id,
+        "File upload: tenant=%s user=%s url=%s hash=%s bytes=%d reused=%s file_id=%s",
+        user.tenant_id,
+        user.id,
+        file_url,
+        file_hash,
+        len(content),
+        reused,
+        row.id,
     )
 
     return {
@@ -123,7 +127,7 @@ async def upload_file(
         "content_type": content_type,
         "size": len(content),
         "recognize_status": row.recognize_status,
-        "status": "uploaded",
+        "status": "reused" if reused else "uploaded",
     }
 
 

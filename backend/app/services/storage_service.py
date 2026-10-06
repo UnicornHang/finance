@@ -1,12 +1,15 @@
 """对象存储服务（MinIO）。"""
 
 from io import BytesIO
+import logging
 from typing import BinaryIO
 
 from minio import Minio
 from minio.error import S3Error
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class StorageService:
@@ -68,6 +71,29 @@ class StorageService:
     def delete_file(self, bucket: str, object_name: str) -> None:
         """删除文件。"""
         self.client.remove_object(bucket, object_name)
+
+    def object_exists(self, file_url: str) -> bool:
+        """s3://bucket/key 是否还在桶里。"""
+        try:
+            bucket, key = parse_s3_url(file_url)
+        except ValueError:
+            return False
+        try:
+            self.client.stat_object(bucket_name=bucket, object_name=key)
+            return True
+        except S3Error:
+            return False
+
+    def list_objects(self, bucket: str, prefix: str = "") -> list[tuple[str, object]]:
+        """列出桶内对象：(object_name, last_modified)。"""
+        items: list[tuple[str, object]] = []
+        try:
+            for obj in self.client.list_objects(bucket, prefix=prefix, recursive=True):
+                if obj.object_name:
+                    items.append((obj.object_name, obj.last_modified))
+        except S3Error:
+            logger.exception("list objects failed bucket=%s prefix=%s", bucket, prefix)
+        return items
 
     def download_bytes(self, file_url: str) -> bytes:
         """从 s3://bucket/key 下载对象内容。"""

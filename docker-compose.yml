@@ -64,6 +64,28 @@ services:
       - finance-net
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-2}
 
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finance-celery-beat
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    networks:
+      - finance-net
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
   # ===================== 前端 =====================
   frontend:
     build:

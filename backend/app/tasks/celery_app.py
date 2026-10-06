@@ -1,6 +1,7 @@
 """Celery 应用实例。"""
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.config import settings
 
@@ -11,6 +12,7 @@ celery_app = Celery(
     include=[
         "app.tasks.ocr_task",
         "app.tasks.contract_task",
+        "app.tasks.cleanup_task",
     ],
 )
 
@@ -24,4 +26,10 @@ celery_app.conf.update(
     task_time_limit=300,
     worker_max_tasks_per_child=1000,
     worker_prefetch_multiplier=1,
+    beat_schedule={
+        "cleanup-duplicate-files": {
+            "task": "app.tasks.cleanup_task.cleanup_duplicate_files",
+            "schedule": crontab(hour=3, minute=30, day_of_week="sun"),
+        },
+    },
 )

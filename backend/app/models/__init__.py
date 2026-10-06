@@ -167,6 +167,7 @@ class ChatFile(Base):
     __table_args__ = (
         Index("idx_chat_files_session", "session_id", "created_at"),
         Index("idx_chat_files_message", "message_id"),
+        Index("idx_chat_files_tenant_hash", "tenant_id", "file_hash"),
     )
 
 
