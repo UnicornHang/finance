@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.security import create_access_token, create_refresh_token, decode_token
 from app.deps import get_current_user
 from app.models import User
+from app.schemas import PasswordChange, ProfileUpdate
 from app.services.auth_service import auth_service
 
 router = APIRouter()
@@ -133,3 +134,40 @@ async def logout():
 async def me(user: User = Depends(get_current_user)):
     """获取当前登录用户信息（用于刷新用户态）。"""
     return _build_user_dict(user)
+
+
+def _client_meta(request: Request) -> tuple[str | None, str | None]:
+    """提取审计用 IP 与 UA。"""
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    return ip, ua
+
+
+@router.patch("/me")
+async def update_me(
+    payload: ProfileUpdate,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前用户更新姓名、部门。"""
+    ip, ua = _client_meta(request)
+    updated = await auth_service.update_profile(
+        db, user=user, payload=payload, ip=ip, ua=ua
+    )
+    return _build_user_dict(updated)
+
+
+@router.post("/me/password")
+async def change_my_password(
+    payload: PasswordChange,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前用户修改密码，需提供正确的旧密码。"""
+    ip, ua = _client_meta(request)
+    await auth_service.change_password(
+        db, user=user, payload=payload, ip=ip, ua=ua
+    )
+    return {"message": "password updated"}

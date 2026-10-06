@@ -124,6 +124,35 @@ class PasswordResetOut(BaseModel):
     temporary_password: str
 
 
+class ProfileUpdate(BaseModel):
+    """当前用户更新自己的姓名/部门；账号与角色不可改。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    dept: str | None = Field(default=None, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("姓名不能为空")
+        return stripped
+
+    @field_validator("dept")
+    @classmethod
+    def validate_dept(cls, value: str | None) -> str | None:
+        return _normalize_optional_text(value)
+
+
+class PasswordChange(BaseModel):
+    """当前用户修改登录密码。"""
+
+    old_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=10, max_length=72)
+
+
 # ================ 会话 ================
 
 class SessionCreate(BaseModel):

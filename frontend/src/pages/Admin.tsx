@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   NavLink,
   Navigate,
@@ -33,6 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { AccountSettingsDialog } from '@/components/AccountSettingsDialog'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -61,6 +63,7 @@ const ROLE_TONE: Record<string, 'primary' | 'success' | 'neutral'> = {
 export function Admin() {
   const user = useAuthStore((s) => s.user)
   const { logout } = useAuth()
+  const [accountOpen, setAccountOpen] = useState(false)
 
   if (user?.role !== 'admin' && user?.role !== 'finance') {
     return <Navigate to="/chat" replace />
@@ -165,7 +168,7 @@ export function Admin() {
                 </Badge>
               </div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setAccountOpen(true)}>
                 <Settings className="h-4 w-4 text-ink-tertiary" />
                 账户设置
               </DropdownMenuItem>
@@ -182,6 +185,7 @@ export function Admin() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <AccountSettingsDialog open={accountOpen} onOpenChange={setAccountOpen} />
         </div>
       </header>
 

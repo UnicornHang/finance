@@ -8,9 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.exceptions import AccountLockedError, UnauthorizedError
-from app.core.security import verify_password
+from app.core.exceptions import AccountLockedError, BusinessError, UnauthorizedError
+from app.core.security import hash_password, verify_password
 from app.models import User
+from app.schemas import PasswordChange, ProfileUpdate
+from app.services.audit_service import write_audit_log
 
 
 class AuthService:
@@ -53,6 +55,74 @@ class AuthService:
     async def get_by_id(self, db: AsyncSession, user_id: UUID) -> User | None:
         """根据 ID 查询用户。"""
         return await db.get(User, user_id)
+
+    async def update_profile(
+        self,
+        db: AsyncSession,
+        *,
+        user: User,
+        payload: ProfileUpdate,
+        ip: str | None = None,
+        ua: str | None = None,
+    ) -> User:
+        """更新当前用户姓名、部门；不改账号、角色、状态。"""
+        data = payload.model_dump(exclude_unset=True)
+        if not data:
+            return user
+
+        before = {"name": user.name, "dept": user.dept}
+        if "name" in data:
+            user.name = data["name"]
+        if "dept" in data:
+            user.dept = data["dept"]
+        await db.flush()
+        await write_audit_log(
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            operation_type="update_profile",
+            target_type="user",
+            target_id=user.id,
+            before=before,
+            after={"name": user.name, "dept": user.dept},
+            ip=ip,
+            ua=ua,
+        )
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    async def change_password(
+        self,
+        db: AsyncSession,
+        *,
+        user: User,
+        payload: PasswordChange,
+        ip: str | None = None,
+        ua: str | None = None,
+    ) -> None:
+        """校验旧密码后写入新哈希；错误旧密码返回 400，避免前端把会话清掉。"""
+        if not verify_password(payload.old_password, user.password_hash or ""):
+            raise BusinessError("当前密码不正确", code="WRONG_PASSWORD")
+        if verify_password(payload.new_password, user.password_hash or ""):
+            raise BusinessError("新密码不能与当前密码相同", code="PASSWORD_UNCHANGED")
+
+        user.password_hash = hash_password(payload.new_password)
+        user.failed_login_attempts = 0
+        user.locked_until = None
+        await db.flush()
+        await write_audit_log(
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            operation_type="change_password",
+            target_type="user",
+            target_id=user.id,
+            after={"account": user.account},
+            ip=ip,
+            ua=ua,
+        )
+        await db.commit()
 
     def _utcnow(self) -> datetime:
         """当前 UTC 时间。"""

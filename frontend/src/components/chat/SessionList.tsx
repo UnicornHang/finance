@@ -47,6 +47,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useSessionStore } from '@/stores/sessionStore'
+import { AccountSettingsDialog } from '@/components/AccountSettingsDialog'
 import { useAuthStore } from '@/stores/authStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -621,6 +622,7 @@ const ROLE_LABEL: Record<string, string> = {
 function UserFooter() {
   const user = useAuthStore((s) => s.user)
   const { logout } = useAuth()
+  const [accountOpen, setAccountOpen] = useState(false)
 
   if (!user) return null
 
@@ -667,7 +669,7 @@ function UserFooter() {
               </Link>
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem disabled>
+          <DropdownMenuItem onClick={() => setAccountOpen(true)}>
             <Settings className="h-3.5 w-3.5" />
             账户设置
           </DropdownMenuItem>
@@ -678,6 +680,7 @@ function UserFooter() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <AccountSettingsDialog open={accountOpen} onOpenChange={setAccountOpen} />
     </div>
   )
 }
