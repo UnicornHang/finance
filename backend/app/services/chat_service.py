@@ -219,6 +219,30 @@ def _serialize_invoice(inv, *, archive_status: str | None = None) -> dict[str, A
     }
 
 
+def _serialize_contract_sidepanel(
+    row,
+    *,
+    archive_status: str,
+    chat_file_id: UUID | str | None = None,
+) -> dict[str, Any]:
+    """侧栏 / SSE 用的合同字典。"""
+    return {
+        "status": "ready",
+        "file_url": row.file_url,
+        "file_hash": row.file_hash,
+        "chat_file_id": str(chat_file_id) if chat_file_id else None,
+        "contract_id": str(row.id),
+        "archive_status": archive_status,
+        "contract_name": row.contract_name,
+        "party_a": row.party_a,
+        "party_b": row.party_b,
+        "sign_date": row.sign_date.isoformat() if row.sign_date else None,
+        "amount": float(row.amount) if row.amount is not None else None,
+        "risk_level": row.risk_level,
+        "review_result": row.review_result,
+    }
+
+
 def _format_result_for_prompt(fields: dict[str, Any], source: str) -> str:
     """把结构化结果写成模型可读摘要。"""
     lines = [
@@ -818,6 +842,16 @@ class ChatService:
         content_type: str | None,
     ) -> AsyncGenerator[dict, None]:
         """合同：交给合同审查场景的模型，不走发票识别。"""
+        archived = await contract_service.get_archived_by_hash(
+            db, user.tenant_id, file_hash, user=user
+        )
+        if archived is not None:
+            async for event in self._stream_archived_contract(
+                db, user, session_id, file_id=file_id, row=archived
+            ):
+                yield event
+            return
+
         # 和发票一样先打开右侧栏，审查结束后再换成结果
         yield {
             "type": "sidepanel",
@@ -1091,6 +1125,128 @@ class ChatService:
             )
         yield {"type": "done"}
 
+    async def lookup_archived_upload(
+        self,
+        db: AsyncSession,
+        user: "User",
+        file_hash: str,
+    ) -> tuple[str, Any] | None:
+        """同一原件已归档则返回 (invoice|contract, row)，避免再跑模型。"""
+        if not file_hash:
+            return None
+        inv = await invoice_service.get_archived_by_hash(
+            db, user.tenant_id, file_hash, user=user
+        )
+        if inv is not None:
+            return ("invoice", inv)
+        row = await contract_service.get_archived_by_hash(
+            db, user.tenant_id, file_hash, user=user
+        )
+        if row is not None:
+            return ("contract", row)
+        return None
+
+    async def _stream_archived_reuse(
+        self,
+        db: AsyncSession,
+        user: "User",
+        session_id: UUID,
+        *,
+        file_id: UUID,
+        kind: str,
+        row: Any,
+    ) -> AsyncGenerator[dict, None]:
+        """复用已归档档案：只推侧栏和固定回复，不调用识别/审查模型。"""
+        if kind == "invoice":
+            async for event in self._stream_archived_invoice(
+                db, user, session_id, file_id=file_id, inv=row
+            ):
+                yield event
+            return
+        if kind == "contract":
+            async for event in self._stream_archived_contract(
+                db, user, session_id, file_id=file_id, row=row
+            ):
+                yield event
+            return
+        raise ValueError(f"unhandled archived kind: {kind}")
+
+    async def _stream_archived_invoice(
+        self,
+        db: AsyncSession,
+        user: "User",
+        session_id: UUID,
+        *,
+        file_id: UUID,
+        inv: Any,
+    ) -> AsyncGenerator[dict, None]:
+        """已归档发票：挂附件、打开侧栏、固定告知。"""
+        await chat_file_service.mark(
+            db,
+            file_id,
+            intent="invoice",
+            recognize_status="succeeded",
+            invoice_id=inv.id,
+            recognize_error=None,
+            extract_result={
+                "invoice_code": inv.invoice_code,
+                "invoice_number": inv.invoice_number,
+            },
+        )
+        await set_last_intent(db, session_id, Intent.INVOICE_UPLOAD.value)
+        payload = {
+            **_serialize_invoice(inv, archive_status="archived"),
+            "status": "ready",
+            "recognize_status": "succeeded",
+            "invoice_id": str(inv.id),
+        }
+        yield {"type": "sidepanel", "payload": {"type": "invoice", "data": payload}}
+        text = (
+            "这张发票已经归档了，不再重新识别。"
+            "右侧可查看已保存的字段，无需再次确认归档。"
+        )
+        yield {"type": "text", "content": text}
+        await self.save_message(db, session_id, user.tenant_id, "assistant", text)
+        yield {"type": "done"}
+
+    async def _stream_archived_contract(
+        self,
+        db: AsyncSession,
+        user: "User",
+        session_id: UUID,
+        *,
+        file_id: UUID,
+        row: Any,
+    ) -> AsyncGenerator[dict, None]:
+        """已归档合同：挂附件、打开侧栏、固定告知。"""
+        await chat_file_service.mark(
+            db,
+            file_id,
+            intent="contract",
+            recognize_status="succeeded",
+            contract_id=row.id,
+            recognize_error=None,
+            extract_result={
+                "contract_name": row.contract_name,
+                "party_a": row.party_a,
+                "party_b": row.party_b,
+                "sign_date": row.sign_date.isoformat() if row.sign_date else None,
+                "amount": float(row.amount) if row.amount is not None else None,
+            },
+        )
+        await set_last_intent(db, session_id, Intent.CONTRACT_UPLOAD.value)
+        payload = _serialize_contract_sidepanel(
+            row, archive_status="archived", chat_file_id=file_id
+        )
+        yield {"type": "sidepanel", "payload": {"type": "contract", "data": payload}}
+        text = (
+            "这份合同已经归档了，不再重新审查。"
+            "右侧可查看已保存的审查结果，无需再次确认归档。"
+        )
+        yield {"type": "text", "content": text}
+        await self.save_message(db, session_id, user.tenant_id, "assistant", text)
+        yield {"type": "done"}
+
     async def _stream_invoice_recognize(
         self,
         db: AsyncSession,
@@ -1107,6 +1263,16 @@ class ChatService:
         """通用大模型识别图片/文件 + 侧栏 + 带结果回复。"""
         from app.services.invoice_service import invoice_service
         from app.services.invoice_vision_service import invoice_vision_service
+
+        archived = await invoice_service.get_archived_by_hash(
+            db, user.tenant_id, file_hash, user=user
+        )
+        if archived is not None:
+            async for event in self._stream_archived_invoice(
+                db, user, session_id, file_id=file_id, inv=archived
+            ):
+                yield event
+            return
 
         # 先告诉前端进入识别中（轮询仍可用）
         yield {

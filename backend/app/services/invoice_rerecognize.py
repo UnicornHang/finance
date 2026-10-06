@@ -42,6 +42,8 @@ async def rerecognize_invoice(
 ) -> "Invoice":
     """按原件重新抽取字段，覆盖当前档案；不改变归档状态。"""
     inv = await invoice_service.get(db, tenant_id, invoice_id, user=user)
+    if await invoice_service.sidepanel_archive_status(db, inv) == "archived":
+        raise BusinessError("该发票已归档，不再重新识别", code="INVOICE_ALREADY_ARCHIVED")
     if not inv.file_url:
         raise BusinessError("没有原件，无法重新识别", code="INVOICE_FILE_MISSING")
 

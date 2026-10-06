@@ -295,6 +295,34 @@ class InvoiceService:
             stmt = stmt.where(Invoice.id != exclude_id)
         return (await db.execute(stmt)).scalars().first()
 
+    async def get_archived_by_hash(
+        self,
+        db: AsyncSession,
+        tenant_id: UUID,
+        file_hash: str,
+        *,
+        user: "User | None" = None,
+    ) -> "Invoice | None":
+        """同一原件已归档则返回该发票，供跳过重复识别。"""
+        from app.models import Invoice
+
+        if not file_hash:
+            return None
+        conditions = [
+            Invoice.tenant_id == tenant_id,
+            Invoice.file_hash == file_hash,
+            Invoice.status == "active",
+        ]
+        if user is not None and user.role == "employee":
+            conditions.append(Invoice.user_id == user.id)
+        stmt = (
+            select(Invoice)
+            .where(and_(*conditions))
+            .order_by(Invoice.created_at.desc())
+            .limit(1)
+        )
+        return (await db.execute(stmt)).scalars().first()
+
     async def sidepanel_archive_status(self, db: AsyncSession, inv: "Invoice") -> str:
         """识别完成后给侧栏用的归档态：本票已归档，或档案里已有相同代码+号码。"""
         if inv.status == "active":

@@ -47,6 +47,8 @@ async def rereview_contract(
 ) -> "Contract":
     """下载原件 → 抽正文 → 模型审查 → 覆盖当前合同记录。"""
     row = await contract_service.get(db, user.tenant_id, contract_id, user=user)
+    if await contract_service.sidepanel_archive_status(db, row) == "archived":
+        raise BusinessError("该合同已归档，不再重新审查", code="CONTRACT_ALREADY_ARCHIVED")
     if not row.file_url:
         raise BusinessError("没有原件，无法重新审查", code="CONTRACT_FILE_MISSING")
 

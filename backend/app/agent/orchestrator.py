@@ -436,6 +436,20 @@ class AgentOrchestrator:
         file_meta: dict,
     ) -> AsyncGenerator[dict, None]:
         """附件子图分类后，调用现有识别/审查/文件闲聊并流式 SSE。"""
+        hit = await service.lookup_archived_upload(db, user, file_hash)
+        if hit is not None:
+            kind, row = hit
+            record(
+                "upload_archived_reuse",
+                file_kind=kind,
+                tenant_id=str(user.tenant_id),
+            )
+            async for event in service._stream_archived_reuse(
+                db, user, session_id, file_id=file_id, kind=kind, row=row
+            ):
+                yield event
+            return
+
         # 避免与 ChatService 模块循环：下载函数定义在 chat_service
         from app.services.chat_service import _download_bytes
 

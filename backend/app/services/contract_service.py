@@ -202,6 +202,35 @@ class ContractService:
             stmt = stmt.where(Contract.id != exclude_id)
         return (await db.execute(stmt)).scalars().first()
 
+    async def get_archived_by_hash(
+        self,
+        db: AsyncSession,
+        tenant_id: UUID,
+        file_hash: str,
+        *,
+        user: "User | None" = None,
+    ) -> "Contract | None":
+        """同一原件已归档则返回该合同，供跳过重复审查。"""
+        from app.models import Contract
+
+        if not file_hash:
+            return None
+        conditions = [
+            Contract.tenant_id == tenant_id,
+            Contract.file_hash == file_hash,
+            Contract.status == "active",
+        ]
+        if user is not None and user.role == "employee":
+            conditions.append(Contract.user_id == user.id)
+        return (
+            await db.execute(
+                select(Contract)
+                .where(*conditions)
+                .order_by(Contract.created_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+
     async def sidepanel_archive_status(self, db: AsyncSession, row: "Contract") -> str:
         """侧栏归档态：本合同已归档，或档案里已有相同文件。"""
         if row.status == "active":
