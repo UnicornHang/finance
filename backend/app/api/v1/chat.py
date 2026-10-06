@@ -6,6 +6,7 @@
 文本由 classify_intent 后进入 LangGraph 编排（失败回退原管道）；附件仍先文件分类再进入识别/审查。
 """
 
+import asyncio
 import json
 import logging
 from uuid import UUID
@@ -97,6 +98,9 @@ async def chat_stream(
                 if event.get("type") == "text" and "session_id" not in event:
                     event = {**event, "session_id": str(actual_session_id)}
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            logger.info("chat_stream cancelled session_id=%s", actual_session_id)
+            raise
         except Exception as exc:
             logger.exception("chat_stream unexpected error")
             error_event = {"type": "error", "message": f"服务器内部错误：{exc}"}

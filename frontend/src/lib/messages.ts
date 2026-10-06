@@ -1,5 +1,10 @@
 import type { Message, MessageAttachment, WebSource } from '@/types'
 
+/** 助手消息是否为流式中断半截落库。 */
+export function isInterruptedMessage(message: Message): boolean {
+  return message.tool_calls?.interrupted === true
+}
+
 /** 从消息上取出附件：优先用 attachments，否则读 tool_calls.attachments。 */
 export function readAttachments(message: Message): MessageAttachment[] {
   if (message.attachments?.length) {

@@ -26,6 +26,16 @@ def _make_msg(role="assistant", content=None, id=None):
     return SimpleNamespace(role=role, content=content, id=id or role)
 
 
+def _assistant_saves(service: ChatService) -> list:
+    """取出 mock save_message 里 role 为 assistant 的调用。"""
+    saves = []
+    for call in service.save_message.await_args_list:
+        role = call.args[3] if len(call.args) > 3 else call.kwargs.get("role")
+        if role == "assistant":
+            saves.append(call)
+    return saves
+
+
 @pytest.fixture
 def mock_db():
     """模拟 AsyncSession：execute 链式返回 scalars().all()。"""
@@ -102,7 +112,7 @@ async def test_stream_response_yields_events(mock_db, mock_user, mock_session):
 
     with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
         mock_cfg_svc.resolve = AsyncMock(return_value=None)
-        with patch("app.services.chat_service.llm_service") as mock_llm:
+        with patch("app.services.stream_persist.llm_service") as mock_llm:
             mock_llm.stream = mock_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
@@ -129,21 +139,25 @@ async def test_stream_response_yields_events(mock_db, mock_user, mock_session):
     full_text = "".join(text_chunks)
     assert full_text == "你好，我是AI"
 
-    # save_message 至少被调用 2 次（user + assistant）
-    assert service.save_message.call_count >= 2
+    # 用户消息 + 一条助手消息，封装成功后不再手写第二次 save
+    assert service.save_message.call_count == 2
+    assistant_saves = _assistant_saves(service)
+    assert len(assistant_saves) == 1
+    tool_calls = assistant_saves[0].kwargs.get("tool_calls")
+    assert not (isinstance(tool_calls, dict) and tool_calls.get("interrupted"))
 
 
 @pytest.mark.asyncio
 async def test_stream_response_handles_llm_error(mock_db, mock_user, mock_session):
-    """LLM 调用失败时 yield error 事件。"""
+    """已吐出文本后 LLM 失败：error、半截落库且 interrupted，且不发 done。"""
 
     async def failing_llm_stream(messages, scene, **kwargs):
+        yield "半截"
         raise RuntimeError("API rate limit")
-        yield  # noqa: 让生成器标记为 async generator
 
     with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
         mock_cfg_svc.resolve = AsyncMock(return_value=None)
-        with patch("app.services.chat_service.llm_service") as mock_llm:
+        with patch("app.services.stream_persist.llm_service") as mock_llm:
             mock_llm.stream = failing_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
@@ -163,6 +177,13 @@ async def test_stream_response_handles_llm_error(mock_db, mock_user, mock_sessio
     error_events = [e for e in events if e["type"] == "error"]
     assert len(error_events) == 1
     assert "API rate limit" in error_events[0]["message"]
+    text = "".join(e["content"] for e in events if e["type"] == "text")
+    assert text == "半截"
+    assert not any(e["type"] == "done" for e in events)
+    assistant_saves = _assistant_saves(service)
+    assert len(assistant_saves) == 1
+    assert assistant_saves[0].args[4] == "半截"
+    assert assistant_saves[0].kwargs["tool_calls"]["interrupted"] is True
 
 
 @pytest.mark.asyncio
@@ -203,7 +224,7 @@ async def test_stream_uses_custom_system_prompt(mock_db, mock_user, mock_session
         mock_cfg_svc.resolve = AsyncMock(
             return_value={"system_prompt": "你叫MoFan，是魔方财务科技顾问。"}
         )
-        with patch("app.services.chat_service.llm_service") as mock_llm:
+        with patch("app.services.stream_persist.llm_service") as mock_llm:
             mock_llm.stream = mock_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
@@ -260,7 +281,7 @@ async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_ses
 
     with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
         mock_cfg_svc.resolve = AsyncMock(return_value=None)
-        with patch("app.services.chat_service.llm_service") as mock_llm:
+        with patch("app.services.stream_persist.llm_service") as mock_llm:
             mock_llm.stream = mock_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
@@ -323,6 +344,7 @@ async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_ses
     assert "不得把模型知识截止日期当作当前日期" in user_content
     tool_kw = service.save_message.call_args.kwargs
     assert tool_kw.get("tool_calls", {}).get("tool") == "search_official_data"
+    assert tool_kw.get("tool_calls", {}).get("interrupted") is not True
 
 
 @pytest.mark.asyncio
@@ -346,7 +368,7 @@ async def test_stream_policy_query_injects_rag(mock_db, mock_user, mock_session)
 
     with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
         mock_cfg_svc.resolve = AsyncMock(return_value=None)
-        with patch("app.services.chat_service.llm_service") as mock_llm:
+        with patch("app.services.stream_persist.llm_service") as mock_llm:
             mock_llm.stream = mock_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
@@ -399,7 +421,7 @@ async def test_stream_invoice_intent_without_file_asks_upload(
 
     with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
         mock_cfg_svc.resolve = AsyncMock(return_value=None)
-        with patch("app.services.chat_service.llm_service") as mock_llm:
+        with patch("app.services.stream_persist.llm_service") as mock_llm:
             mock_llm.stream = mock_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)
@@ -429,7 +451,7 @@ async def test_stream_official_portal_has_no_search(mock_db, mock_user, mock_ses
 
     with patch("app.services.chat_service.llm_config_service") as mock_cfg_svc:
         mock_cfg_svc.resolve = AsyncMock(return_value=None)
-        with patch("app.services.chat_service.llm_service") as mock_llm:
+        with patch("app.services.stream_persist.llm_service") as mock_llm:
             mock_llm.stream = mock_llm_stream
             with patch("app.services.chat_service.session_service") as mock_session_svc:
                 mock_session_svc.verify_access = AsyncMock(return_value=mock_session)

@@ -32,14 +32,15 @@ from app.services.invoice_document import (
     _prepare_document,
 )
 from app.services.llm_config_service import llm_config_service
-from app.services.llm_service import llm_service
+from app.services.stream_persist import StreamPersistResult, stream_llm_and_persist
 from app.services.rag_service import rag_service
 from app.services.official_policy_service import (
     format_official_policy_context,
     official_policy_service,
 )
 from app.services.invoice_service import invoice_service
-from app.services.contract_service import contract_service
+from app.services.invoice_vision_service import invoice_vision_service
+from app.services.contract_service import contract_service, infer_risk_level
 from app.services.session_service import session_service
 from app.services.tool_config_service import tool_config_service
 from app.services.web_search_service import WebSearchRuntime
@@ -289,6 +290,14 @@ def _user_type_mismatch_instruction(user_message: str, actual: str) -> str:
             "不要按发票识别字段来写。"
         )
     return ""
+
+
+def _persist_error_detail(message: str, prefix: str) -> str:
+    """从封装 error 文案中取出异常原文，供 recognize_error 使用。"""
+    head = f"{prefix}："
+    if message.startswith(head):
+        return message[len(head):]
+    return message
 
 
 class ChatService:
@@ -635,39 +644,28 @@ class ChatService:
             {"role": "user", "content": user_content},
         ]
 
-        assistant_content = ""
-        try:
-            async for chunk in llm_service.stream(
-                messages,
-                scene=scene,
-                db=db,
-                tenant_id=str(user.tenant_id),
-            ):
-                assistant_content += chunk
-                yield {"type": "text", "content": chunk}
-        except Exception as exc:
-            logger.exception("LLM 调用失败")
-            yield {"type": "error", "message": f"AI 调用失败：{exc}"}
-            if assistant_content:
-                await self.save_message(
-                    db,
-                    session_id,
-                    user.tenant_id,
-                    "assistant",
-                    assistant_content,
-                    tool_calls=search_trace,
-                )
+        # 回退路径同样只落一条；auto_title 与 done 都要求未中断
+        persist = StreamPersistResult()
+        stream_failed = False
+        async for event in stream_llm_and_persist(
+            save_message=self.save_message,
+            db=db,
+            session_id=session_id,
+            tenant_id=user.tenant_id,
+            messages=messages,
+            scene=scene,
+            base_tool_calls=search_trace,
+            result=persist,
+            error_prefix="AI 调用失败",
+        ):
+            if event.get("type") == "error":
+                stream_failed = True
+            yield event
+
+        if persist.interrupted or stream_failed:
             return
 
-        if assistant_content.strip():
-            await self.save_message(
-                db,
-                session_id,
-                user.tenant_id,
-                "assistant",
-                assistant_content,
-                tool_calls=search_trace,
-            )
+        if persist.saved and not persist.interrupted:
             if not history or len(history) <= 1:
                 await self.auto_title(db, session, display_msg)
 
@@ -842,6 +840,15 @@ class ChatService:
         ):
             yield event
 
+    async def _mark_upload_interrupted(self, db: AsyncSession, file_id: UUID) -> None:
+        """流式被断开时把附件标为失败，避免 recognize_status 停在 running。"""
+        await chat_file_service.mark(
+            db,
+            file_id,
+            recognize_status="failed",
+            recognize_error="连接已中断",
+        )
+
     async def _stream_contract_review(
         self,
         db: AsyncSession,
@@ -856,7 +863,11 @@ class ChatService:
         filename: str | None,
         content_type: str | None,
     ) -> AsyncGenerator[dict, None]:
-        """合同：交给合同审查场景的模型，不走发票识别。"""
+        """合同：交给合同审查场景的模型，不走发票识别。
+
+        审查正文由 stream_llm_and_persist 落库。失败时标记文件并推失败侧栏，
+        不再重复 save_message。
+        """
         archived = await contract_service.get_archived_by_hash(
             db, user.tenant_id, file_hash, user=user
         )
@@ -951,7 +962,6 @@ class ChatService:
             yield {"type": "done"}
             return
         user_content = _as_llm_message_content(content)
-        assistant_content = ""
         system_prompt = (
             "你是合同审查助手。用户消息里的正文已由系统从 PDF/Word 抽出，"
             "必须当作有效合同文本审查，不得拒绝或讨论文件格式。"
@@ -961,28 +971,43 @@ class ChatService:
         )
         if mismatch:
             system_prompt += f"\n{mismatch}"
-        try:
-            async for chunk in llm_service.stream(
-                [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ],
-                scene="contract_review",
-                db=db,
-                tenant_id=str(user.tenant_id),
-                temperature=0.2,
-            ):
-                assistant_content += chunk
-                yield {"type": "text", "content": chunk}
-        except Exception as exc:
-            logger.exception("contract review failed")
+        # 正文由封装落库。先扣住 error：前端收到 error 会停读，侧栏必须先于 error 发出。
+        persist = StreamPersistResult()
+        error_event: dict | None = None
+
+        async def _on_interrupt() -> None:
+            """审查流被取消时标失败；侧栏仍留给正常返回后的分支，断连不再补推。"""
+            await self._mark_upload_interrupted(db, file_id)
+
+        async for event in stream_llm_and_persist(
+            save_message=self.save_message,
+            db=db,
+            session_id=session_id,
+            tenant_id=user.tenant_id,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            scene="contract_review",
+            result=persist,
+            on_interrupt=_on_interrupt,
+            error_prefix="合同审查失败",
+            temperature=0.2,
+        ):
+            if event.get("type") == "error":
+                error_event = event
+                continue
+            yield event
+
+        # 零 chunk 时封装不置 interrupted，但仍有 error，同样按审查失败处理
+        if persist.interrupted or error_event is not None:
+            error_message = str((error_event or {}).get("message") or "合同审查失败")
             await chat_file_service.mark(
-                db, file_id, recognize_status="failed", recognize_error=str(exc)
+                db,
+                file_id,
+                recognize_status="failed",
+                recognize_error=_persist_error_detail(error_message, "合同审查失败"),
             )
-            if assistant_content.strip():
-                await self.save_message(
-                    db, session_id, user.tenant_id, "assistant", assistant_content
-                )
             yield {
                 "type": "sidepanel",
                 "payload": {
@@ -995,19 +1020,19 @@ class ChatService:
                         "chat_file_id": str(file_id),
                         **overview,
                         "review_result": {
-                            "summary": f"合同审查失败：{exc}",
+                            "summary": error_message,
                             "violations": [],
                         },
                     },
                 },
             }
-            yield {"type": "error", "message": f"合同审查失败：{exc}"}
+            if error_event is not None:
+                yield error_event
             yield {"type": "done"}
             return
 
+        assistant_content = persist.content
         # 审查结果写入 pending_review，等用户点「确定归档」才变 active
-        from app.services.contract_service import contract_service, infer_risk_level
-
         review_result = {
             "summary": assistant_content,
             "violations": [],
@@ -1053,10 +1078,8 @@ class ChatService:
             # 侧栏仍可展示审查结果；无 contract_id 时走兼容确认路径
             yield {"type": "text", "content": f"\n\n（识别结果暂存失败：{exc}，请稍后重试确认归档）\n"}
 
+        # 成功正文已由封装落库，这里只推就绪侧栏
         if assistant_content.strip():
-            await self.save_message(
-                db, session_id, user.tenant_id, "assistant", assistant_content
-            )
             yield {
                 "type": "sidepanel",
                 "payload": {
@@ -1089,7 +1112,11 @@ class ChatService:
         filename: str | None,
         content_type: str | None,
     ) -> AsyncGenerator[dict, None]:
-        """普通图片或文件：附件已在表里，这里只把内容交给日常对话模型。"""
+        """普通图片或文件：附件已在表里，这里只把内容交给日常对话模型。
+
+        回复正文由 stream_llm_and_persist 落库。中断或失败标记 failed，
+        成功标记 succeeded，中断后仍 yield done。
+        """
         yield {"type": "text", "content": "按普通问题处理这份文件…\n\n"}
         mime = _guess_mime(file_bytes, content_type, filename)
         try:
@@ -1114,30 +1141,44 @@ class ChatService:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": _as_llm_message_content(content)},
         ]
-        assistant_content = ""
-        try:
-            async for chunk in llm_service.stream(
-                messages,
-                scene="chitchat",
-                db=db,
-                tenant_id=str(user.tenant_id),
-            ):
-                assistant_content += chunk
-                yield {"type": "text", "content": chunk}
-        except Exception as exc:
-            logger.exception("file chat failed")
+        # 正文由封装落库。error 留到 mark 之后再发，避免客户端停读时状态还没写上。
+        persist = StreamPersistResult()
+        error_event: dict | None = None
+
+        async def _on_interrupt() -> None:
+            """文件闲聊被取消时标失败，正常结束仍由循环后的分支标 succeeded。"""
+            await self._mark_upload_interrupted(db, file_id)
+
+        async for event in stream_llm_and_persist(
+            save_message=self.save_message,
+            db=db,
+            session_id=session_id,
+            tenant_id=user.tenant_id,
+            messages=messages,
+            scene="chitchat",
+            result=persist,
+            on_interrupt=_on_interrupt,
+            error_prefix="回复失败",
+        ):
+            if event.get("type") == "error":
+                error_event = event
+                continue
+            yield event
+
+        if persist.interrupted or error_event is not None:
+            error_message = str((error_event or {}).get("message") or "回复失败")
             await chat_file_service.mark(
-                db, file_id, recognize_status="failed", recognize_error=str(exc)
+                db,
+                file_id,
+                recognize_status="failed",
+                recognize_error=_persist_error_detail(error_message, "回复失败"),
             )
-            yield {"type": "error", "message": f"回复失败：{exc}"}
         else:
             await chat_file_service.mark(
                 db, file_id, recognize_status="succeeded", recognize_error=None
             )
-        if assistant_content.strip():
-            await self.save_message(
-                db, session_id, user.tenant_id, "assistant", assistant_content
-            )
+        if error_event is not None:
+            yield error_event
         yield {"type": "done"}
 
     async def lookup_archived_upload(
@@ -1275,10 +1316,11 @@ class ChatService:
         file_hash: str,
         file_meta: dict,
     ) -> AsyncGenerator[dict, None]:
-        """通用大模型识别图片/文件 + 侧栏 + 带结果回复。"""
-        from app.services.invoice_service import invoice_service
-        from app.services.invoice_vision_service import invoice_vision_service
+        """通用大模型识别图片/文件 + 侧栏 + 带结果回复。
 
+        尾部汇报走 stream_llm_and_persist。仅零 chunk 失败才落 fallback 全文，
+        且不标 interrupted；已有半截则保留，不再覆盖。
+        """
         archived = await invoice_service.get_archived_by_hash(
             db, user.tenant_id, file_hash, user=user
         )
@@ -1406,36 +1448,48 @@ class ChatService:
             {"role": "user", "content": reply_user},
         ]
 
-        assistant_content = ""
-        try:
-            async for chunk in llm_service.stream(
-                messages,
-                scene="chitchat",
-                db=db,
-                tenant_id=str(user.tenant_id),
-            ):
-                assistant_content += chunk
-                yield {"type": "text", "content": chunk}
-        except Exception as exc:
-            logger.exception("LLM reply after invoice failed")
-            # 至少给一段确定性摘要，避免空白
+        # 识别在汇报流之前已标 succeeded。断连只落半截助手消息，不回改附件、不补侧栏。
+        # 先吐正文。error 先扣住：零 chunk 时要先落 fallback 再发 error，避免客户端停读丢掉摘要。
+        persist = StreamPersistResult()
+        error_event: dict | None = None
+        async for event in stream_llm_and_persist(
+            save_message=self.save_message,
+            db=db,
+            session_id=session_id,
+            tenant_id=user.tenant_id,
+            messages=messages,
+            scene="chitchat",
+            result=persist,
+            error_prefix="AI 回复失败",
+        ):
+            if event.get("type") == "error":
+                error_event = event
+                continue
+            yield event
+
+        # 封装在零 chunk 失败时 interrupted 仍为 false；用「有 error 且未落库」识别
+        zero_chunk_failure = error_event is not None and not persist.saved
+        title_source = user_message or f"发票 {fields.get('invoice_number') or ''}"
+        if zero_chunk_failure:
             fallback = (
                 f"识别完成（来源：通用大模型）。\n"
                 f"{summary}\n\n请在右侧核对后确认归档。"
             )
-            assistant_content = fallback
-            yield {"type": "text", "content": fallback}
-            yield {"type": "error", "message": f"AI 回复失败：{exc}"}
-
-        if assistant_content.strip():
+            # 业务降级全文，不写 interrupted
             await self.save_message(
-                db, session_id, user.tenant_id, "assistant", assistant_content
+                db, session_id, user.tenant_id, "assistant", fallback
             )
+            yield {"type": "text", "content": fallback}
             if not session.title:
-                await self.auto_title(
-                    db, session, user_message or f"发票 {fields.get('invoice_number') or ''}"
-                )
+                await self.auto_title(db, session, title_source)
+        elif persist.interrupted and persist.saved:
+            # 已有半截 + interrupted，不用 fallback 覆盖
+            pass
+        elif persist.saved and not session.title:
+            await self.auto_title(db, session, title_source)
 
+        if error_event is not None:
+            yield error_event
         yield {"type": "done"}
 
 

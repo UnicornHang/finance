@@ -125,6 +125,11 @@ export function useChat() {
           }
           if (event.type === 'done') break
         }
+      } catch (err) {
+        if (accumulated.trim()) {
+          updateMessage(sessionId, assistantMsg.id, { content: accumulated })
+        }
+        console.error('[useChat] stream failed', err)
       } finally {
         if (frame !== 0) cancelAnimationFrame(frame)
         flush()

@@ -20,7 +20,7 @@ import { fileApi } from '@/api/file'
 import { documentKind } from '@/lib/sidePanelHistory'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
-import { readSearchSources } from '@/lib/messages'
+import { isInterruptedMessage, readSearchSources } from '@/lib/messages'
 import type { Message, MessageAttachment } from '@/types'
 
 import { Markdown } from './Markdown'
@@ -490,6 +490,10 @@ function MessageBubbleView({ message, onOpenDocument }: Props) {
                 </div>
               )}
             </div>
+          )}
+
+          {!isUser && isInterruptedMessage(message) && (
+            <p className="text-label-sm text-ink-tertiary">生成被中断</p>
           )}
 
           {isUser && (

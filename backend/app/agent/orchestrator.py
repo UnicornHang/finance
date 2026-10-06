@@ -24,6 +24,7 @@ from app.agent.tools.catalog import build_text_tools, persistable_tool_calls, pi
 from app.agent.upload_graph import get_upload_graph, upload_runtime
 from app.services.chat_file_service import chat_file_service
 from app.services.invoice_vision_service import invoice_vision_service
+from app.services.stream_persist import StreamPersistResult, stream_llm_and_persist
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,9 +55,6 @@ class AgentOrchestrator:
         related_history: str = "",
     ) -> AsyncGenerator[dict, None]:
         """跑图后把最终回复流式输出为 SSE dict。"""
-        # 从 chat_service 取 llm_service，便于测试 patch 同一绑定
-        from app.services.chat_service import llm_service
-
         if intent == Intent.CONFIRM_PENDING:
             async for event in service._stream_confirm_pending(
                 db, user, session_id, display_msg=display_msg, ctx=ctx
@@ -136,39 +134,28 @@ class AgentOrchestrator:
                     "sources": raw_sources,
                 }
 
-        assistant_content = ""
-        try:
-            async for chunk in llm_service.stream(
-                openai_messages,
-                scene=scene,
-                db=db,
-                tenant_id=str(user.tenant_id),
-            ):
-                assistant_content += chunk
-                yield {"type": "text", "content": chunk}
-        except Exception as exc:
-            logger.exception("graph LLM stream failed")
-            yield {"type": "error", "message": f"AI 调用失败：{exc}"}
-            if assistant_content:
-                await service.save_message(
-                    db,
-                    session_id,
-                    user.tenant_id,
-                    "assistant",
-                    assistant_content,
-                    tool_calls=search_trace,
-                )
+        # 助手消息只由封装落一条；出错或中断后不再发 done
+        persist = StreamPersistResult()
+        stream_failed = False
+        async for event in stream_llm_and_persist(
+            save_message=service.save_message,
+            db=db,
+            session_id=session_id,
+            tenant_id=user.tenant_id,
+            messages=openai_messages,
+            scene=scene,
+            base_tool_calls=search_trace,
+            result=persist,
+            error_prefix="AI 调用失败",
+        ):
+            if event.get("type") == "error":
+                stream_failed = True
+            yield event
+
+        if persist.interrupted or stream_failed:
             return
 
-        if assistant_content.strip():
-            await service.save_message(
-                db,
-                session_id,
-                user.tenant_id,
-                "assistant",
-                assistant_content,
-                tool_calls=search_trace,
-            )
+        if persist.saved and persist.content.strip():
             if not history or len(history) <= 1:
                 await service.auto_title(db, session, display_msg)
             title = _first_policy_title(tool_result)
