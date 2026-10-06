@@ -7,6 +7,7 @@
 - GET    /invoices/{invoice_id}               详情
 - PATCH  /invoices/{invoice_id}               编辑字段
 - POST   /invoices/{invoice_id}/confirm       pending_review → active
+- POST   /invoices/{invoice_id}/recognize     按原件重新识别字段
 - DELETE /invoices/{invoice_id}               软删
 - GET    /invoices/{invoice_id}/file          预签名下载 URL
 
@@ -254,6 +255,25 @@ async def confirm_invoice(
         fields=fields or None,
     )
     return _serialize(inv)
+
+
+@router.post("/{invoice_id}/recognize")
+async def rerecognize_invoice(
+    invoice_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """侧栏「重新识别」：按原件再跑一遍多模态抽取，覆盖字段。"""
+    from app.services.invoice_rerecognize import rerecognize_invoice
+
+    inv = await rerecognize_invoice(
+        db,
+        tenant_id=user.tenant_id,
+        user=user,
+        invoice_id=invoice_id,
+    )
+    archive_status = await invoice_service.sidepanel_archive_status(db, inv)
+    return _serialize(inv, archive_status=archive_status)
 
 
 @router.delete("/{invoice_id}")

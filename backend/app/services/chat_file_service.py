@@ -156,6 +156,28 @@ class ChatFileService:
             "contract_id": str(row.contract_id) if row.contract_id else None,
         }
 
+    async def latest_for_invoice(self, db: AsyncSession, invoice_id: UUID) -> ChatFile | None:
+        """发票档案关联的最近一条附件，用来取文件名和 MIME。"""
+        return (
+            await db.execute(
+                select(ChatFile)
+                .where(ChatFile.invoice_id == invoice_id)
+                .order_by(ChatFile.updated_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+
+    async def latest_for_contract(self, db: AsyncSession, contract_id: UUID) -> ChatFile | None:
+        """合同档案关联的最近一条附件。"""
+        return (
+            await db.execute(
+                select(ChatFile)
+                .where(ChatFile.contract_id == contract_id)
+                .order_by(ChatFile.updated_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+
     async def invoice_code_numbers(
         self, db: AsyncSession, rows: list[ChatFile]
     ) -> dict[UUID, tuple[str | None, str | None]]:

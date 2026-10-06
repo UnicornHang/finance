@@ -69,5 +69,26 @@ class StorageService:
         """删除文件。"""
         self.client.remove_object(bucket, object_name)
 
+    def download_bytes(self, file_url: str) -> bytes:
+        """从 s3://bucket/key 下载对象内容。"""
+        bucket, key = parse_s3_url(file_url)
+        obj = self.client.get_object(bucket_name=bucket, object_name=key)
+        try:
+            return obj.read()
+        finally:
+            obj.close()
+            obj.release_conn()
+
+
+def parse_s3_url(s3_url: str) -> tuple[str, str]:
+    """s3://bucket/key → (bucket, key)。"""
+    if not s3_url.startswith("s3://"):
+        raise ValueError(f"invalid s3 url: {s3_url}")
+    rest = s3_url[len("s3://") :]
+    bucket, _, key = rest.partition("/")
+    if not bucket or not key:
+        raise ValueError(f"invalid s3 url: {s3_url}")
+    return bucket, key
+
 
 storage_service = StorageService()

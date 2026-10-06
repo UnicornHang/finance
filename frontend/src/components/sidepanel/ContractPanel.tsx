@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { FileText, Loader2, RotateCw, ShieldAlert, X } from 'lucide-react'
+import { FileText, Loader2, RotateCw, ShieldAlert, AlertCircle, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Markdown } from '@/components/chat/Markdown'
@@ -10,18 +10,9 @@ import { Field } from '@/components/ui/surface'
 import { Badge } from '@/components/ui/badge'
 import { RiskBadge } from './RiskBadge'
 import { contractApi } from '@/api/contract'
+import { readApiMessage } from '@/lib/apiError'
 import { useUIStore } from '@/stores/uiStore'
 import { formatCurrency } from '@/lib/utils'
-
-/** 业务错误文案在 response.data.message。 */
-function readApiMessage(err: unknown): string | null {
-  if (!err || typeof err !== 'object' || !('response' in err)) return null
-  const data = (err as { response?: { data?: { message?: unknown; detail?: unknown } } }).response
-    ?.data
-  if (typeof data?.message === 'string' && data.message.trim()) return data.message
-  if (typeof data?.detail === 'string' && data.detail.trim()) return data.detail
-  return null
-}
 
 type ContractPanelData = {
   status?: 'processing' | 'ready' | string
@@ -36,6 +27,7 @@ type ContractPanelData = {
   file_hash?: string | null
   chat_file_id?: string | null
   contract_id?: string | null
+  id?: string | null
   /** pending=待确认归档；archived=已归档 */
   archive_status?: 'pending' | 'archived' | string | null
   message?: string
@@ -57,9 +49,10 @@ function guessRiskLevel(data: ContractPanelData): 'high' | 'medium' | 'low' {
 
 /** 合同面板：根据 sidePanelData 内容显示处理中态 / 审查结果，并支持确定归档。 */
 export function ContractPanel() {
-  const { sidePanelData, closeSidePanel, clearSidePanel } = useUIStore()
+  const { sidePanelData, closeSidePanel, clearSidePanel, openSidePanel } = useUIStore()
   const queryClient = useQueryClient()
   const [submitting, setSubmitting] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const data = (sidePanelData ?? null) as ContractPanelData | null
@@ -154,6 +147,43 @@ export function ContractPanel() {
       toast.error(msg)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const contractId = data.contract_id || data.id || null
+
+  /** 用同一份原件再跑审查，覆盖摘要和概览字段。 */
+  const onRereview = async () => {
+    if (!contractId) {
+      toast.error('缺少合同记录，请重新上传后再审查')
+      return
+    }
+    setRetrying(true)
+    setSubmitError(null)
+    try {
+      const row = await contractApi.reReview(contractId)
+      const archiveStatus =
+        row.status === 'active' || row.archive_status === 'archived'
+          ? 'archived'
+          : row.status === 'pending_review'
+            ? 'pending'
+            : row.status
+      openSidePanel('contract', {
+        ...row,
+        status: 'ready',
+        contract_id: row.id,
+        archive_status: archiveStatus,
+        chat_file_id: data.chat_file_id || null,
+        file_url: row.file_url || data.file_url,
+        file_hash: row.file_hash || data.file_hash,
+      })
+      toast.success('已按原件重新审查，请核对结果')
+    } catch (err: unknown) {
+      const msg = readApiMessage(err) || '重新审查失败'
+      setSubmitError(msg)
+      toast.error(msg)
+    } finally {
+      setRetrying(false)
     }
   }
 
@@ -328,26 +358,43 @@ export function ContractPanel() {
                 {submitError}
               </div>
             )}
+            {alreadyArchived && (
+              <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-tint px-3 py-2 text-body-sm text-warning">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>这份合同已经归档了，无需再次确认归档</span>
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <footer className="flex items-center gap-2 border-t border-line px-5 py-3">
-        <Button variant="ghost" size="md" type="button" disabled title="请重新上传合同以再次审查">
-          <RotateCw className="h-4 w-4" />
-          重新审查
-        </Button>
+        {!alreadyArchived && (
+          <Button
+            variant="ghost"
+            size="md"
+            type="button"
+            disabled={retrying || submitting || isProcessing || pipelineNotImplemented || !contractId}
+            onClick={() => void onRereview()}
+            title={contractId ? '按原件重新审查' : '缺少合同记录，请重新上传'}
+          >
+            {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+            {retrying ? '审查中...' : '重新审查'}
+          </Button>
+        )}
         <div className="flex-1" />
         <Button variant="secondary" onClick={closeSidePanel} type="button">
-          关闭
+          {alreadyArchived ? '关闭' : '取消'}
         </Button>
-        <Button
-          type="button"
-          disabled={isProcessing || pipelineNotImplemented || submitting || alreadyArchived}
-          onClick={() => void onArchive()}
-        >
-          {submitting ? '归档中...' : alreadyArchived ? '已归档' : '确定归档'}
-        </Button>
+        {!alreadyArchived && (
+          <Button
+            type="button"
+            disabled={isProcessing || pipelineNotImplemented || submitting || retrying}
+            onClick={() => void onArchive()}
+          >
+            {submitting ? '归档中...' : '确定归档'}
+          </Button>
+        )}
       </footer>
     </aside>
   )

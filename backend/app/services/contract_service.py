@@ -202,6 +202,21 @@ class ContractService:
             stmt = stmt.where(Contract.id != exclude_id)
         return (await db.execute(stmt)).scalars().first()
 
+    async def sidepanel_archive_status(self, db: AsyncSession, row: "Contract") -> str:
+        """侧栏归档态：本合同已归档，或档案里已有相同文件。"""
+        if row.status == "active":
+            return "archived"
+        if row.file_hash:
+            dup = await self._find_archived_by_hash(
+                db,
+                row.tenant_id,
+                row.file_hash,
+                exclude_id=row.id,
+            )
+            if dup is not None:
+                return "archived"
+        return "pending"
+
     def _build_pending_fields(self, data: dict[str, Any]) -> dict[str, Any]:
         """从审查/侧栏数据组装待归档字段（不含 tenant/user）。"""
         file_url = (data.get("file_url") or "").strip()
@@ -433,6 +448,55 @@ class ContractService:
         await db.commit()
         logger.info("contract confirmed id=%s hash=%s", row.id, (row.file_hash or "")[:12])
         await mark_contract_archived(db, row.id)
+        return row
+
+    async def refresh_review(
+        self,
+        db: AsyncSession,
+        *,
+        tenant_id: UUID,
+        user: "User",
+        contract_id: UUID,
+        data: dict[str, Any],
+        chat_file_id: UUID | None = None,
+    ) -> "Contract":
+        """用新审查结果覆盖指定合同；已归档只刷新内容，不改 status。"""
+        row = await self.get(db, tenant_id, contract_id, user=user)
+        before = _serialize_snapshot(row)
+        fields = self._build_pending_fields(data)
+        keep_status = row.status
+        for key, value in fields.items():
+            if key in {"status", "file_url", "file_hash"}:
+                continue
+            setattr(row, key, value)
+        if keep_status != "active":
+            row.status = "pending_review"
+        await db.flush()
+        await db.refresh(row)
+        await self._link_chat_file(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            chat_file_id=chat_file_id,
+            contract_id=row.id,
+        )
+        await write_audit_log(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            operation_type="contract.rereview",
+            target_type="contract",
+            target_id=row.id,
+            before=before,
+            after=_serialize_snapshot(row),
+        )
+        await db.commit()
+        logger.info(
+            "contract review refreshed: id=%s hash=%s status=%s",
+            row.id,
+            (row.file_hash or "")[:12],
+            row.status,
+        )
         return row
 
     async def soft_delete(

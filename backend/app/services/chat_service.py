@@ -161,28 +161,11 @@ def _format_rag_context(hits: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def _parse_s3_url(s3_url: str) -> tuple[str, str]:
-    """s3://bucket/key → (bucket, key)"""
-    if not s3_url.startswith("s3://"):
-        raise ValueError(f"invalid s3 url: {s3_url}")
-    rest = s3_url[len("s3://") :]
-    bucket, _, key = rest.partition("/")
-    if not bucket or not key:
-        raise ValueError(f"invalid s3 url: {s3_url}")
-    return bucket, key
-
-
 def _download_bytes(file_url: str) -> bytes:
     """从 MinIO 下载对象为 bytes。"""
     from app.services.storage_service import storage_service
 
-    bucket, key = _parse_s3_url(file_url)
-    obj = storage_service.client.get_object(bucket_name=bucket, object_name=key)
-    try:
-        return obj.read()
-    finally:
-        obj.close()
-        obj.release_conn()
+    return storage_service.download_bytes(file_url)
 
 
 def _result_to_fields(result) -> dict[str, Any]:
@@ -1011,6 +994,7 @@ class ChatService:
                 recognize_error=None,
             )
             await remember_contract_pending(db, session_id, pending.id)
+            archive_status = await contract_service.sidepanel_archive_status(db, pending)
         except Exception as exc:
             logger.exception("contract create_pending failed")
             await db.rollback()

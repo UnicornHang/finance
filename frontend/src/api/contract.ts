@@ -17,6 +17,7 @@ export const contractApi = {
   /** pending_review → active；最后一次编辑机会 */
   confirm: (id: string, data: Partial<Contract> = {}) =>
     apiClient.post<Contract>(`/contracts/${id}/confirm`, data).then((r) => r.data),
+  /** 按原件重新审查，覆盖摘要与概览字段 */
   reReview: (id: string) =>
     apiClient.post<Contract>(`/contracts/${id}/review`).then((r) => r.data),
   remove: (id: string) => apiClient.delete(`/contracts/${id}`),

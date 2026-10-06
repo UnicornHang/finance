@@ -3,6 +3,7 @@
 与发票一致：
 - 审查完成后写入 pending_review（Agent 不代替用户确认）
 - 用户在右侧栏点「确定归档」→ POST /{id}/confirm → active
+- 用户点「重新审查」→ POST /{id}/review，按原件再跑审查
 列表供管理后台「合同归档」使用。
 """
 
@@ -19,7 +20,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.exceptions import BusinessError
 from app.deps import get_current_user
 from app.models import User
 from app.services.contract_service import contract_service
@@ -58,7 +58,7 @@ class ContractConfirmRequest(BaseModel):
     key_clauses: str | None = None
 
 
-def _serialize(row) -> dict[str, Any]:
+def _serialize(row, archive_status: str | None = None) -> dict[str, Any]:
     """Contract → 前端 Contract 类型。"""
     return {
         "id": str(row.id),
@@ -74,6 +74,14 @@ def _serialize(row) -> dict[str, Any]:
         "review_result": row.review_result,
         "risk_level": row.risk_level,
         "status": row.status,
+        "archive_status": archive_status
+        or (
+            "archived"
+            if row.status == "active"
+            else "pending"
+            if row.status == "pending_review"
+            else row.status
+        ),
         "file_url": row.file_url,
         "file_hash": row.file_hash,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -114,7 +122,8 @@ async def archive_contract(
         chat_file_id=body.chat_file_id,
     )
     await db.commit()
-    return _serialize(row)
+    archive_status = await contract_service.sidepanel_archive_status(db, row)
+    return _serialize(row, archive_status=archive_status)
 
 
 @router.get("/{contract_id}")
@@ -125,7 +134,8 @@ async def get_contract(
 ):
     """合同详情 + 审查报告。"""
     row = await contract_service.get(db, user.tenant_id, contract_id, user=user)
-    return _serialize(row)
+    archive_status = await contract_service.sidepanel_archive_status(db, row)
+    return _serialize(row, archive_status=archive_status)
 
 
 @router.post("/{contract_id}/confirm")
@@ -144,13 +154,22 @@ async def confirm_contract(
         contract_id=contract_id,
         fields=fields or None,
     )
-    return _serialize(row)
+    archive_status = await contract_service.sidepanel_archive_status(db, row)
+    return _serialize(row, archive_status=archive_status)
 
 
 @router.post("/{contract_id}/review")
-async def re_review_contract(contract_id: UUID):
-    """重新审查合同（人工触发）。完整流水线后续迭代。"""
-    raise BusinessError("重新审查尚未开放，请重新上传合同", code="CONTRACT_REVIEW_TODO")
+async def re_review_contract(
+    contract_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """侧栏「重新审查」：按原件再跑一遍合规审查，覆盖摘要与概览字段。"""
+    from app.services.contract_rereview import rereview_contract
+
+    row = await rereview_contract(db, user, contract_id)
+    archive_status = await contract_service.sidepanel_archive_status(db, row)
+    return _serialize(row, archive_status=archive_status)
 
 
 @router.delete("/{contract_id}")

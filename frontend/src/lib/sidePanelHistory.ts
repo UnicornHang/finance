@@ -275,9 +275,9 @@ async function restoreContract(
       const contract = await contractApi.get(attachment.contract_id)
       if (isCancelled()) return
       const archiveStatus =
-        contract.status === 'active'
+        contract.archive_status === 'archived' || contract.status === 'active'
           ? 'archived'
-          : contract.status === 'pending_review'
+          : contract.archive_status === 'pending' || contract.status === 'pending_review'
             ? 'pending'
             : contract.status
       // 档案摘要若被确认接口脏写覆盖，优先用当轮助手回复展示

@@ -111,6 +111,8 @@ export interface Contract {
   review_result: { violations: Violation[]; risk_level: string; summary: string } | null
   risk_level: 'high' | 'medium' | 'low' | null
   status: string
+  /** 侧栏归档态：本合同已归档，或档案已有相同文件 */
+  archive_status?: 'pending' | 'archived' | string | null
   file_url: string | null
   file_hash: string | null
   created_at: string

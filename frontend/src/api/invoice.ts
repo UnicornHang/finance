@@ -93,6 +93,10 @@ export const invoiceApi = {
       .post<Invoice>(`/invoices/${id}/confirm`, data)
       .then((r) => r.data),
 
+  /** 按原件重新识别字段 */
+  rerecognize: (id: string) =>
+    apiClient.post<Invoice>(`/invoices/${id}/recognize`).then((r) => r.data),
+
   /** 前端轮询查 OCR 结果 */
   previewByHash: (fileHash: string) =>
     apiClient

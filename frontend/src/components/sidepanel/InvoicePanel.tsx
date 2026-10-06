@@ -27,64 +27,19 @@ import { Field } from '@/components/ui/surface'
 import { Badge } from '@/components/ui/badge'
 import { useUIStore, type InvoiceSidePanelData } from '@/stores/uiStore'
 import { invoiceApi } from '@/api/invoice'
+import { readApiMessage } from '@/lib/apiError'
 import { resolveInvoiceArchiveStatus } from '@/lib/sidePanelHistory'
 import { invoiceSchema, type InvoiceInput } from '@/lib/validators'
 import { formatCurrency } from '@/lib/utils'
+import { calcConfidence, pickInvoiceFields } from './invoicePanelModel'
 
 const POLL_INTERVAL_MS = 2000
 const POLL_MAX_ATTEMPTS = 30 // ~60s
 
-/** 业务错误文案在 response.data.message，不要回落到 Axios 的 status code 句子。 */
-function readApiMessage(err: unknown): string | null {
-  if (!err || typeof err !== 'object' || !('response' in err)) return null
-  const data = (err as { response?: { data?: { message?: unknown; detail?: unknown } } }).response
-    ?.data
-  if (typeof data?.message === 'string' && data.message.trim()) return data.message
-  if (typeof data?.detail === 'string' && data.detail.trim()) return data.detail
-  return null
-}
-
-/** 从 sidePanelData 中抽取可填入表单的发票字段。 */
-function pickInvoiceFields(data: InvoiceSidePanelData): Partial<InvoiceInput> {
-  const source = data as Partial<InvoiceInput> & Record<string, unknown>
-  const date = typeof source.invoice_date === 'string' ? source.invoice_date.slice(0, 10) : source.invoice_date
-  return {
-    invoice_title: source.invoice_title ?? '',
-    company: source.company ?? '',
-    tax_id: source.tax_id ?? '',
-    invoice_code: source.invoice_code ?? '',
-    invoice_number: source.invoice_number ?? '',
-    invoice_date: date ?? '',
-    amount_excl_tax: source.amount_excl_tax ?? undefined,
-    tax_amount: source.tax_amount ?? undefined,
-    amount_incl_tax: source.amount_incl_tax ?? undefined,
-    invoice_type: source.invoice_type ?? '',
-    seller: source.seller ?? '',
-    buyer: source.buyer ?? '',
-    remark: source.remark ?? '',
-  }
-}
-
-/** 处理中态平均置信度（按已有字段计算）。 */
-function calcConfidence(invoice: InvoiceInput | undefined): number | null {
-  if (!invoice) return null
-  // 简化：必填字段填了几个
-  const required: (keyof InvoiceInput)[] = [
-    'invoice_title',
-    'invoice_number',
-    'amount_incl_tax',
-    'invoice_date',
-  ]
-  const filled = required.filter((k) => {
-    const v = invoice[k]
-    return v !== undefined && v !== null && v !== ''
-  }).length
-  return filled / required.length
-}
-
 export function InvoicePanel() {
   const { sidePanelData, closeSidePanel, clearSidePanel, openSidePanel } = useUIStore()
   const [submitting, setSubmitting] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [pollAttempts, setPollAttempts] = useState(0)
   const [pollError, setPollError] = useState<string | null>(null)
@@ -106,8 +61,13 @@ export function InvoicePanel() {
     'invoice_id' in data &&
     typeof (data as { invoice_id?: string }).invoice_id === 'string'
 
-  const invoiceId =
-    isReady && 'invoice_id' in data ? (data.invoice_id as string) : undefined
+  const invoiceId = (() => {
+    if (!data || typeof data !== 'object') return undefined
+    const rec = data as { invoice_id?: unknown; id?: unknown }
+    if (typeof rec.invoice_id === 'string' && rec.invoice_id) return rec.invoice_id
+    if (typeof rec.id === 'string' && rec.id) return rec.id
+    return undefined
+  })()
 
   /** 已归档只展示核对结果，不再提供「确定归档」。 */
   const alreadyArchived =
@@ -213,6 +173,33 @@ export function InvoicePanel() {
       toast.error(msg)
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  /** 用同一张原件再跑一遍识别，覆盖侧栏字段。 */
+  const onRerecognize = async () => {
+    if (!invoiceId) {
+      toast.error('缺少发票记录，请重新上传后再识别')
+      return
+    }
+    setRetrying(true)
+    setSubmitError(null)
+    try {
+      const inv = await invoiceApi.rerecognize(invoiceId)
+      const archiveStatus = resolveInvoiceArchiveStatus(inv)
+      openSidePanel('invoice', {
+        ...inv,
+        status: 'ready',
+        invoice_id: inv.id,
+        archive_status: archiveStatus,
+      })
+      toast.success('已按原件重新识别，请核对字段')
+    } catch (err: unknown) {
+      const msg = readApiMessage(err) || '重新识别失败'
+      setSubmitError(msg)
+      toast.error(msg)
+    } finally {
+      setRetrying(false)
     }
   }
 
@@ -473,10 +460,19 @@ export function InvoicePanel() {
       {/* 底部 footer（仅 ready 显示操作按钮） */}
       {!isProcessing && (
         <footer className="flex items-center gap-2 border-t border-line px-5 py-3">
-          <Button variant="ghost" size="md" type="button">
-            <RotateCw className="h-4 w-4" />
-            重新识别
-          </Button>
+          {!alreadyArchived && (
+            <Button
+              variant="ghost"
+              size="md"
+              type="button"
+              disabled={retrying || submitting || !invoiceId}
+              onClick={() => void onRerecognize()}
+              title={invoiceId ? '按原件重新抽取字段' : '缺少发票记录，请重新上传'}
+            >
+              {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+              {retrying ? '识别中...' : '重新识别'}
+            </Button>
+          )}
           <div className="flex-1" />
           <Button variant="secondary" onClick={closeSidePanel} type="button">
             {alreadyArchived ? '关闭' : '取消'}
@@ -484,7 +480,7 @@ export function InvoicePanel() {
           {!alreadyArchived && (
             <Button
               onClick={form.handleSubmit(onSubmit)}
-              disabled={submitting}
+              disabled={submitting || retrying}
               type="button"
             >
               {submitting ? '归档中...' : '确定归档'}
