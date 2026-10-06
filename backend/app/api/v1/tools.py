@@ -18,7 +18,12 @@ from app.core.exceptions import BusinessError, ForbiddenError
 from app.core.security import decrypt_field
 from app.deps import get_current_user
 from app.models import User
-from app.services.tool_catalog import TOOL_CATALOG, get_tool_catalog
+from app.services.tool_catalog import (
+    TOOL_CATALOG,
+    TOOL_SEARCH_OFFICIAL_DATA,
+    get_tool_catalog,
+    normalize_tool_name,
+)
 from app.services.tool_config_service import is_placeholder_api_key, tool_config_service
 from app.services.web_search_service import web_search_service
 
@@ -33,7 +38,7 @@ class ToolConfigUpsert(BaseModel):
     base_url: str | None = None
     enabled: bool = False
     timeout_seconds: int = Field(default=15, ge=5, le=120)
-    max_results: int = Field(default=8, ge=1, le=20)
+    max_results: int = Field(default=16, ge=1, le=20)
     fetch_pages: int = Field(default=2, ge=0, le=5)
     fetch_max_chars: int = Field(default=4000, ge=500, le=20000)
 
@@ -55,10 +60,11 @@ def _require_admin(user: User) -> None:
 
 
 def _tool_or_400(tool_name: str) -> str:
-    """校验工具名。"""
-    if tool_name not in TOOL_CATALOG:
+    """校验工具名并规范成目录主 key。"""
+    canonical = normalize_tool_name(tool_name)
+    if canonical not in TOOL_CATALOG:
         raise BusinessError(f"未知工具：{tool_name}", code="UNKNOWN_TOOL")
-    return tool_name
+    return canonical
 
 
 @router.get("/catalog")
@@ -86,11 +92,11 @@ async def upsert_config(
 ):
     """新增或更新工具配置。"""
     _require_admin(user)
-    _tool_or_400(tool_name)
+    canonical = _tool_or_400(tool_name)
     cfg = await tool_config_service.upsert(
-        db, user.tenant_id, tool_name, payload.model_dump()
+        db, user.tenant_id, canonical, payload.model_dump()
     )
-    return tool_config_service.to_safe_dict(tool_name, cfg)
+    return tool_config_service.to_safe_dict(canonical, cfg)
 
 
 @router.post("/configs/{tool_name}/test")
@@ -101,9 +107,9 @@ async def test_saved_config(
 ):
     """用已保存配置测检索连通性。"""
     _require_admin(user)
-    _tool_or_400(tool_name)
+    canonical = _tool_or_400(tool_name)
     runtime = await tool_config_service.resolve_web_search(db, user.tenant_id)
-    if tool_name != "search_official_policy":
+    if canonical != TOOL_SEARCH_OFFICIAL_DATA:
         raise BusinessError("该工具暂不支持连通性测试", code="TEST_UNSUPPORTED")
     return await web_search_service.test_connectivity(runtime)
 

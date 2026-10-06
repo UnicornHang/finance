@@ -12,6 +12,7 @@ from app.agent.policy import POLICY_RAG_MIN_SCORE, TOOL_QUERY_POLICY, TOOL_SEARC
 from app.services.official_policy_service import (
     format_official_policy_context,
     official_policy_service,
+    sources_from_hits,
 )
 from app.services.rag_service import rag_service
 from app.services.tool_config_service import tool_config_service
@@ -72,27 +73,48 @@ def build_text_tools(
             score = h.get("score")
             score_s = f"{float(score):.3f}" if score is not None else "-"
             body = (h.get("content") or "").strip()
-            parts.append(f"[{i}] 《{title}》（类型:{doc_type}，相关度:{score_s}）\n{body}")
+            parts.append(
+                f"【制度{i}】 《{title}》（类型:{doc_type}，相关度:{score_s}）\n{body}"
+            )
         return "\n\n".join(parts)
 
-    async def search_official_policy(query: str) -> str:
-        """检索财政部、税务总局等权威网站的公开财税政策。不用于本公司差旅报销制度。"""
+    async def search_official_data(
+        query: str,
+        region: str | None = None,
+        period: str | None = None,
+        topic: str | None = None,
+    ) -> str:
+        """检索公开网页上的财税政策与财政数据（全网检索，官方来源优先展示）。
+
+        请尽量填写 region / period / topic。回答时请用 [n] 引用返回条目。
+        不用于本公司差旅报销制度，也不可假装完成发票查验或工商查询。
+        """
         try:
             runtime = await tool_config_service.resolve_web_search(db, tenant_id)
         except Exception:
             logger.exception("resolve web search config failed, fall back to env")
             runtime = WebSearchRuntime.from_settings()
         search_result = await official_policy_service.search_and_fetch(
-            query, runtime=runtime
+            query,
+            runtime=runtime,
+            region=region,
+            period=period,
+            topic=topic,
         )
+        hits = search_result.get("hits") or []
+        sources = search_result.get("sources") or sources_from_hits(hits)
         trace["search"] = {
             "tool": TOOL_SEARCH_OFFICIAL,
             "query": search_result.get("query"),
+            "region": region,
+            "period": period,
+            "topic": topic,
             "provider": search_result.get("provider"),
             "ok": search_result.get("ok"),
-            "hit_count": len(search_result.get("hits") or []),
+            "hit_count": len(hits),
             "fetched_count": len(search_result.get("pages") or []),
             "error": search_result.get("error"),
+            "sources": sources,
         }
         return format_official_policy_context(search_result)
 
@@ -103,9 +125,9 @@ def build_text_tools(
             description=query_policy.__doc__ or TOOL_QUERY_POLICY,
         ),
         StructuredTool.from_function(
-            coroutine=search_official_policy,
+            coroutine=search_official_data,
             name=TOOL_SEARCH_OFFICIAL,
-            description=search_official_policy.__doc__ or TOOL_SEARCH_OFFICIAL,
+            description=search_official_data.__doc__ or TOOL_SEARCH_OFFICIAL,
         ),
     ]
 

@@ -42,7 +42,7 @@ class WebSearchRuntime:
             api_key=(settings.web_search_api_key or "").strip(),
             base_url=(settings.web_search_base_url or "").strip(),
             timeout=int(settings.web_search_timeout or 15),
-            max_results=int(settings.web_search_max_results or 8),
+            max_results=int(settings.web_search_max_results or 16),
             fetch_pages=int(settings.web_search_fetch_pages or 0),
             fetch_max_chars=int(settings.web_search_fetch_max_chars or 4000),
         )
@@ -101,7 +101,7 @@ class WebSearchService:
             }
 
         provider: SearchProvider = rt.provider
-        limit = max_results or rt.max_results or 8
+        limit = max_results or rt.max_results or 16
         domains = include_domains or []
         try:
             if provider == "bocha":
@@ -164,7 +164,8 @@ class WebSearchService:
         payload = {
             "query": q,
             "count": limit,
-            "freshness": "oneYear",
+            # 官方统计稿常跨年发布；限制 oneYear 会漏掉已公布的财政数据
+            "freshness": "noLimit",
             "summary": True,
         }
         headers = {

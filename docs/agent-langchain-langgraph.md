@@ -29,9 +29,10 @@ TD 原文使用 LangChain `AgentExecutor`。本方案改为：
 ### 2.1 目标（B1）
 
 1. 无附件文本：`classify_intent` → 按意图绑定允许的工具 → LangGraph 循环（最多 2 轮 Tool）→ 流式回复。
-2. 只读工具仅两个：`query_policy`、`search_official_policy`。
-3. A 的硬门禁保留：公司制度不搜外网冒充规定；公开财税不锁进弱相关知识库；官方门户不调工具、不假装已查验；归档必须用户在侧栏确认。
+2. 只读工具仅两个：`query_policy`、`search_official_data`；`policy_query` / `public_tax` 均可调用二者。
+3. A 的硬门禁保留：公司制度不搜外网冒充规定；公开财税以权威站为主并可叠加知识库；官方门户不调工具、不假装已查验；归档必须用户在侧栏确认。
 4. 图失败或厂商不支持 function calling 时，回退现有 `_stream_text_intent`（A 管道）。
+5. 首轮未调工具时软提醒一轮，**不**强制补调。
 
 ### 2.2 非目标
 
@@ -85,14 +86,14 @@ B1 **不启用** Graph persist / checkpointer。
 
 | Intent | allowed_tools | 行为 |
 |---|---|---|
-| `policy_query` | `query_policy` | 低分/空库由工具返回「知识库暂无」；禁止改调搜索 |
-| `public_tax` | `search_official_policy` | 禁止 `query_policy` |
+| `policy_query` | `query_policy`, `search_official_data` | 默认偏知识库；可叠加官方；低分/空库不得用外网冒充公司制度 |
+| `public_tax` | `query_policy`, `search_official_data` | 默认偏官方；可叠加知识库对照公司执行 |
 | `official_portal` | `[]` | 只生成官方入口引导 |
 | `chitchat` | `[]` | B1 闲聊不开放工具，避免乱搜 |
 | `invoice_upload` | `[]` | 无附件：引导上传；有附件不进本图 |
 | `contract_upload` | `[]` | 同上 |
 
-工具节点二次校验：不在 `allowed_tools` 中的调用丢弃并打日志，本轮视为无工具。
+工具节点二次校验：不在 `allowed_tools` 中的调用丢弃并打日志。首轮无合法 call 时软提醒一轮，不强制补调。
 
 ---
 
@@ -103,7 +104,7 @@ B1 **不启用** Graph persist / checkpointer。
 | 工具名 | 调用 | 返回 | 注意 |
 |---|---|---|---|
 | `query_policy` | `rag_service.retrieve`，相关分 `< 0.35` 视为未命中 | 片段标题+正文，或「知识库暂无相关规定」 | 注入 `tenant_id`；不发外网 |
-| `search_official_policy` | `official_policy_service.search_and_fetch` + `format_official_policy_context` | 已格式化的权威资料（含失败「不得编造」） | 不在工具内直接写 SSE；由 Graph 在进入该节点时发 `status` |
+| `search_official_data` | `official_policy_service.search_and_fetch`（支持 region/period/topic）+ `format_official_policy_context` | 已格式化的权威资料（含失败「不得编造」） | 不在工具内直接写 SSE；由 Graph 在进入该节点时发 `status` |
 
 不提供发票真伪 / 工商公示 / 裁判文书查询工具。
 
@@ -115,7 +116,7 @@ B1 **不启用** Graph persist / checkpointer。
 
 | 图侧事件 | SSE |
 |---|---|
-| 进入 `search_official_policy` | `{type: "status", message: "正在按财政部、税务总局等权威网站检索…"}` |
+| 进入双源检索 | `{type: "status", message: "正在检索企业制度与权威网站…"}` |
 | 进入 `query_policy` | `{type: "status", message: "正在检索企业制度…"}` |
 | 模型文本流 | `{type: "text", content}` |
 | 异常 | `{type: "error", message}` |
@@ -166,8 +167,7 @@ B1 **不启用** Graph persist / checkpointer。
 
 | 用例 | 期望 |
 |---|---|
-| `policy_query` | 仅 `query_policy` |
-| `public_tax` | 仅 `search_official_policy` |
+| `policy_query` / `public_tax` | `query_policy` + `search_official_data` |
 | `official_portal` / `chitchat` / 无附件发票或合同 | 空列表 |
 
 ### 9.3 单测：工具
@@ -197,12 +197,12 @@ B1 **不启用** Graph persist / checkpointer。
 
 | 编号 | 给定 | 期望 |
 |---|---|---|
-| G1 | `policy_query` + RAG 高分 | 只执行 `query_policy`；最终文本含制度片段；搜索次数 = 0 |
-| G2 | `policy_query` + RAG 空 | 不调搜索；回复含「知识库暂无」 |
-| G3 | `public_tax` | 只执行搜索；事件含 `status`；落库 `tool_calls.tool == search_official_policy` |
+| G1 | `policy_query` + 模型调 `query_policy` + RAG 高分 | 执行知识库；最终文本含制度片段 |
+| G2 | `policy_query` + 首轮无 call | 软提醒一轮；仍无 call 则空工具结果，不 force |
+| G3 | `public_tax` + 模型调 `search_official_data` | 执行搜索；事件含 `status`；落库 `tool_calls.tool == search_official_data` |
 | G4 | `official_portal` | 工具次数 = 0；回复含查验/公示/文书/12366 URL |
-| G5 | `policy_query` 但模型仍 call 搜索 | 工具节点拒绝；不发起外网/搜索 mock |
-| G6 | 连续合法 tool_calls | 第 3 轮不再执行工具，进入 finalize |
+| G5 | `policy_query` + 模型调官方工具 | 允许执行（双源白名单） |
+| G6 | 同轮双工具合法 call | 两者均执行 |
 | G7 | `contract_upload` 无附件 | 不进工具；引导上传 |
 | G8 | adapter 抛错 | 回退 A 管道；仍有 `error` 或完整 `text`+`done`；进程不崩 |
 

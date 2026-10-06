@@ -1,4 +1,10 @@
-import type { ReactNode } from 'react'
+import {
+  cloneElement,
+  Fragment,
+  isValidElement,
+  useMemo,
+  type ReactNode,
+} from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -7,7 +13,13 @@ import { cn } from '@/lib/utils'
 interface Props {
   content: string
   className?: string
+  /** 可点击角标的合法序号（与来源条 index 一致） */
+  citeIndexes?: Set<number>
+  /** 正文 [n] 角标点击 */
+  onCiteClick?: (index: number) => void
 }
+
+const CITE_RE = /\[(\d{1,2})\]/g
 
 const HEADING_CLASS = {
   1: 'mt-3 mb-1.5 text-title-lg font-semibold first:mt-0',
@@ -17,14 +29,6 @@ const HEADING_CLASS = {
   5: 'mt-1.5 mb-0.5 text-body-md font-semibold first:mt-0',
   6: 'mt-1.5 mb-0.5 text-body-md font-semibold first:mt-0',
 } as const
-
-/** 标题样式与原先手写渲染保持一致。 */
-function heading(level: keyof typeof HEADING_CLASS): Components['h1'] {
-  const Tag = `h${level}` as 'h1'
-  return function Heading({ children }) {
-    return <Tag className={HEADING_CLASS[level]}>{children}</Tag>
-  }
-}
 
 /** 行内代码用浅底，围栏代码块由外层 pre 承担边框。 */
 function Code({ className, children }: { className?: string; children?: ReactNode }) {
@@ -37,56 +41,160 @@ function Code({ className, children }: { className?: string; children?: ReactNod
   )
 }
 
-const components: Components = {
-  h1: heading(1),
-  h2: heading(2),
-  h3: heading(3),
-  h4: heading(4),
-  h5: heading(5),
-  h6: heading(6),
-  p: ({ children }) => <p className="my-1.5 leading-relaxed first:mt-0 last:mb-0">{children}</p>,
-  ul: ({ children }) => (
-    <ul className="my-1.5 ml-5 list-disc space-y-0.5 marker:text-ink-tertiary">{children}</ul>
-  ),
-  ol: ({ children }) => (
-    <ol className="my-1.5 ml-5 list-decimal space-y-0.5 marker:text-ink-tertiary">{children}</ol>
-  ),
-  hr: () => <hr className="my-2 border-line" />,
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="text-primary underline underline-offset-2"
-    >
-      {children}
-    </a>
-  ),
-  blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-line pl-3 text-ink-secondary">{children}</blockquote>
-  ),
-  pre: ({ children }) => (
-    <pre className="my-2 overflow-x-auto rounded-md border border-line bg-canvas p-3 font-mono text-[0.9em] leading-relaxed">
-      {children}
-    </pre>
-  ),
-  code: Code,
-  table: ({ children }) => (
-    <div className="my-2 overflow-x-auto">
-      <table className="w-full border-collapse text-left text-body-sm">{children}</table>
-    </div>
-  ),
-  th: ({ children }) => (
-    <th className="border border-line bg-canvas px-2 py-1 font-semibold">{children}</th>
-  ),
-  td: ({ children }) => <td className="border border-line px-2 py-1">{children}</td>,
+/** 跳过 pre/code 与自定义 Code 内的 [n]，避免误把示例当成引用角标。 */
+function skipCiteTransform(node: ReactNode): boolean {
+  if (!isValidElement(node)) return false
+  const type = node.type
+  if (type === Code || type === 'code' || type === 'pre') return true
+  return false
+}
+
+/**
+ * 递归把正文中的 [n]（n∈citeIndexes）渲染为可点击角标；其余保持原文。
+ */
+export function renderWithCites(
+  children: ReactNode,
+  citeIndexes: Set<number> | undefined,
+  onCiteClick?: (index: number) => void,
+): ReactNode {
+  if (children == null || children === false) return children
+
+  if (typeof children === 'string') {
+    if (!citeIndexes?.size) return children
+    const parts: ReactNode[] = []
+    let lastIndex = 0
+    CITE_RE.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = CITE_RE.exec(children)) !== null) {
+      const n = Number(match[1])
+      const start = match.index
+      if (start > lastIndex) parts.push(children.slice(lastIndex, start))
+      if (citeIndexes.has(n)) {
+        parts.push(
+          <button
+            key={`cite-${start}-${n}`}
+            type="button"
+            className="mx-0.5 inline-flex rounded bg-primary/15 px-1 text-label-sm font-medium text-primary align-baseline hover:bg-primary/25"
+            onClick={() => onCiteClick?.(n)}
+            aria-label={`引用来源 ${n}`}
+          >
+            [{n}]
+          </button>,
+        )
+      } else {
+        parts.push(match[0])
+      }
+      lastIndex = start + match[0].length
+    }
+    if (lastIndex === 0) return children
+    if (lastIndex < children.length) parts.push(children.slice(lastIndex))
+    return parts.length === 1 ? parts[0] : parts
+  }
+
+  if (Array.isArray(children)) {
+    return children.map((child, i) => (
+      <Fragment key={i}>{renderWithCites(child, citeIndexes, onCiteClick)}</Fragment>
+    ))
+  }
+
+  if (isValidElement(children)) {
+    if (skipCiteTransform(children)) return children
+    const props = children.props as { children?: ReactNode }
+    if (props.children == null) return children
+    return cloneElement(
+      children,
+      {},
+      renderWithCites(props.children, citeIndexes, onCiteClick),
+    )
+  }
+
+  return children
+}
+
+/** 标题样式与原先手写渲染保持一致。 */
+function heading(
+  level: keyof typeof HEADING_CLASS,
+  wrap: (children: ReactNode) => ReactNode,
+): Components['h1'] {
+  const Tag = `h${level}` as 'h1'
+  return function Heading({ children }) {
+    return <Tag className={HEADING_CLASS[level]}>{wrap(children)}</Tag>
+  }
+}
+
+/** 按是否启用角标，生成 react-markdown 组件映射。 */
+function buildComponents(
+  citeIndexes: Set<number> | undefined,
+  onCiteClick?: (index: number) => void,
+): Components {
+  const wrap = (children: ReactNode) =>
+    renderWithCites(children, citeIndexes, onCiteClick)
+
+  return {
+    h1: heading(1, wrap),
+    h2: heading(2, wrap),
+    h3: heading(3, wrap),
+    h4: heading(4, wrap),
+    h5: heading(5, wrap),
+    h6: heading(6, wrap),
+    p: ({ children }) => (
+      <p className="my-1.5 leading-relaxed first:mt-0 last:mb-0">{wrap(children)}</p>
+    ),
+    ul: ({ children }) => (
+      <ul className="my-1.5 ml-5 list-disc space-y-0.5 marker:text-ink-tertiary">{children}</ul>
+    ),
+    ol: ({ children }) => (
+      <ol className="my-1.5 ml-5 list-decimal space-y-0.5 marker:text-ink-tertiary">{children}</ol>
+    ),
+    li: ({ children }) => <li>{wrap(children)}</li>,
+    hr: () => <hr className="my-2 border-line" />,
+    a: ({ href, children }) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="text-primary underline underline-offset-2"
+      >
+        {wrap(children)}
+      </a>
+    ),
+    blockquote: ({ children }) => (
+      <blockquote className="my-2 border-l-2 border-line pl-3 text-ink-secondary">
+        {wrap(children)}
+      </blockquote>
+    ),
+    pre: ({ children }) => (
+      <pre className="my-2 overflow-x-auto rounded-md border border-line bg-canvas p-3 font-mono text-[0.9em] leading-relaxed">
+        {children}
+      </pre>
+    ),
+    code: Code,
+    table: ({ children }) => (
+      <div className="my-2 overflow-x-auto">
+        <table className="w-full border-collapse text-left text-body-sm">{children}</table>
+      </div>
+    ),
+    th: ({ children }) => (
+      <th className="border border-line bg-canvas px-2 py-1 font-semibold">{wrap(children)}</th>
+    ),
+    td: ({ children }) => (
+      <td className="border border-line px-2 py-1">{wrap(children)}</td>
+    ),
+    strong: ({ children }) => <strong>{wrap(children)}</strong>,
+    em: ({ children }) => <em>{wrap(children)}</em>,
+  }
 }
 
 /**
  * 用 react-markdown 渲染模型回复。
  * 不启用 rehype-raw，模型输出里的 HTML 不会当成页面节点插入。
  */
-export function Markdown({ content, className }: Props) {
+export function Markdown({ content, className, citeIndexes, onCiteClick }: Props) {
+  const components = useMemo(
+    () => buildComponents(citeIndexes, onCiteClick),
+    [citeIndexes, onCiteClick],
+  )
+
   return (
     <div className={cn('text-body-md text-ink', className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>

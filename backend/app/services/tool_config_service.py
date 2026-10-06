@@ -14,7 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import BusinessError
 from app.core.security import decrypt_field, encrypt_field
 from app.models import ToolConfig
-from app.services.tool_catalog import TOOL_CATALOG, TOOL_SEARCH_OFFICIAL_POLICY
+from app.services.tool_catalog import (
+    TOOL_CATALOG,
+    TOOL_SEARCH_OFFICIAL_DATA,
+    TOOL_SEARCH_OFFICIAL_POLICY_LEGACY,
+    normalize_tool_name,
+)
 from app.services.web_search_service import SearchProvider, WebSearchRuntime
 
 logger = logging.getLogger(__name__)
@@ -63,22 +68,43 @@ class ToolConfigService:
             await db.rollback()
             return [self.to_safe_dict(name, None) for name in TOOL_CATALOG]
         by_name = {r.tool_name: r for r in rows}
-        return [
-            self.to_safe_dict(name, by_name.get(name))
-            for name in TOOL_CATALOG
-        ]
+        items: list[dict] = []
+        for name in TOOL_CATALOG:
+            row = by_name.get(name)
+            if row is None:
+                for legacy in TOOL_CATALOG[name].get("legacy_keys") or ():
+                    row = by_name.get(legacy)
+                    if row is not None:
+                        break
+            items.append(self.to_safe_dict(name, row))
+        return items
 
     async def get_row(
         self, db: AsyncSession, tenant_id: UUID, tool_name: str
     ) -> ToolConfig | None:
-        """读取单条库记录。"""
+        """读取单条库记录；新名未命中时回退旧工具名。"""
+        canonical = normalize_tool_name(tool_name)
         result = await db.execute(
             select(ToolConfig).where(
                 ToolConfig.tenant_id == tenant_id,
-                ToolConfig.tool_name == tool_name,
+                ToolConfig.tool_name == canonical,
             )
         )
-        return result.scalars().first()
+        row = result.scalars().first()
+        if row is not None:
+            return row
+        legacy_keys = (TOOL_CATALOG.get(canonical) or {}).get("legacy_keys") or ()
+        for legacy in legacy_keys:
+            result = await db.execute(
+                select(ToolConfig).where(
+                    ToolConfig.tenant_id == tenant_id,
+                    ToolConfig.tool_name == legacy,
+                )
+            )
+            row = result.scalars().first()
+            if row is not None:
+                return row
+        return None
 
     async def upsert(
         self,
@@ -88,6 +114,7 @@ class ToolConfigService:
         data: dict[str, Any],
     ) -> ToolConfig:
         """新增或更新。api_key 缺省/占位则保留原密文。"""
+        tool_name = normalize_tool_name(tool_name)
         if tool_name not in TOOL_CATALOG:
             raise BusinessError(f"未知工具：{tool_name}", code="UNKNOWN_TOOL")
         meta = TOOL_CATALOG[tool_name]
@@ -98,12 +125,14 @@ class ToolConfigService:
         existing = await self.get_row(db, tenant_id, tool_name)
         extra = {
             "timeout_seconds": int(data.get("timeout_seconds") or 15),
-            "max_results": int(data.get("max_results") or 8),
+            "max_results": int(data.get("max_results") or 16),
             "fetch_pages": int(data.get("fetch_pages") or 0),
             "fetch_max_chars": int(data.get("fetch_max_chars") or 4000),
         }
         raw_key = data.get("api_key")
         if existing:
+            # 统一写回规范工具名，逐步迁移旧 key
+            existing.tool_name = tool_name
             existing.provider = provider
             existing.base_url = data.get("base_url")
             existing.enabled = bool(data.get("enabled", existing.enabled))
@@ -139,20 +168,21 @@ class ToolConfigService:
             raise
         await db.refresh(cfg)
         self._invalidate_cache(tenant_id, tool_name)
+        self._invalidate_cache(tenant_id, TOOL_SEARCH_OFFICIAL_POLICY_LEGACY)
         return cfg
 
     async def resolve_web_search(
         self, db: AsyncSession, tenant_id: UUID
     ) -> WebSearchRuntime:
         """权威检索运行时配置：有库记录则覆盖 env，Key 缺失时仍可用 env。"""
-        cache_key = (str(tenant_id), TOOL_SEARCH_OFFICIAL_POLICY)
+        cache_key = (str(tenant_id), TOOL_SEARCH_OFFICIAL_DATA)
         now = time.time()
         cached = _config_cache.get(cache_key)
         if cached and (now - _cache_timestamps.get(cache_key, 0)) < _CACHE_TTL_SECONDS:
             return cached
 
         base = WebSearchRuntime.from_settings()
-        row = await self.get_row(db, tenant_id, TOOL_SEARCH_OFFICIAL_POLICY)
+        row = await self.get_row(db, tenant_id, TOOL_SEARCH_OFFICIAL_DATA)
         runtime = self._merge_web_search(base, row)
         _config_cache[cache_key] = runtime
         _cache_timestamps[cache_key] = now

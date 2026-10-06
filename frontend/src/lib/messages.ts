@@ -1,4 +1,4 @@
-import type { Message, MessageAttachment } from '@/types'
+import type { Message, MessageAttachment, WebSource } from '@/types'
 
 /** 从消息上取出附件：优先用 attachments，否则读 tool_calls.attachments。 */
 export function readAttachments(message: Message): MessageAttachment[] {
@@ -13,6 +13,27 @@ export function readAttachments(message: Message): MessageAttachment[] {
       typeof item === 'object' &&
       'file_url' in item &&
       typeof item.file_url === 'string',
+  )
+}
+
+/** 从 assistant.tool_calls 取出公开检索 sources（兼容仅 search / 双工具嵌套）。 */
+export function readSearchSources(message: Message): WebSource[] {
+  const tc = message.tool_calls
+  if (!tc || typeof tc !== 'object') return []
+  const nested = tc.search
+  const block =
+    nested && typeof nested === 'object'
+      ? (nested as Record<string, unknown>)
+      : tc.tool === 'search_official_data'
+        ? tc
+        : null
+  if (!block || !Array.isArray(block.sources)) return []
+  return block.sources.filter(
+    (s): s is WebSource =>
+      !!s &&
+      typeof s === 'object' &&
+      typeof (s as WebSource).index === 'number' &&
+      typeof (s as WebSource).url === 'string',
   )
 }
 

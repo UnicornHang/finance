@@ -7,19 +7,24 @@ from contextvars import ContextVar
 from typing import Any, TypedDict
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.llm_adapter import ChatFinanceLLM
 from app.agent.observe import record
-from app.agent.policy import MAX_TOOL_ROUNDS, TOOL_QUERY_POLICY, tools_for_intent
+from app.agent.policy import MAX_TOOL_ROUNDS, TOOL_QUERY_POLICY, TOOL_SEARCH_OFFICIAL, tools_for_intent
 from app.agent.router import Intent
 
 logger = logging.getLogger(__name__)
 
 # 本请求的 llm / tools，避免依赖 LangGraph 是否把 config 传进节点
 graph_runtime: ContextVar[dict[str, Any]] = ContextVar("text_agent_runtime")
+
+_SOFT_REMIND_TEXT = (
+    "若问题依赖企业制度或权威公开数据，请调用 query_policy 和/或 search_official_data，"
+    "并尽量填写 region/period/topic；不要直接臆造最新官方数据或财政数字。"
+)
 
 
 class AgentState(TypedDict, total=False):
@@ -32,6 +37,8 @@ class AgentState(TypedDict, total=False):
     pending_calls: list[dict]
     tool_result: str
     messages: list[BaseMessage]
+    soft_reminded: bool
+    retry_agent: bool
 
 
 def _runtime() -> dict[str, Any]:
@@ -53,6 +60,8 @@ def _arg_for_tool(name: str, display_msg: str, args: dict | None) -> dict:
         return args
     if name == TOOL_QUERY_POLICY:
         return {"question": display_msg}
+    if name == TOOL_SEARCH_OFFICIAL:
+        return {"query": display_msg}
     return {"query": display_msg}
 
 
@@ -64,6 +73,8 @@ async def gate_node(state: AgentState) -> dict:
         "tool_round": int(state.get("tool_round") or 0),
         "pending_calls": [],
         "tool_result": state.get("tool_result") or "",
+        "soft_reminded": bool(state.get("soft_reminded")),
+        "retry_agent": False,
     }
 
 
@@ -75,7 +86,7 @@ def after_gate(state: AgentState) -> str:
 
 
 async def agent_node(state: AgentState) -> dict:
-    """绑白名单工具调用模型；无合法 call 时强制补调一次。"""
+    """绑白名单工具调用模型；首轮无合法 call 时软提醒一轮，不强制补调。"""
     rt = _runtime()
     llm: ChatFinanceLLM = rt["llm"]
     tools: list[BaseTool] = rt.get("bound_tools") or []
@@ -84,6 +95,7 @@ async def agent_node(state: AgentState) -> dict:
     round_n = int(state.get("tool_round") or 0)
     display_msg = state.get("display_msg") or ""
     already = (state.get("tool_result") or "").strip()
+    soft_reminded = bool(state.get("soft_reminded"))
 
     bind = [t for t in tools if t.name in set(allowed)] if allowed and not already else []
     ai: AIMessage = await llm.ainvoke(messages, tools=bind or None)
@@ -102,41 +114,31 @@ async def agent_node(state: AgentState) -> dict:
         else:
             logger.warning("drop illegal tool call name=%s allowed=%s", name, allowed)
 
-    forced = False
-    if not legal and allowed and round_n == 0 and not already:
-        name = allowed[0]
-        legal = [
-            {
-                "id": "forced-" + name,
-                "name": name,
-                "args": _arg_for_tool(name, display_msg, None),
-            }
-        ]
-        forced = True
-        logger.info("force tool %s for intent=%s", name, state.get("intent"))
-        record(
-            "force_tool",
-            tool=name,
-            intent=str(state.get("intent") or ""),
-        )
-
     if legal and round_n >= MAX_TOOL_ROUNDS:
         logger.info("max tool rounds reached, ignore further calls")
         legal = []
-        forced = False
 
-    if forced:
-        ai = AIMessage(
-            content="",
-            tool_calls=[
-                {"id": c["id"], "name": c["name"], "args": c["args"]} for c in legal
-            ],
+    # 首轮无合法工具调用：软提醒一次，不 force
+    if not legal and allowed and not soft_reminded and not already:
+        record(
+            "soft_remind",
+            intent=str(state.get("intent") or ""),
+            allowed=",".join(allowed),
         )
+        return {
+            "messages": messages + [ai, SystemMessage(content=_SOFT_REMIND_TEXT)],
+            "pending_calls": [],
+            "tool_round": round_n,
+            "soft_reminded": True,
+            "retry_agent": True,
+        }
 
     return {
         "messages": messages + [ai],
         "pending_calls": legal,
         "tool_round": round_n + (1 if legal else 0),
+        "soft_reminded": soft_reminded,
+        "retry_agent": False,
     }
 
 
@@ -182,13 +184,16 @@ async def tools_node(state: AgentState) -> dict:
         "messages": messages,
         "tool_result": "\n\n".join(c for c in chunks if c).strip(),
         "pending_calls": [],
+        "retry_agent": False,
     }
 
 
 def after_agent(state: AgentState) -> str:
-    """有待执行工具则进 tools，否则结束（最终生成在编排器流式完成）。"""
+    """有待执行工具进 tools；软提醒则再入 agent；否则结束。"""
     if state.get("pending_calls"):
         return "tools"
+    if state.get("retry_agent"):
+        return "agent"
     return "finalize"
 
 
@@ -213,7 +218,7 @@ def build_text_graph():
     graph.add_conditional_edges(
         "agent",
         after_agent,
-        {"tools": "tools", "finalize": "finalize"},
+        {"tools": "tools", "agent": "agent", "finalize": "finalize"},
     )
     graph.add_edge("tools", "finalize")
     graph.add_edge("finalize", END)

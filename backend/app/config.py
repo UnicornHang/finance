@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     web_search_api_key: str = ""
     web_search_base_url: str = ""
     web_search_timeout: int = 15
-    web_search_max_results: int = 8
+    web_search_max_results: int = 16
     # 检索命中后抓取前 N 条官方页面正文；0 = 只用不摘要
     web_search_fetch_pages: int = 2
     web_search_fetch_max_chars: int = 4000

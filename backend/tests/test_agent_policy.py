@@ -4,17 +4,18 @@ from app.agent.policy import (
     TOOL_QUERY_POLICY,
     TOOL_SEARCH_OFFICIAL,
     effective_intent,
+    status_event_for_tools,
     tools_for_intent,
 )
 from app.agent.router import Intent
 
 
-def test_policy_query_only_knowledge_tool():
-    assert tools_for_intent(Intent.POLICY_QUERY) == [TOOL_QUERY_POLICY]
-
-
-def test_public_tax_only_search_tool():
-    assert tools_for_intent(Intent.PUBLIC_TAX) == [TOOL_SEARCH_OFFICIAL]
+def test_policy_and_public_tax_share_both_tools():
+    """制度与公开财税均开放知识库与官方检索。"""
+    both = [TOOL_QUERY_POLICY, TOOL_SEARCH_OFFICIAL]
+    assert tools_for_intent(Intent.POLICY_QUERY) == both
+    assert tools_for_intent(Intent.PUBLIC_TAX) == both
+    assert TOOL_SEARCH_OFFICIAL == "search_official_data"
 
 
 def test_portal_and_chitchat_have_no_tools():
@@ -30,3 +31,19 @@ def test_effective_intent_does_not_open_chitchat_tools():
     intent = effective_intent(Intent.CHITCHAT, None, "今天天气怎么样")
     assert intent == Intent.CHITCHAT
     assert tools_for_intent(intent) == []
+
+
+def test_status_event_for_official_search_only():
+    """仅官方检索时使用联网搜索 status 文案。"""
+    assert status_event_for_tools([TOOL_SEARCH_OFFICIAL]) == {
+        "type": "status",
+        "message": "正在联网搜索…",
+    }
+
+
+def test_status_event_for_dual_tools():
+    """双工具白名单使用合并 status 文案。"""
+    assert status_event_for_tools([TOOL_QUERY_POLICY, TOOL_SEARCH_OFFICIAL]) == {
+        "type": "status",
+        "message": "正在检索企业制度并联网搜索…",
+    }

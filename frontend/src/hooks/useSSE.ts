@@ -102,6 +102,15 @@ export function useChat() {
                 updateMessage(sessionId, assistantMsg.id, { content: event.message })
               }
               break
+            case 'sources':
+              updateMessage(sessionId, assistantMsg.id, {
+                tool_calls: {
+                  tool: 'search_official_data',
+                  hit_count: event.hit_count,
+                  sources: event.sources,
+                },
+              })
+              break
             case 'sidepanel':
               openSidePanel(event.payload.type, event.payload.data)
               break

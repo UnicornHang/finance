@@ -28,6 +28,7 @@ async def test_query_policy_high_score():
         mock_rag.retrieve = AsyncMock(return_value=hits)
         tools = build_text_tools(MagicMock(), "tenant", trace)
         text = await _tool(tools, TOOL_QUERY_POLICY).ainvoke({"question": "差旅"})
+    assert "【制度1】" in text
     assert "差旅补贴管理办法" in text
     assert "住宿上限 500" in text
     assert trace["policy"]["tool"] == TOOL_QUERY_POLICY
@@ -51,7 +52,7 @@ async def test_query_policy_low_score_is_empty():
 
 
 @pytest.mark.asyncio
-async def test_search_official_policy_formats_and_traces():
+async def test_search_official_data_formats_and_traces():
     """搜索成功写入 trace，并带上标题与链接。"""
     payload = {
         "ok": True,
@@ -74,11 +75,27 @@ async def test_search_official_policy_formats_and_traces():
         with patch("app.agent.tools.catalog.official_policy_service") as mock_pol:
             mock_pol.search_and_fetch = AsyncMock(return_value=payload)
             tools = build_text_tools(MagicMock(), "tenant", trace)
-            text = await _tool(tools, TOOL_SEARCH_OFFICIAL).ainvoke({"query": "增值税"})
+            text = await _tool(tools, TOOL_SEARCH_OFFICIAL).ainvoke(
+                {
+                    "query": "增值税",
+                    "region": "广东",
+                    "period": "2026",
+                    "topic": "tax",
+                }
+            )
     assert "总局公告" in text
     assert "https://www.chinatax.gov.cn/a" in text
+    assert TOOL_SEARCH_OFFICIAL == "search_official_data"
     assert trace["search"]["tool"] == TOOL_SEARCH_OFFICIAL
     assert trace["search"]["ok"] is True
+    assert trace["search"]["region"] == "广东"
+    assert trace["search"]["sources"][0]["index"] == 1
+    assert trace["search"]["sources"][0]["url"] == "https://www.chinatax.gov.cn/a"
+    mock_pol.search_and_fetch.assert_awaited()
+    kwargs = mock_pol.search_and_fetch.await_args.kwargs
+    assert kwargs.get("region") == "广东"
+    assert kwargs.get("period") == "2026"
+    assert kwargs.get("topic") == "tax"
 
 
 def test_pick_tools_filters_allowlist():

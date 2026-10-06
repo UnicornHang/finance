@@ -50,6 +50,20 @@ async def test_classify_low_confidence_falls_back_heuristic():
 
 
 @pytest.mark.asyncio
+async def test_public_fiscal_data_uses_llm_classification():
+    """地方财政数据由模型识别为公开财税，不使用硬规则覆盖。"""
+    with patch("app.agent.router.llm_service") as mock_llm:
+        mock_llm.invoke = AsyncMock(
+            return_value='{"intent":"public_tax","confidence":0.96}'
+        )
+        decision = await classify_intent("2026广东省一季度财政")
+
+    assert decision.intent == Intent.PUBLIC_TAX
+    assert decision.source == IntentSource.LLM
+    assert decision.confidence == pytest.approx(0.96)
+
+
+@pytest.mark.asyncio
 async def test_classify_invalid_json_falls_back_heuristic():
     """演示模式或非 JSON 输出走启发。"""
     with patch("app.agent.router.llm_service") as mock_llm:

@@ -13,7 +13,11 @@ from app.agent.llm_adapter import ChatFinanceLLM, history_to_messages
 from app.agent.memory import set_last_intent
 from app.agent.memory.entities import remember_policy_title
 from app.agent.observe import record
-from app.agent.policy import status_event_for_tools, tools_for_intent
+from app.agent.policy import (
+    TOOL_SEARCH_OFFICIAL,
+    status_event_for_tools,
+    tools_for_intent,
+)
 from app.agent.router import Intent
 from app.agent.tools.catalog import build_text_tools, persistable_tool_calls, pick_tools
 from app.agent.upload_graph import get_upload_graph, upload_runtime
@@ -113,6 +117,21 @@ class AgentOrchestrator:
             tenant_id=str(user.tenant_id),
         )
         search_trace = persistable_tool_calls(trace)
+        search_block = None
+        if isinstance(search_trace, dict):
+            search_block = search_trace.get("search") or (
+                search_trace
+                if search_trace.get("tool") == TOOL_SEARCH_OFFICIAL
+                else None
+            )
+        if isinstance(search_block, dict):
+            raw_sources = search_block.get("sources") or []
+            if isinstance(raw_sources, list) and raw_sources:
+                yield {
+                    "type": "sources",
+                    "hit_count": int(search_block.get("hit_count") or len(raw_sources)),
+                    "sources": raw_sources,
+                }
 
         assistant_content = ""
         try:
@@ -167,6 +186,7 @@ class AgentOrchestrator:
             POLICY_SYSTEM_PROMPT,
             PORTAL_SYSTEM_PROMPT,
             PUBLIC_TAX_SYSTEM_PROMPT,
+            current_date_instruction,
         )
 
         match intent:
@@ -196,9 +216,13 @@ class AgentOrchestrator:
                 return (
                     POLICY_SYSTEM_PROMPT,
                     (
+                        f"{current_date_instruction()}\n\n"
                         f"{display_msg}\n\n"
-                        "请调用 query_policy 查询企业知识库后再答；"
-                        "若工具表明暂无规定，明确告知知识库暂无，禁止用外网冒充公司制度。"
+                        "可调用 query_policy（企业知识库）和/或 search_official_data（权威公开数据）。"
+                        "公司内部制度、差旅报销、补贴优先 query_policy；"
+                        "国家/地方公开政策或财政数据用 search_official_data，并尽量填写 region/period/topic；"
+                        "需要对照时两者都可调用。"
+                        "若知识库暂无规定，明确告知，禁止用外网冒充公司制度。"
                     ),
                     "policy_query",
                 )
@@ -206,9 +230,12 @@ class AgentOrchestrator:
                 return (
                     PUBLIC_TAX_SYSTEM_PROMPT,
                     (
+                        f"{current_date_instruction()}\n\n"
                         f"{display_msg}\n\n"
-                        "请调用 search_official_policy 按权威网站列表检索后再答；"
-                        "用「我根据常用的权威网站列表查了一下」过渡。"
+                        "可调用 search_official_data（权威公开数据）和/或 query_policy（企业知识库）。"
+                        "国家/地方公开政策、财政收支、预算执行优先 search_official_data，"
+                        "并尽量填写 region/period/topic；若还需对照本公司执行口径可再调 query_policy。"
+                        "用「我联网查了公开网页，并优先采信权威官方来源」过渡；禁止臆造文号与财政数字。"
                     ),
                     "chitchat",
                 )
@@ -235,42 +262,142 @@ class AgentOrchestrator:
         ctx: SessionContext | None = None,
     ) -> tuple[list[dict], str]:
         """根据工具结果组装最终流式消息（与 A 管道约束对齐）。"""
-        from app.services.chat_service import POLICY_SYSTEM_PROMPT, PUBLIC_TAX_SYSTEM_PROMPT
+        from app.services.chat_service import (
+            POLICY_SYSTEM_PROMPT,
+            PUBLIC_TAX_SYSTEM_PROMPT,
+            current_date_instruction,
+        )
+
+        def _source_flags(text: str) -> tuple[bool, bool]:
+            """粗分知识库块与官方块是否出现。"""
+            body = text or ""
+            has_policy = (
+                "相关度:" in body
+                or ("《" in body and "知识库暂无" not in body[:80])
+                or "知识库暂无" in body
+            )
+            has_official = any(
+                marker in body
+                for marker in (
+                    "权威官网",
+                    "权威站点",
+                    "专业参考平台",
+                    "【原文",
+                    "未在财政部",
+                    "不得编造",
+                )
+            )
+            return has_policy, has_official
+
+        def _policy_usable(text: str) -> bool:
+            """知识库是否有可引用正文（非空库提示）。"""
+            if not text:
+                return False
+            if "知识库暂无" in text and "相关度:" not in text:
+                return False
+            return "相关度:" in text or "《" in text
+
+        _citation_rule = (
+            "公开网页资料按 [1][2]… 编号，企业制度资料按 【制度1】【制度2】… 编号；"
+            "回答中对关键数字、文号、结论请标注对应编号；"
+            "公开数据优先采信标注为权威官网的条目；禁止编造资料中未出现的数字。"
+        )
+
+        def _official_usable(text: str) -> bool:
+            """官方检索是否有可引用命中。"""
+            if not text:
+                return False
+            if "未检索到" in text or "检索失败" in text or "未在财政部" in text:
+                if "权威官网" not in text and "公开网页摘要" not in text:
+                    return False
+            return any(
+                m in text
+                for m in (
+                    "权威官网",
+                    "专业参考平台",
+                    "公开网页摘要",
+                    "【原文",
+                    "链接:",
+                )
+            )
 
         match intent:
-            case Intent.POLICY_QUERY:
-                empty = (not tool_result) or ("知识库暂无" in tool_result[:200])
-                if empty:
-                    system_prompt = await service._effective_system_prompt(
-                        db, user.tenant_id, "chitchat"
+            case Intent.POLICY_QUERY | Intent.PUBLIC_TAX:
+                has_policy, has_official = _source_flags(tool_result)
+                policy_ok = _policy_usable(tool_result)
+                official_ok = _official_usable(tool_result)
+
+                if policy_ok and official_ok:
+                    primary = (
+                        "先回应用户主诉求，再补充对照；"
+                        "禁止把官方标准说成「本公司规定」，也禁止把公司制度说成国家法规。"
                     )
-                    system_prompt = (
-                        f"{system_prompt}\n\n"
-                        "用户在问企业制度/补贴标准，但当前知识库未召回足够相关内容。"
-                        "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
-                        "不要用外部机关参考标准冒充本公司规定。"
+                    if intent == Intent.PUBLIC_TAX:
+                        system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
+                        scene = "chitchat"
+                        lead = (
+                            "请用「我联网查了公开网页，并优先采信权威官方来源」自然过渡，"
+                            "再按核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
+                            "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
+                        )
+                    else:
+                        system_prompt = POLICY_SYSTEM_PROMPT
+                        scene = "policy_query"
+                        lead = "请基于资料作答；公司执行口径以知识库为准。"
+                    user_content = (
+                        f"{current_date_instruction()}\n\n"
+                        f"【检索资料（可能含企业制度与权威网站）】\n{tool_result}\n\n"
+                        f"【用户问题】\n{display_msg}\n\n"
+                        f"{lead}{primary}\n{_citation_rule}"
                     )
-                    user_content = display_msg
-                    scene = "chitchat"
-                else:
+                elif policy_ok:
                     system_prompt = POLICY_SYSTEM_PROMPT
                     user_content = (
                         f"【知识库参考资料】\n{tool_result}\n\n"
                         f"【用户问题】\n{display_msg}\n\n"
                         "请基于参考资料作答；若资料不足以回答，请直接说明知识库暂无相关规定。"
+                        "不要把外部机关标准冒充本公司规定。"
                     )
                     scene = "policy_query"
-            case Intent.PUBLIC_TAX:
-                system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
-                context = tool_result or "（未检索到资料）"
-                user_content = (
-                    f"【权威网站检索资料】\n{context}\n\n"
-                    f"【用户问题】\n{display_msg}\n\n"
-                    "请用「我根据常用的权威网站列表查了一下」自然过渡，再按"
-                    "核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
-                    "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
-                )
-                scene = "chitchat"
+                elif official_ok:
+                    system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
+                    user_content = (
+                        f"{current_date_instruction()}\n\n"
+                        f"【权威网站检索资料】\n{tool_result}\n\n"
+                        f"【用户问题】\n{display_msg}\n\n"
+                        "请用「我联网查了公开网页，并优先采信权威官方来源」自然过渡，再按"
+                        "核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
+                        "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
+                        "若用户还问本公司制度而资料中没有，明确说明未查到公司制度。"
+                        "资料里若已有全国一般公共预算等数字，必须引用，禁止声称尚未公布；"
+                        "不要用地市财政局材料冒充全国数据。"
+                        f"\n{_citation_rule}"
+                    )
+                    scene = "chitchat"
+                else:
+                    system_prompt = await service._effective_system_prompt(
+                        db, user.tenant_id, "chitchat"
+                    )
+                    if intent == Intent.POLICY_QUERY and (
+                        has_policy or not tool_result
+                    ):
+                        system_prompt = (
+                            f"{system_prompt}\n\n"
+                            "用户在问企业制度/补贴标准，但当前知识库未召回足够相关内容。"
+                            "请明确告知「知识库暂无相关制度」，可建议管理员在后台上传后重试；"
+                            "不要用外部机关参考标准冒充本公司规定。"
+                        )
+                    else:
+                        system_prompt = (
+                            f"{system_prompt}\n\n"
+                            f"{current_date_instruction()}\n"
+                            "本轮未取得可用的企业制度或权威网站资料。"
+                            "请明确告知暂无可靠检索结果，禁止编造税率、文号、财政数字或公司规定。"
+                            "不要臆测「数据尚未发布」——除非检索资料里明确写了发布时间或未公布说明；"
+                            "可给出财政部、中国政府网等可自行查阅的入口。"
+                        )
+                    user_content = display_msg
+                    scene = "chitchat"
             case (
                 Intent.CHITCHAT
                 | Intent.OFFICIAL_PORTAL

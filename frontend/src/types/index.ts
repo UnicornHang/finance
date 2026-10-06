@@ -348,10 +348,22 @@ export interface DashboardOverview {
   }
 }
 
+/** 公开检索 / SSE sources 事件中的单条引用。 */
+export interface WebSource {
+  index: number
+  title: string
+  url: string
+  snippet?: string
+  source_kind?: 'official' | 'supplemental' | 'web' | string
+  favicon_host?: string
+  published_at?: string
+}
+
 // SSE 事件类型
 export type StreamEvent =
   | { type: 'text'; content: string; session_id?: string }
   | { type: 'status'; message: string }
+  | { type: 'sources'; hit_count: number; sources: WebSource[] }
   | {
       type: 'sidepanel'
       payload: {

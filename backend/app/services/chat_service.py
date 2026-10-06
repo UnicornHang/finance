@@ -5,6 +5,7 @@
 上传发票时由通用多模态大模型识别图片/文件 → 入库侧栏 → 模型带着结果回复。不使用 OCR。
 """
 
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import TYPE_CHECKING, AsyncGenerator, Any
 from uuid import UUID
@@ -46,6 +47,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_CHINA_TIMEZONE = timezone(timedelta(hours=8))
+
+
+def current_date_instruction() -> str:
+    """生成公开数据回答使用的北京时间约束，避免模型误报当前年份。"""
+    current_date = datetime.now(_CHINA_TIMEZONE).date().isoformat()
+    return (
+        f"【当前日期】{current_date}（北京时间）。"
+        "不得把模型知识截止日期当作当前日期；只按检索资料判断文件是否已发布。"
+    )
+
 
 # 场景未配置 system_prompt 时的默认人设（对齐 docs/provide.md）。
 SYSTEM_PROMPT = """你叫MoFan，是魔方财务科技旗下一位资深的财税顾问机器人。
@@ -55,7 +67,7 @@ SYSTEM_PROMPT = """你叫MoFan，是魔方财务科技旗下一位资深的财�
 1. 识别并归档发票（用户上传发票图片/PDF）
 2. 审查合同合规性
 3. 回答企业制度问题（企业知识库）
-4. 查询最新公开财税政策（系统会按权威网站列表检索并注入资料，请把注入结果当作已完成的官方查询）
+4. 查询最新公开财税政策（系统会联网检索公开网页并注入资料，请优先采信权威官方来源，把注入结果当作已完成的检索）
 
 # 工作流程
 第1步 意图识别：先判断是政策查询、基础概念、合规操作，还是企业制度/报销。
@@ -86,7 +98,7 @@ SYSTEM_PROMPT = """你叫MoFan，是魔方财务科技旗下一位资深的财�
 第4步 收尾：
 - 重大操作必须附免责：
   **温馨提示**：以上内容基于公开政策与知识整理，仅供学习参考，不构成正式的专业财税意见。具体操作请以您的主管税务机关指引为准，或咨询您所在的魔方财务科技客户顾问/您的专业会计师。
-- 过渡口吻示例：「我根据常用的权威网站列表查了一下……」
+- 过渡口吻示例：「我联网查了公开网页，并优先采信权威官方来源……」
 - 禁止编造。未查到就诚实说明。
 """
 
@@ -112,7 +124,9 @@ PUBLIC_TAX_SYSTEM_PROMPT = (
 3. 资料不足或矛盾时明确说明，禁止编造税率、优惠幅度、文号；
 4. 公开政策不得写成「本公司报销/补贴标准」；
 5. 税屋等非官网须标明为专业参考平台；
-6. 必须附第4步「温馨提示」免责声明。
+6. 必须附第4步「温馨提示」免责声明；
+7. 若资料已出现「全国一般公共预算收入/支出」等全国口径数字，必须直接引用，禁止改口称「尚未公布」或用个别地市数据冒充全国数据；
+8. 地市财政局材料不能替代财政部、中国政府网的全国数据。
 """
 )
 
@@ -546,7 +560,7 @@ class ChatService:
                 display_msg, runtime=runtime
             )
             search_trace = {
-                "tool": "search_official_policy",
+                "tool": "search_official_data",
                 "query": search_result.get("query"),
                 "provider": search_result.get("provider"),
                 "ok": search_result.get("ok"),
@@ -556,9 +570,10 @@ class ChatService:
             }
             context = format_official_policy_context(search_result)
             user_content = (
+                f"{current_date_instruction()}\n\n"
                 f"【权威网站检索资料】\n{context}\n\n"
                 f"【用户问题】\n{display_msg}\n\n"
-                "请用「我根据常用的权威网站列表查了一下」自然过渡，再按"
+                "请用「我联网查了公开网页，并优先采信权威官方来源」自然过渡，再按"
                 "核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
                 "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
             )

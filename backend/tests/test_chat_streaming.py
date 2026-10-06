@@ -269,7 +269,22 @@ async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_ses
                 ):
                     with patch(
                         "app.agent.llm_adapter.ChatFinanceLLM.ainvoke",
-                        AsyncMock(return_value=AIMessage(content="", tool_calls=[])),
+                        AsyncMock(
+                            return_value=AIMessage(
+                                content="",
+                                tool_calls=[
+                                    {
+                                        "id": "s1",
+                                        "name": "search_official_data",
+                                        "args": {
+                                            "query": "广州企业所得税税收优惠",
+                                            "region": "广东",
+                                            "topic": "tax",
+                                        },
+                                    }
+                                ],
+                            )
+                        ),
                     ):
                         with patch(
                             "app.agent.tools.catalog.official_policy_service"
@@ -289,13 +304,24 @@ async def test_stream_public_tax_searches_and_cites(mock_db, mock_user, mock_ses
                                 events.append(event)
 
     assert any(e.get("type") == "status" for e in events)
+    src_events = [e for e in events if e.get("type") == "sources"]
+    assert src_events
+    assert src_events[0]["sources"][0]["index"] == 1
+    text_idx = next(i for i, e in enumerate(events) if e.get("type") == "text")
+    sources_idx = next(i for i, e in enumerate(events) if e.get("type") == "sources")
+    assert sources_idx < text_idx
+    assert "[1][2]" in captured["messages"][-1]["content"] or "标注对应 [n]" in captured[
+        "messages"
+    ][-1]["content"]
     assert captured["messages"][0]["role"] == "system"
     assert "权威网站" in captured["messages"][0]["content"]
     user_content = captured["messages"][-1]["content"]
     assert "国家税务总局公告" in user_content
     assert "https://www.chinatax.gov.cn/a" in user_content
+    assert "【当前日期】" in user_content
+    assert "不得把模型知识截止日期当作当前日期" in user_content
     tool_kw = service.save_message.call_args.kwargs
-    assert tool_kw.get("tool_calls", {}).get("tool") == "search_official_policy"
+    assert tool_kw.get("tool_calls", {}).get("tool") == "search_official_data"
 
 
 @pytest.mark.asyncio
@@ -329,7 +355,18 @@ async def test_stream_policy_query_injects_rag(mock_db, mock_user, mock_session)
                 ):
                     with patch(
                         "app.agent.llm_adapter.ChatFinanceLLM.ainvoke",
-                        AsyncMock(return_value=AIMessage(content="", tool_calls=[])),
+                        AsyncMock(
+                            return_value=AIMessage(
+                                content="",
+                                tool_calls=[
+                                    {
+                                        "id": "p1",
+                                        "name": "query_policy",
+                                        "args": {"question": "差旅住宿补贴怎么报？"},
+                                    }
+                                ],
+                            )
+                        ),
                     ):
                         with patch("app.agent.tools.catalog.rag_service") as mock_rag:
                             mock_rag.retrieve = AsyncMock(return_value=rag_hits)

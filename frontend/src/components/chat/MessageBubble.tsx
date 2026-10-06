@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bot,
   CheckCheck,
@@ -20,9 +20,11 @@ import { fileApi } from '@/api/file'
 import { documentKind } from '@/lib/sidePanelHistory'
 import { cn } from '@/lib/utils'
 import { useUIStore } from '@/stores/uiStore'
+import { readSearchSources } from '@/lib/messages'
 import type { Message, MessageAttachment } from '@/types'
 
 import { Markdown } from './Markdown'
+import { SearchSourcesBar } from './SearchSourcesBar'
 
 interface Props {
   message: Message
@@ -384,6 +386,23 @@ function MessageBubbleView({ message, onOpenDocument }: Props) {
   })
 
   const [previewAtt, setPreviewAtt] = useState<MessageAttachment | null>(null)
+  /** 正文角标点击时高亮来源条对应项（Task 8 接 Markdown onCiteClick） */
+  const [highlightIndex, setHighlightIndex] = useState<number | null>(null)
+  const [sourcesExpanded, setSourcesExpanded] = useState(false)
+
+  const sources =
+    message.role === 'assistant' ? readSearchSources(message) : []
+  const hasSearchSources = sources.length > 0
+  const citeIndexes = useMemo(
+    () => new Set(sources.map((s) => s.index)),
+    [sources],
+  )
+
+  /** 正文 [n] 角标：展开来源条并高亮对应项 */
+  const handleCiteClick = useCallback((index: number) => {
+    setHighlightIndex(index)
+    setSourcesExpanded(true)
+  }, [])
 
   if (isTool) return null
 
@@ -427,7 +446,7 @@ function MessageBubbleView({ message, onOpenDocument }: Props) {
             </div>
           )}
 
-          {(showText || showStreamingDots) && (
+          {(showText || showStreamingDots || hasSearchSources) && (
             <div
               data-slot="message-bubble"
               className={cn(
@@ -437,6 +456,14 @@ function MessageBubbleView({ message, onOpenDocument }: Props) {
                   : 'bg-surface text-ink border border-line',
               )}
             >
+              {hasSearchSources && (
+                <SearchSourcesBar
+                  sources={sources}
+                  highlightIndex={highlightIndex}
+                  expanded={sourcesExpanded}
+                  onExpandedChange={setSourcesExpanded}
+                />
+              )}
               {showStreamingDots ? (
                 <span className="inline-flex gap-1 text-ink-tertiary">
                   <span className="h-1.5 w-1.5 animate-stream-blink rounded-full bg-ink-tertiary" />
@@ -455,7 +482,11 @@ function MessageBubbleView({ message, onOpenDocument }: Props) {
                 </div>
               ) : (
                 <div className="break-words">
-                  <Markdown content={message.content!} />
+                  <Markdown
+                    content={message.content!}
+                    citeIndexes={hasSearchSources ? citeIndexes : undefined}
+                    onCiteClick={hasSearchSources ? handleCiteClick : undefined}
+                  />
                 </div>
               )}
             </div>

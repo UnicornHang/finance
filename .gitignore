@@ -68,6 +68,8 @@ desktop.ini
 
 # Local-only (do not commit)
 .workbuddy/
+.superpowers/
+docs/superpowers/
 docs/backend-runbook.md
 docs/ubuntu-docker-setup.md
 docs/RAG-KB-Design.md

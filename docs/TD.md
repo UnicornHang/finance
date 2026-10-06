@@ -486,12 +486,12 @@ class SessionContext:
 
 ### 5.2 Agent 架构（B1）
 
-无附件：`ChatService` → `classify_intent` → `effective_intent` → `AgentOrchestrator.stream_text` → LangGraph（`gate` → `agent` → `tools` → `finalize`）→ `llm_service.stream`。
+无附件：`ChatService` → `classify_intent` → `effective_intent` → `AgentOrchestrator.stream_text` → LangGraph（`gate` → `agent` ⇄ 软提醒 → `tools` → `finalize`）→ `llm_service.stream`。
 有附件：`AgentOrchestrator.stream_upload` → 附件子图 `classify_file` 硬路由 → 现有发票识别 / 合同审查 / 文件闲聊（SSE 不变；归档仍 REST 或对话 `confirm_pending` 调同一 confirm）。
 会话记忆：`SessionContext.load_safe` 注入摘要与 pending；不使用 LangGraph checkpointer。
 
-- 意图白名单：`policy_query` 仅 `query_policy`；`public_tax` 仅 `search_official_policy`；门户 / 闲聊 / 无附件单据无工具。
-- 模型不返回 tool_calls 时，对有白名单的意图强制补调一次，避免演示模式漏检索。
+- 意图白名单：`policy_query` / `public_tax` 均可 `query_policy` + `search_official_data`；门户 / 闲聊 / 无附件单据无工具。
+- 模型首轮不返回合法 tool_calls 时软提醒一轮，**不**强制补调。
 - 非法工具名丢弃。图失败且尚未向客户端推事件时，回退 `_stream_text_intent`。
 - 有附件：`stream_upload` 附件子图硬路由到发票识别 / 合同审查 / 普通文件。**禁止** Agent 直接归档；对话「确认归档」走 `confirm_pending`，与 REST confirm 同一 service。
 
