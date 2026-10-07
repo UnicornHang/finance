@@ -19,6 +19,7 @@ from app.services.invoice_document import (
     _media_content,
     _prepare_document,
 )
+from app.services.llm_service import llm_service
 from app.services.ocr_service import InvoiceOCRResult
 
 if TYPE_CHECKING:
@@ -217,8 +218,6 @@ class InvoiceVisionService:
         单据识别场景没配密钥时，改用日常对话里已配置的通用模型（如 qwen3.7-flash）。
         图片走 image_url；PDF/Word 先抽文字，抽不到再发内嵌图。
         """
-        from app.services.llm_service import llm_service
-
         cfg = await _resolve_recognition_config(db, tenant_id)
         if cfg is None:
             raise ValueError(
@@ -251,6 +250,10 @@ class InvoiceVisionService:
             temperature=0.1,
             max_tokens=1500,
             apply_scene_prompt=False,
+            db=db,
+            tenant_id=tenant_id,
+            scene="ocr_post",
+            session_id=None,
         )
         if not text.strip():
             raise ValueError("大模型返回空内容，请确认模型支持看图（如 qwen3.7-flash）")
@@ -268,8 +271,6 @@ class InvoiceVisionService:
         tenant_id: str | None,
     ) -> str:
         """先看附件和用户原话，判断该交给哪个业务。返回 invoice / contract / chat。"""
-        from app.services.llm_service import llm_service
-
         cfg = await _resolve_recognition_config(db, tenant_id)
         if cfg is None:
             raise ValueError("没有可用的大模型密钥，无法判断文件类型")
@@ -291,6 +292,10 @@ class InvoiceVisionService:
             temperature=0.0,
             max_tokens=200,
             apply_scene_prompt=False,
+            db=db,
+            tenant_id=tenant_id,
+            scene="ocr_post",
+            session_id=None,
         )
         data = _parse_json_object(text)
         intent = str(data.get("intent") or "chat").strip().lower()

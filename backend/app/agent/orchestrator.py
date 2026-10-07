@@ -80,6 +80,8 @@ class AgentOrchestrator:
             scene="chitchat" if scene == "chitchat" else scene,
             db=db,
             tenant_id=str(user.tenant_id),
+            session_id=str(session_id),
+            user_id=str(user.id),
         )
         graph = get_text_graph()
         token = graph_runtime.set({"llm": llm, "bound_tools": bound})
@@ -142,6 +144,7 @@ class AgentOrchestrator:
             db=db,
             session_id=session_id,
             tenant_id=user.tenant_id,
+            user_id=user.id,
             messages=openai_messages,
             scene=scene,
             base_tool_calls=search_trace,

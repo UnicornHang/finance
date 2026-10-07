@@ -311,13 +311,12 @@ export interface DashboardRiskContract {
   risk_level: 'high' | 'medium' | 'low' | string
 }
 
-export interface DashboardRecentArchive {
-  id: string
-  kind: 'invoice' | 'contract' | string
-  title: string
-  amount: number | null
-  operator_name: string | null
-  created_at: string | null
+/** 数据概览：按日 Token 消耗趋势点 */
+export interface DashboardTokenTrendPoint {
+  date: string
+  label: string
+  weekday: string
+  total_tokens: number
 }
 
 export interface DashboardOverview {
@@ -335,7 +334,12 @@ export interface DashboardOverview {
     delta_pct: number | null
   }
   risk_contracts: DashboardRiskContract[]
-  recent_archives: DashboardRecentArchive[]
+  /** 近 N 天 LLM Token 消耗趋势 */
+  token_trend: {
+    points: DashboardTokenTrendPoint[]
+    delta_pct: number | null
+    period_total: number
+  }
   activity: {
     active_users: number
     invoices_uploaded: number

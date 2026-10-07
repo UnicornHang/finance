@@ -304,8 +304,9 @@ export function Admin() {
 
         {/* 主区域：绝对定位撑满；padding 不在滚动层，避免详情 h-full 被撑出外层滚动条 */}
         <main className="relative min-h-0 flex-1 overflow-hidden">
-          <div className="absolute inset-0 flex flex-col p-8">
-            <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="absolute inset-0 flex flex-col p-5">
+            {/* h-full 让数据概览可撑满一屏；其它长页仍可在此层滚动 */}
+            <div className="h-full min-h-0 overflow-y-auto">
               <Outlet />
             </div>
           </div>

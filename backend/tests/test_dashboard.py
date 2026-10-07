@@ -47,6 +47,11 @@ async def test_overview_ok_for_finance(client: AsyncClient, finance_headers):
     assert body["days"] == 7
     assert "today_archived" in body["kpis"]
     assert len(body["trend"]["points"]) == 7
+    assert "token_trend" in body
+    assert len(body["token_trend"]["points"]) == 7
+    assert "total_tokens" in body["token_trend"]["points"][0]
+    assert "period_total" in body["token_trend"]
+    assert "recent_archives" not in body
 
 
 @pytest.mark.asyncio
@@ -88,7 +93,8 @@ async def test_overview_counts_confirmed_invoice(client: AsyncClient, auth_heade
     assert len(body["trend"]["points"]) == 30
     assert body["kpis"]["today_archived"]["value"] >= before_today + 1
     assert body["kpis"]["month_invoice_amount"]["value"] >= before_amount + 1130
-    assert any(item["id"] == inv_id for item in body["recent_archives"])
+    assert len(body["token_trend"]["points"]) == 30
+    assert "recent_archives" not in body
 
     await db_session.execute(delete(AuditLog).where(AuditLog.target_id == UUID(inv_id)))
     await db_session.execute(delete(Invoice).where(Invoice.id == UUID(inv_id)))

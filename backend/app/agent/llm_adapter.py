@@ -93,10 +93,14 @@ class ChatFinanceLLM:
         scene: str,
         db: "AsyncSession | None",
         tenant_id: str | None,
+        session_id: str | None = None,
+        user_id: str | None = None,
     ):
         self.scene = scene
         self.db = db
         self.tenant_id = tenant_id
+        self.session_id = session_id
+        self.user_id = user_id
 
     async def ainvoke(
         self,
@@ -119,6 +123,12 @@ class ChatFinanceLLM:
             temperature=temperature,
             apply_scene_prompt=False,
             tools=openai_tools,
+            db=self.db,
+            tenant_id=self.tenant_id,
+            scene=self.scene,
+            session_id=self.session_id,
+            user_id=self.user_id,
+            source="complete",
         )
         tool_calls = [
             {

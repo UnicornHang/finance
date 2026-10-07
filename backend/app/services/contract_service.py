@@ -698,6 +698,8 @@ async def review_contract(text_content: str, tenant_id: str, db) -> dict:
     result = await llm_service.invoke(
         messages=[{"role": "user", "content": prompt}],
         scene="contract_review",
-        response_format={"type": "json_object"},
+        db=db,
+        tenant_id=tenant_id,
+        session_id=None,
     )
     return json.loads(result)

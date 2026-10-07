@@ -35,16 +35,13 @@ function sampleOverview(): DashboardOverview {
     risk_contracts: [
       { id: 'c1', title: '设备采购合同', amount: 580000, risk_level: 'high' },
     ],
-    recent_archives: [
-      {
-        id: 'i1',
-        kind: 'invoice',
-        title: '看板测试发票',
-        amount: 1130,
-        operator_name: '管理员',
-        created_at: '2026-10-05T09:00:00+08:00',
-      },
-    ],
+    token_trend: {
+      points: [
+        { date: '2026-10-05', label: '10/5', weekday: '周一', total_tokens: 1200 },
+      ],
+      delta_pct: 12.5,
+      period_total: 1200,
+    },
     activity: {
       active_users: 3,
       invoices_uploaded: 2,
@@ -85,14 +82,13 @@ describe('数据概览', () => {
     mockedApi.overview.mockReset()
   })
 
-  it('应展示接口返回的 KPI 与最近归档', async () => {
+  it('应展示 KPI 与 Token 消耗趋势', async () => {
     mockedApi.overview.mockResolvedValue(sampleOverview())
     renderDashboard()
 
     expect(await screen.findByText('今日归档')).toBeInTheDocument()
-    expect(screen.getByText('设备采购合同')).toBeInTheDocument()
-    expect(screen.getByText('看板测试发票')).toBeInTheDocument()
-    expect(screen.getByText('所有文档均已索引完成')).toBeInTheDocument()
+    expect(screen.getByText(/Token 消耗/)).toBeInTheDocument()
+    expect(screen.queryByText('看板测试发票')).not.toBeInTheDocument()
   })
 
   it('加载失败时应提供重试', async () => {

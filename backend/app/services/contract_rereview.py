@@ -99,6 +99,8 @@ async def rereview_contract(
             scene="contract_review",
             db=db,
             tenant_id=str(user.tenant_id),
+            user_id=str(user.id),
+            session_id=None,
             temperature=0.2,
             apply_scene_prompt=False,
         )

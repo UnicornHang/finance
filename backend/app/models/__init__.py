@@ -102,6 +102,9 @@ class Session(Base):
         nullable=True,
     )
     status: Mapped[str] = mapped_column(String(20), default="active")
+    prompt_tokens_total: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    completion_tokens_total: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()")
@@ -440,6 +443,37 @@ class AuditLog(Base):
     )
 
 
+# ================ LLM 用量事件 ================
+
+class LlmUsageEvent(Base):
+    """单次 LLM 调用的 token 用量事件。"""
+
+    __tablename__ = "llm_usage_events"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    session_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL")
+    )
+    user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
+    scene: Mapped[str] = mapped_column(String(50), default="unknown")
+    provider: Mapped[str | None] = mapped_column(String(50))
+    model: Mapped[str | None] = mapped_column(String(100))
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    usage_missing: Mapped[bool] = mapped_column(Boolean, default=False)
+    source: Mapped[str] = mapped_column(String(20), default="complete")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+
+    __table_args__ = (
+        Index("idx_llm_usage_tenant_created", "tenant_id", "created_at"),
+        Index("idx_llm_usage_tenant_session", "tenant_id", "session_id"),
+    )
+
+
 # ================ 异步导出任务 ================
 
 class ExportJob(Base):
@@ -488,6 +522,7 @@ __all__ = [
     "LlmConfig",
     "ToolConfig",
     "AuditLog",
+    "LlmUsageEvent",
     "ExportJob",
     "UserRole",
     "InvoiceType",

@@ -54,13 +54,25 @@ def split_fold_batches(lines: list[str], max_chars: int = 8000) -> list[list[str
     return batches
 
 
-async def update_summary(session_id: str, old_summary: str, lines: list[str]) -> str:
+async def update_summary(
+    session_id: str,
+    old_summary: str,
+    lines: list[str],
+    *,
+    db: AsyncSession | None = None,
+    tenant_id: str | UUID | None = None,
+    user_id: str | UUID | None = None,
+) -> str:
     """用传入的 lines 更新摘要，截到 800 字。不再截最近 20 条。"""
     prompt = build_summary_prompt(old_summary, lines)
     text = await llm_service.invoke(
         messages=[{"role": "user", "content": prompt}],
         scene="chitchat",
         apply_scene_prompt=False,
+        db=db,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        user_id=user_id,
     )
     trimmed = (text or "").strip()[:SUMMARY_CHAR_CAP]
     logger.info("update_summary session=%s chars=%s", session_id, len(trimmed))
@@ -158,7 +170,14 @@ async def fold_outside_window(
             return
         folded = session.summary or ""
         for batch in split_fold_batches(lines, SUMMARY_BATCH_CHARS):
-            folded = await update_summary(str(session.id), folded, batch)
+            folded = await update_summary(
+                str(session.id),
+                folded,
+                batch,
+                db=db,
+                tenant_id=str(session.tenant_id),
+                user_id=str(session.user_id),
+            )
             if not folded:
                 break
         if not folded:

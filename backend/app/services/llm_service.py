@@ -11,9 +11,11 @@ import json
 import logging
 import re
 from typing import AsyncGenerator, TYPE_CHECKING
+from uuid import UUID
 
 from app.config import settings
 from app.services.llm_config_service import llm_config_service
+from app.services.llm_usage_service import parse_usage, record_llm_usage
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -255,13 +257,16 @@ class LLMService:
         messages: list[dict],
         scene: str = "chitchat",
         db: "AsyncSession | None" = None,
-        tenant_id: str | None = None,
+        tenant_id: str | UUID | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
         apply_scene_prompt: bool = True,
+        session_id: str | UUID | None = None,
+        user_id: str | UUID | None = None,
     ) -> str:
         """同步调用 LLM。意图分类等结构化调用应关闭 apply_scene_prompt。"""
         cfg = await self._resolve_config(scene, db, tenant_id)
+        # mock 分支不打点
         if not cfg or not (cfg.get("api_key") or "").strip():
             return self._mock_response(messages)
 
@@ -271,6 +276,12 @@ class LLMService:
             temperature=temperature,
             max_tokens=max_tokens,
             apply_scene_prompt=apply_scene_prompt,
+            session_id=session_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            db=db,
+            scene=scene,
+            source="invoke",
         )
         return content
 
@@ -283,6 +294,12 @@ class LLMService:
         max_tokens: int | None = None,
         apply_scene_prompt: bool = False,
         tools: list[dict] | None = None,
+        session_id: str | UUID | None = None,
+        user_id: str | UUID | None = None,
+        tenant_id: str | UUID | None = None,
+        db: "AsyncSession | None" = None,
+        scene: str = "unknown",
+        source: str = "complete",
     ) -> str:
         """用指定配置调用模型。识别场景不要套用闲聊人设。"""
         content, _calls = await self.complete_chat_with_config(
@@ -292,6 +309,12 @@ class LLMService:
             max_tokens=max_tokens,
             apply_scene_prompt=apply_scene_prompt,
             tools=tools,
+            session_id=session_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            db=db,
+            scene=scene,
+            source=source,
         )
         return content
 
@@ -304,6 +327,12 @@ class LLMService:
         max_tokens: int | None = None,
         apply_scene_prompt: bool = False,
         tools: list[dict] | None = None,
+        session_id: str | UUID | None = None,
+        user_id: str | UUID | None = None,
+        tenant_id: str | UUID | None = None,
+        db: "AsyncSession | None" = None,
+        scene: str = "unknown",
+        source: str = "complete",
     ) -> tuple[str, list[dict]]:
         """调用模型并解析可选 tool_calls。返回 (正文, OpenAI 风格工具调用列表)。"""
         from litellm import acompletion
@@ -329,6 +358,23 @@ class LLMService:
             max_tokens=max_tokens or cfg.get("max_tokens") or 1500,
             **extra,
         )
+        # 成功后解析 usage 并落库（失败只记日志，不阻断）
+        usage_raw = getattr(response, "usage", None)
+        p, c, t, missing = parse_usage(usage_raw)
+        await record_llm_usage(
+            db=db,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            scene=scene,
+            provider=cfg.get("provider"),
+            model=cfg.get("model"),
+            prompt_tokens=p,
+            completion_tokens=c,
+            total_tokens=t,
+            usage_missing=missing,
+            source=source,
+        )
         message = response.choices[0].message
         content = getattr(message, "content", None) or ""
         return content, _litellm_tool_calls(message)
@@ -338,14 +384,17 @@ class LLMService:
         messages: list[dict],
         scene: str = "chitchat",
         db: "AsyncSession | None" = None,
-        tenant_id: str | None = None,
+        tenant_id: str | UUID | None = None,
         temperature: float | None = None,
+        session_id: str | UUID | None = None,
+        user_id: str | UUID | None = None,
     ) -> AsyncGenerator[str, None]:
         """流式调用，逐 chunk 产出文本。
 
         未配置 API Key 时进入 mock 模式，逐字符返回演示响应。
         """
         cfg = await self._resolve_config(scene, db, tenant_id)
+        # mock 分支不打点
         if not cfg:
             async for chunk in self._mock_stream(messages):
                 yield chunk
@@ -357,24 +406,68 @@ class LLMService:
         if not any(m.get("role") == "system" for m in messages):
             outgoing = apply_system_prompt(messages, cfg.get("system_prompt"))
         try:
-            response = await acompletion(
-                model=_resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
-                messages=outgoing,
-                api_key=cfg["api_key"],
-                api_base=cfg["base_url"] or None,
-                temperature=temperature if temperature is not None else cfg["temperature"],
-                stream=True,
-                timeout=cfg["timeout"],
-                **(
-                    {"extra_body": {"enable_thinking": False}}
-                    if cfg.get("provider") == "dashscope"
-                    else {}
-                ),
-            )
-            async for chunk in response:
-                content = chunk.choices[0].delta.content
-                if content:
-                    yield content
+            acompletion_kwargs: dict = {
+                "model": _resolve_model_name(cfg.get("provider", "openai"), cfg["model"]),
+                "messages": outgoing,
+                "api_key": cfg["api_key"],
+                "api_base": cfg["base_url"] or None,
+                "temperature": temperature if temperature is not None else cfg["temperature"],
+                "stream": True,
+                "timeout": cfg["timeout"],
+            }
+            if cfg.get("provider") == "dashscope":
+                acompletion_kwargs["extra_body"] = {"enable_thinking": False}
+
+            # 优先请求流式 usage；litellm/provider 拒收则回退并强制 usage_missing
+            force_usage_missing = False
+            try:
+                response = await acompletion(
+                    **acompletion_kwargs,
+                    stream_options={"include_usage": True},
+                )
+            except Exception as so_exc:
+                msg = str(so_exc).lower()
+                if not (
+                    isinstance(so_exc, TypeError)
+                    or "stream_options" in msg
+                    or "include_usage" in msg
+                    or "unexpected" in msg
+                ):
+                    raise
+                logger.debug("stream_options 不被支持，回退: %s", so_exc)
+                force_usage_missing = True
+                response = await acompletion(**acompletion_kwargs)
+
+            # 请求已发出后：finally 记账，GeneratorExit/CancelledError/中途错误仍落库
+            last_usage = None
+            try:
+                async for chunk in response:
+                    # usage 末包常带 usage 且 choices=[]，须先收 usage 再安全读 delta
+                    u = getattr(chunk, "usage", None)
+                    if u is not None:
+                        last_usage = u
+                    choices = getattr(chunk, "choices", None) or []
+                    if not choices:
+                        continue
+                    content = choices[0].delta.content
+                    if content:
+                        yield content
+            finally:
+                p, c, t, missing = parse_usage(last_usage)
+                await record_llm_usage(
+                    db=db,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    user_id=user_id,
+                    scene=scene,
+                    provider=cfg.get("provider"),
+                    model=cfg.get("model"),
+                    prompt_tokens=p,
+                    completion_tokens=c,
+                    total_tokens=t,
+                    usage_missing=(missing or force_usage_missing),
+                    source="stream",
+                )
         except Exception as exc:
             logger.exception("LLM 流式调用失败: %s", exc)
             yield f"\n\n[LLM 调用失败: {exc}]"

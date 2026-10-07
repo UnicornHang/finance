@@ -18,10 +18,18 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import AuditLog, Contract, Invoice, KbChunk, KbDocument, Message, Session, User
+from app.models import (
+    AuditLog,
+    Contract,
+    Invoice,
+    KbChunk,
+    KbDocument,
+    LlmUsageEvent,
+    Message,
+    Session,
+)
 
 DASHBOARD_TZ = ZoneInfo("Asia/Shanghai")
-_ARCHIVE_OPS = ("confirm_invoice", "contract.confirm")
 
 
 def _now() -> datetime:
@@ -137,7 +145,14 @@ class DashboardService:
         activity = await self._activity(db, tenant_id, month_start, month_end)
         knowledge = await self._knowledge(db, tenant_id, month_start, month_end)
         risk_items = await self._risk_contracts(db, tenant_id)
-        recent = await self._recent_archives(db, tenant_id)
+
+        # Token 趋势与归档趋势共用同一 days 窗口及环比对照窗
+        token_points = await self._token_trend(db, tenant_id, trend_start_day, today)
+        prev_token_points = await self._token_trend(
+            db, tenant_id, prev_trend_start, prev_trend_end
+        )
+        token_total = sum(p["total_tokens"] for p in token_points)
+        prev_token_total = sum(p["total_tokens"] for p in prev_token_points)
 
         return {
             "timezone": "Asia/Shanghai",
@@ -153,8 +168,12 @@ class DashboardService:
                 "points": trend,
                 "delta_pct": delta_pct(float(trend_total), float(prev_trend_total)),
             },
+            "token_trend": {
+                "points": token_points,
+                "delta_pct": delta_pct(float(token_total), float(prev_token_total)),
+                "period_total": token_total,
+            },
             "risk_contracts": risk_items,
-            "recent_archives": recent,
             "activity": activity,
             "finance": finance,
             "knowledge": knowledge,
@@ -244,6 +263,42 @@ class DashboardService:
                     "weekday": "周" + "一二三四五六日"[cursor.weekday()],
                     "invoices": inv_map.get(key, 0),
                     "contracts": con_map.get(key, 0),
+                }
+            )
+            cursor += timedelta(days=1)
+        return points
+
+    async def _token_trend(
+        self,
+        db: AsyncSession,
+        tenant_id: UUID,
+        start_day: date,
+        end_day: date,
+    ) -> list[dict[str, Any]]:
+        """按上海自然日汇总 LLM total_tokens；无调用日补 0。"""
+        start, _ = day_window(start_day)
+        _, end = day_window(end_day)
+        stmt = select(LlmUsageEvent.created_at, LlmUsageEvent.total_tokens).where(
+            LlmUsageEvent.tenant_id == tenant_id,
+            LlmUsageEvent.created_at >= start,
+            LlmUsageEvent.created_at < end,
+        )
+        day_map: dict[str, int] = {}
+        for ts, tokens in (await db.execute(stmt)).all():
+            key = _shanghai_day_key(ts)
+            if key is None:
+                continue
+            day_map[key] = day_map.get(key, 0) + int(tokens or 0)
+        points: list[dict[str, Any]] = []
+        cursor = start_day
+        while cursor <= end_day:
+            key = cursor.isoformat()
+            points.append(
+                {
+                    "date": key,
+                    "label": f"{cursor.month}/{cursor.day}",
+                    "weekday": "周" + "一二三四五六日"[cursor.weekday()],
+                    "total_tokens": day_map.get(key, 0),
                 }
             )
             cursor += timedelta(days=1)
@@ -485,48 +540,6 @@ class DashboardService:
                     "title": title,
                     "amount": _as_float(row.amount),
                     "risk_level": row.risk_level,
-                }
-            )
-        return items
-
-    async def _recent_archives(
-        self,
-        db: AsyncSession,
-        tenant_id: UUID,
-        limit: int = 8,
-    ) -> list[dict[str, Any]]:
-        """最近确认归档记录（审计日志）。"""
-        stmt = (
-            select(AuditLog, User.name)
-            .outerjoin(User, User.id == AuditLog.user_id)
-            .where(
-                AuditLog.tenant_id == tenant_id,
-                AuditLog.operation_type.in_(_ARCHIVE_OPS),
-                AuditLog.result == "success",
-            )
-            .order_by(AuditLog.created_at.desc())
-            .limit(limit)
-        )
-        rows = (await db.execute(stmt)).all()
-        items: list[dict[str, Any]] = []
-        for log, operator in rows:
-            after = log.after_value if isinstance(log.after_value, dict) else {}
-            if log.target_type == "invoice":
-                title = after.get("invoice_title") or after.get("invoice_number") or "发票归档"
-                amount = after.get("amount_incl_tax")
-                kind = "invoice"
-            else:
-                title = after.get("contract_name") or after.get("contract_no") or "合同归档"
-                amount = after.get("amount")
-                kind = "contract"
-            items.append(
-                {
-                    "id": str(log.target_id) if log.target_id else str(log.id),
-                    "kind": kind,
-                    "title": str(title),
-                    "amount": _as_float(amount) if amount is not None else None,
-                    "operator_name": operator,
-                    "created_at": log.created_at.isoformat() if log.created_at else None,
                 }
             )
         return items

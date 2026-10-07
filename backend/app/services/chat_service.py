@@ -477,6 +477,8 @@ class ChatService:
             display_msg,
             db=db,
             tenant_id=str(user.tenant_id),
+            session_id=str(session_id),
+            user_id=str(user.id),
         )
         intent = effective_intent(decision.intent, ctx.last_intent(), display_msg)
         record(
@@ -652,6 +654,7 @@ class ChatService:
             db=db,
             session_id=session_id,
             tenant_id=user.tenant_id,
+            user_id=user.id,
             messages=messages,
             scene=scene,
             base_tool_calls=search_trace,
@@ -984,6 +987,7 @@ class ChatService:
             db=db,
             session_id=session_id,
             tenant_id=user.tenant_id,
+            user_id=user.id,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
@@ -1154,6 +1158,7 @@ class ChatService:
             db=db,
             session_id=session_id,
             tenant_id=user.tenant_id,
+            user_id=user.id,
             messages=messages,
             scene="chitchat",
             result=persist,
@@ -1457,6 +1462,7 @@ class ChatService:
             db=db,
             session_id=session_id,
             tenant_id=user.tenant_id,
+            user_id=user.id,
             messages=messages,
             scene="chitchat",
             result=persist,

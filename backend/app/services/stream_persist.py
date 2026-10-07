@@ -81,6 +81,7 @@ async def stream_llm_and_persist(
     tenant_id: UUID,
     messages: list,
     scene: str,
+    user_id: UUID | None = None,
     base_tool_calls: dict | None = None,
     result: StreamPersistResult | None = None,
     on_interrupt: OnInterrupt | None = None,
@@ -135,6 +136,8 @@ async def stream_llm_and_persist(
             scene=scene,
             db=db,
             tenant_id=str(tenant_id),
+            session_id=session_id,
+            user_id=user_id,
             **llm_kwargs,
         ):
             content += chunk

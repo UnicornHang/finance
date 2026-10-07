@@ -174,6 +174,8 @@ async def classify_intent(
     file_type: str | None = None,
     db: "AsyncSession | None" = None,
     tenant_id: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> IntentDecision:
     """识别用户文本意图。
 
@@ -196,6 +198,8 @@ async def classify_intent(
                     scene="chitchat",
                     db=db,
                     tenant_id=tenant_id,
+                    session_id=session_id,
+                    user_id=user_id,
                     temperature=0.0,
                     max_tokens=256,
                     apply_scene_prompt=False,
@@ -232,6 +236,8 @@ async def route_intent(
     file_type: str | None = None,
     db: "AsyncSession | None" = None,
     tenant_id: str | None = None,
+    session_id: str | None = None,
+    user_id: str | None = None,
 ) -> Intent:
     """兼容骨架编排：只返回意图枚举。"""
     decision = await classify_intent(
@@ -239,5 +245,7 @@ async def route_intent(
         file_type=file_type,
         db=db,
         tenant_id=tenant_id,
+        session_id=session_id,
+        user_id=user_id,
     )
     return decision.intent
