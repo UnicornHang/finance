@@ -1,12 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Bot,
-  CheckCheck,
   FileText,
   ImageIcon,
   Loader2,
   PanelRightOpen,
-  User,
 } from 'lucide-react'
 
 import {
@@ -351,8 +348,8 @@ function AttachmentPreviewDialog({
 
 /**
  * Chat 消息气泡
- * - 用户：图片按大图预览、文件按信息卡，二者形态不同；文字独立气泡（原有主色白字）
- * - 助手：白底边框气泡 + 头像，markdown 渲染
+ * - 用户：图片按大图预览、文件按信息卡，二者形态不同；文字独立气泡（主色白字）
+ * - 助手：白底边框气泡，markdown 渲染
  */
 function MessageBubbleView({ message, onOpenDocument }: Props) {
   const isUser = message.role === 'user'
@@ -394,16 +391,10 @@ function MessageBubbleView({ message, onOpenDocument }: Props) {
     <>
       <div
         className={cn(
-          'flex items-end gap-3',
+          'flex',
           isUser ? 'justify-end' : 'justify-start',
         )}
       >
-        {!isUser && (
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary-tint text-primary">
-            <Bot className="h-4 w-4" />
-          </div>
-        )}
-
         <div
           className={cn(
             'flex w-full max-w-[80%] flex-col gap-2',
@@ -479,20 +470,7 @@ function MessageBubbleView({ message, onOpenDocument }: Props) {
           {!isUser && isInterruptedMessage(message) && (
             <p className="text-label-sm text-ink-tertiary">生成被中断</p>
           )}
-
-          {isUser && (
-            <span className="flex items-center gap-1 self-end text-label-sm text-ink-tertiary">
-              <CheckCheck className="h-3 w-3" />
-              已发送
-            </span>
-          )}
         </div>
-
-        {isUser && (
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-inset text-ink-secondary">
-            <User className="h-4 w-4" />
-          </div>
-        )}
       </div>
 
       <AttachmentPreviewDialog
