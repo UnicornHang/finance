@@ -200,37 +200,6 @@ export function Login() {
                   {isLoading ? '登录中...' : '登录'}
                 </Button>
               </form>
-
-              {/* 默认账号提示（更柔和） */}
-              <div className="rounded-lg border border-slate-200/70 bg-slate-50/60 p-3.5">
-                <p className="text-label-sm font-semibold uppercase tracking-wider text-slate-500 mb-2">
-                  默认测试账号
-                </p>
-                <div className="grid grid-cols-3 gap-2 text-body-sm">
-                  <div>
-                    <p className="font-mono font-semibold text-slate-700">
-                      admin
-                    </p>
-                    <p className="text-slate-500 text-xs">Admin@123</p>
-                  </div>
-                  <div>
-                    <p className="font-mono font-semibold text-slate-700">
-                      finance01
-                    </p>
-                    <p className="text-slate-500 text-xs">Finance@123</p>
-                  </div>
-                  <div>
-                    <p className="font-mono font-semibold text-slate-700">
-                      employee01
-                    </p>
-                    <p className="text-slate-500 text-xs">Emp@123</p>
-                  </div>
-                </div>
-              </div>
-
-              <p className="text-center text-body-sm text-slate-400">
-                首次登录将强制修改密码
-              </p>
             </div>
           </div>
         </main>
