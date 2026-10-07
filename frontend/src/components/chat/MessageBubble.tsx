@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bot,
   CheckCheck,
-  Eye,
   FileText,
   ImageIcon,
   Loader2,
@@ -23,6 +22,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { isInterruptedMessage, readSearchSources } from '@/lib/messages'
 import type { Message, MessageAttachment } from '@/types'
 
+import { ImagePreviewViewer } from './ImagePreviewViewer'
 import { Markdown } from './Markdown'
 import { SearchSourcesBar } from './SearchSourcesBar'
 
@@ -138,7 +138,7 @@ function ImageAttachment({
 
 /**
  * 文件附件：文件信息卡（图标 + 文件名 + 类型/大小）
- * 合同/发票可点开右侧审查结果；预览走旁边的小按钮。
+ * 点击整卡预览原文件；合同/发票另提供「查看审查/识别结果」入口。
  */
 function FileAttachment({
   attachment,
@@ -164,20 +164,16 @@ function FileAttachment({
     kind === 'contract' ? '查看审查结果' : kind === 'invoice' ? '查看识别结果' : null
 
   return (
-    <div
-      className={cn(
-        'flex w-[min(100%,300px)] items-stretch overflow-hidden rounded-2xl border bg-surface shadow-sm',
-        active ? 'border-primary ring-1 ring-primary/30' : 'border-line',
-      )}
-    >
+    <div className="space-y-1.5">
       <button
         type="button"
-        onClick={() => {
-          if (canOpenReview) onOpenDocument?.(attachment)
-          else onPreview(attachment)
-        }}
-        className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-canvas"
-        aria-label={canOpenReview ? `${reviewLabel} ${name}` : `预览文件 ${name}`}
+        onClick={() => onPreview(attachment)}
+        className={cn(
+          'flex w-[min(100%,300px)] items-center gap-3 rounded-2xl border bg-surface px-4 py-3 text-left shadow-sm transition-colors hover:bg-canvas',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+          active ? 'border-primary ring-1 ring-primary/30' : 'border-line',
+        )}
+        aria-label={`预览文件 ${name}`}
       >
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-tint">
           <FileText className="h-5 w-5 text-primary" strokeWidth={2} />
@@ -187,23 +183,23 @@ function FileAttachment({
           {metaLine && (
             <p className="mt-0.5 truncate text-label-sm text-ink-tertiary">{metaLine}</p>
           )}
-          {canOpenReview && (
-            <p className="mt-1 inline-flex items-center gap-1 text-label-sm font-medium text-primary">
-              <PanelRightOpen className="h-3 w-3" />
-              {active ? '当前正在查看' : reviewLabel}
-            </p>
-          )}
         </div>
       </button>
-      <button
-        type="button"
-        onClick={() => onPreview(attachment)}
-        className="flex w-10 shrink-0 items-center justify-center border-l border-line text-ink-tertiary transition-colors hover:bg-canvas hover:text-ink"
-        aria-label={`预览文件 ${name}`}
-        title="预览原文件"
-      >
-        <Eye className="h-4 w-4" />
-      </button>
+      {canOpenReview && (
+        <button
+          type="button"
+          onClick={() => onOpenDocument?.(attachment)}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-md px-2 py-1 text-label-sm font-medium',
+            active
+              ? 'bg-primary-tint text-primary'
+              : 'text-primary hover:bg-primary-tint',
+          )}
+        >
+          <PanelRightOpen className="h-3 w-3" />
+          {active ? '当前正在查看' : reviewLabel}
+        </button>
+      )}
     </div>
   )
 }
@@ -228,34 +224,26 @@ function AttachmentCard({
       attachment.recognize_status !== 'failed'
     return (
       <div className="space-y-1.5">
-        <ImageAttachment
-          attachment={attachment}
-          onPreview={canOpenReview ? () => onOpenDocument?.(attachment) : onPreview}
-        />
+        {/* 点击图片直接预览原图；识别/审查结果走下方独立入口 */}
+        <ImageAttachment attachment={attachment} onPreview={onPreview} />
         {canOpenReview && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onOpenDocument?.(attachment)}
-              className={cn(
-                'inline-flex items-center gap-1 rounded-md px-2 py-1 text-label-sm font-medium',
-                active
-                  ? 'bg-primary-tint text-primary'
-                  : 'text-primary hover:bg-primary-tint',
-              )}
-            >
-              <PanelRightOpen className="h-3 w-3" />
-              {active ? '当前正在查看' : kind === 'invoice' ? '查看识别结果' : '查看审查结果'}
-            </button>
-            <button
-              type="button"
-              onClick={() => onPreview(attachment)}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-label-sm text-ink-tertiary hover:bg-canvas hover:text-ink"
-            >
-              <Eye className="h-3 w-3" />
-              预览
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => onOpenDocument?.(attachment)}
+            className={cn(
+              'inline-flex items-center gap-1 rounded-md px-2 py-1 text-label-sm font-medium',
+              active
+                ? 'bg-primary-tint text-primary'
+                : 'text-primary hover:bg-primary-tint',
+            )}
+          >
+            <PanelRightOpen className="h-3 w-3" />
+            {active
+              ? '当前正在查看'
+              : kind === 'invoice'
+                ? '查看识别结果'
+                : '查看审查结果'}
+          </button>
         )}
       </div>
     )
@@ -318,11 +306,11 @@ function AttachmentPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-4xl overflow-hidden">
+      <DialogContent className="max-h-[95vh] w-[min(100%,92vw)] max-w-7xl overflow-hidden p-5 sm:p-6">
         <DialogHeader>
           <DialogTitle className="truncate pr-8">{name}</DialogTitle>
         </DialogHeader>
-        <div className="mt-2 flex min-h-[240px] items-center justify-center">
+        <div className="mt-2 flex min-h-[320px] w-full items-center justify-center">
           {loading && (
             <Loader2 className="h-8 w-8 animate-spin text-ink-tertiary" />
           )}
@@ -330,17 +318,13 @@ function AttachmentPreviewDialog({
             <p className="text-body-md text-danger">{error}</p>
           )}
           {!loading && !error && url && isImage && (
-            <img
-              src={url}
-              alt={name}
-              className="max-h-[75vh] max-w-full object-contain"
-            />
+            <ImagePreviewViewer src={url} alt={name} />
           )}
           {!loading && !error && url && isPdf && (
             <iframe
               src={url}
               title={name}
-              className="h-[75vh] w-full rounded-md border border-line"
+              className="h-[min(82vh,calc(95vh-7rem))] w-full rounded-md border border-line"
             />
           )}
           {!loading && !error && url && !isImage && !isPdf && (
