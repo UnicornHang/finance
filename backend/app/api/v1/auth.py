@@ -12,6 +12,7 @@ from app.core.security import create_access_token, create_refresh_token, decode_
 from app.deps import get_current_user
 from app.models import User
 from app.schemas import PasswordChange, ProfileUpdate
+from app.services.audit_service import write_audit_log
 from app.services.auth_service import auth_service
 
 router = APIRouter()
@@ -40,8 +41,16 @@ def _build_token_response(user, access_token: str, refresh_token: str) -> dict:
     }
 
 
+def _client_meta(request: Request) -> tuple[str | None, str | None]:
+    """提取审计用 IP 与 UA。"""
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    return ip, ua
+
+
 @router.post("/login")
 async def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
@@ -49,7 +58,10 @@ async def login(
 
     OAuth2 标准：username + password 表单字段。
     """
-    user = await auth_service.authenticate(db, form.username, form.password)
+    ip, ua = _client_meta(request)
+    user = await auth_service.authenticate(
+        db, form.username, form.password, ip=ip, ua=ua
+    )
 
     access_token = create_access_token(
         subject=str(user.id),
@@ -120,13 +132,25 @@ async def refresh(
 
 
 @router.post("/logout")
-async def logout():
-    """登出。
-
-    JWT 是无状态的，真正的登出靠客户端清除 Token。
-    服务端可选：维护 Token 黑名单（Redis）。
-    MVP 阶段：直接返回成功。
-    """
+async def logout(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """登出。JWT 无状态，服务端只记审计；客户端负责清 Token。"""
+    ip, ua = _client_meta(request)
+    await write_audit_log(
+        db,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        operation_type="logout",
+        target_type="user",
+        target_id=user.id,
+        after={"account": user.account},
+        ip=ip,
+        ua=ua,
+    )
+    await db.commit()
     return {"message": "logged out"}
 
 
@@ -134,13 +158,6 @@ async def logout():
 async def me(user: User = Depends(get_current_user)):
     """获取当前登录用户信息（用于刷新用户态）。"""
     return _build_user_dict(user)
-
-
-def _client_meta(request: Request) -> tuple[str | None, str | None]:
-    """提取审计用 IP 与 UA。"""
-    ip = request.client.host if request.client else None
-    ua = request.headers.get("user-agent")
-    return ip, ua
 
 
 @router.patch("/me")

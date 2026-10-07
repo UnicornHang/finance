@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.deps import get_current_user
 from app.models import User
+from app.services.audit_service import write_audit_log
 from app.services.invoice_service import invoice_service
 
 logger = logging.getLogger(__name__)
@@ -295,11 +296,12 @@ async def delete_invoice(
 @router.get("/{invoice_id}/file")
 async def get_invoice_file(
     invoice_id: UUID,
+    request: Request,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     expires: int = Query(default=3600, ge=60, le=86400),
 ):
-    """返回 MinIO 预签名下载 URL。"""
+    """返回 MinIO 预签名下载 URL，并记一条下载审计。"""
     url = await invoice_service.get_presigned_download_url(
         db,
         tenant_id=user.tenant_id,
@@ -307,4 +309,17 @@ async def get_invoice_file(
         invoice_id=invoice_id,
         expires_seconds=expires,
     )
+    ip = request.client.host if request.client else None
+    await write_audit_log(
+        db,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        operation_type="file.download",
+        target_type="invoice",
+        target_id=invoice_id,
+        after={"expires_in": expires},
+        ip=ip,
+        ua=request.headers.get("user-agent"),
+    )
+    await db.commit()
     return {"url": url, "expires_in": expires}

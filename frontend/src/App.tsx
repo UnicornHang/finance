@@ -9,6 +9,7 @@ import { ContractArchive } from '@/components/admin/ContractArchive'
 import { KnowledgeBase } from '@/components/admin/KnowledgeBase'
 import { KnowledgeBaseDetail } from '@/components/admin/KnowledgeBaseDetail'
 import { UserManage } from '@/components/admin/UserManage'
+import { AuditLogs } from '@/components/admin/AuditLogs'
 import { LLMSettings } from '@/components/admin/LLMSettings'
 import { ToolSettings } from '@/components/admin/ToolSettings'
 import { useAuthStore } from '@/stores/authStore'
@@ -96,6 +97,14 @@ export default function App() {
           element={
             <RoleRoute roles={['admin']}>
               <UserManage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="audit"
+          element={
+            <RoleRoute roles={['admin']}>
+              <AuditLogs />
             </RoleRoute>
           }
         />

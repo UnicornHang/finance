@@ -57,9 +57,17 @@ export function useAuth() {
     login: loginMutation.mutate,
     isLoading: loginMutation.isPending,
     logout: () => {
-      resetClientState()
-      logout()
-      navigate('/login', { replace: true })
+      // 先记登出审计，再清本地令牌；接口失败也要退出
+      void (async () => {
+        try {
+          await apiClient.post('/auth/logout')
+        } catch {
+          // 令牌已失效时服务端记不上，本地会话仍要清掉
+        }
+        resetClientState()
+        logout()
+        navigate('/login', { replace: true })
+      })()
     },
   }
 }

@@ -11,6 +11,7 @@ import {
   FileText,
   BookOpen,
   Users,
+  ScrollText,
   Cpu,
   Wrench,
   ShieldCheck,
@@ -37,7 +38,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 import type { UserRole } from '@/types'
 
-/** 菜单可见角色：管理员全部；财务三项；员工仅归档 */
+/** 菜单可见角色：管理员全部；财务为概览和归档；员工仅归档 */
 const NAV_ITEMS: {
   to: string
   label: string
@@ -77,6 +78,13 @@ const NAV_ITEMS: {
     to: '/admin/users',
     label: '用户管理',
     icon: Users,
+    end: false,
+    roles: ['admin'],
+  },
+  {
+    to: '/admin/audit',
+    label: '审计日志',
+    icon: ScrollText,
     end: false,
     roles: ['admin'],
   },

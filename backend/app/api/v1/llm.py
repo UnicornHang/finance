@@ -13,7 +13,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,6 +115,7 @@ async def get_config(
 async def upsert_config(
     scene: str,
     payload: LlmConfigUpsert,
+    request: Request,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
@@ -131,7 +132,16 @@ async def upsert_config(
         raise BusinessError(f"不支持的 provider：{payload.provider}", code="UNKNOWN_PROVIDER")
 
     data = payload.model_dump()
-    cfg = await llm_config_service.upsert(db, user.tenant_id, scene, data)
+    ip = request.client.host if request.client else None
+    cfg = await llm_config_service.upsert(
+        db,
+        user.tenant_id,
+        scene,
+        data,
+        actor_id=user.id,
+        ip=ip,
+        ua=request.headers.get("user-agent"),
+    )
     logger.info("租户 %s 更新 LLM 配置 scene=%s provider=%s model=%s", user.tenant_id, scene, cfg.provider, cfg.model)
     return llm_config_service.to_safe_dict(cfg)
 
@@ -139,13 +149,22 @@ async def upsert_config(
 @router.delete("/configs/{scene}")
 async def delete_config(
     scene: str,
+    request: Request,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """删除场景配置（fallback 到 env 或 mock）。"""
     _require_admin(user)
     _scene_or_400(scene)
-    await llm_config_service.delete(db, user.tenant_id, scene)
+    ip = request.client.host if request.client else None
+    await llm_config_service.delete(
+        db,
+        user.tenant_id,
+        scene,
+        actor_id=user.id,
+        ip=ip,
+        ua=request.headers.get("user-agent"),
+    )
     return {"deleted": True, "scene": scene}
 
 

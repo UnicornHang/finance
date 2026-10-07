@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from urllib.parse import unquote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.core.exceptions import BusinessError, ForbiddenError
 from app.deps import get_current_user
 from app.models import User
+from app.services.audit_service import write_audit_log
 from app.services.chat_file_service import chat_file_service
 from app.services.file_gc import resolve_upload_url
 from app.services.session_service import session_service
@@ -131,9 +132,22 @@ async def upload_file(
     }
 
 
+def _download_target(bucket: str) -> str:
+    """按桶名归类下载资源，供审计 target_type 使用。"""
+    if bucket == settings.minio_bucket_invoice:
+        return "invoice"
+    if bucket == settings.minio_bucket_contract:
+        return "contract"
+    if bucket == settings.minio_bucket_kb:
+        return "kb"
+    return "file"
+
+
 @router.get("/presign")
 async def presign_file(
+    request: Request,
     user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     file_url: Annotated[str, Query(description="s3://bucket/key 形式的对象地址")],
     expires: Annotated[int, Query(ge=60, le=86400)] = 3600,
 ) -> dict[str, Any]:
@@ -158,6 +172,18 @@ async def presign_file(
         logger.exception("presign failed: %s", file_url)
         raise BusinessError(f"生成预览链接失败：{exc}", code="PRESIGN_FAILED") from exc
 
+    filename = key.rsplit("/", 1)[-1]
+    await write_audit_log(
+        db,
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        operation_type="file.download",
+        target_type=_download_target(bucket),
+        after={"filename": filename, "file_url": file_url},
+        ip=request.client.host if request.client else None,
+        ua=request.headers.get("user-agent"),
+    )
+    await db.commit()
     return {"url": url, "expires_in": expires}
 
 

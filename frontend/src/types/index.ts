@@ -404,6 +404,37 @@ export interface ExportJobListResponse {
   page_size: number
 }
 
+/** 审计日志一行 */
+export interface AuditLogItem {
+  id: string
+  user_id: string | null
+  user_name: string | null
+  user_account: string | null
+  operation_type: string
+  operation_label: string
+  target_type: string | null
+  target_id: string | null
+  before_value: Record<string, unknown> | null
+  after_value: Record<string, unknown> | null
+  summary: string
+  ip: string | null
+  result: string | null
+  error_message: string | null
+  created_at: string | null
+}
+
+export interface AuditLogListResponse {
+  items: AuditLogItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface AuditLogMeta {
+  operations: { value: string; label: string }[]
+  users: { id: string; name: string; account: string }[]
+}
+
 // SSE 事件类型
 export type StreamEvent =
   | { type: 'text'; content: string; session_id?: string }

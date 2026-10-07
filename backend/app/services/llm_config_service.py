@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import BusinessError, NotFoundError
 from app.core.security import decrypt_field, encrypt_field
+from app.services.audit_service import write_audit_log
 
 if TYPE_CHECKING:
     from app.models import LlmConfig
@@ -49,6 +50,10 @@ class LlmConfigService:
         tenant_id: UUID,
         scene: str,
         data: dict,
+        *,
+        actor_id: UUID | None = None,
+        ip: str | None = None,
+        ua: str | None = None,
     ) -> "LlmConfig":
         """新增或更新某场景配置。
 
@@ -66,11 +71,15 @@ class LlmConfigService:
         from app.models import LlmConfig
 
         existing = await self._get_one(db, tenant_id, scene)
+        before = self.to_audit_dict(existing) if existing else None
         if existing:
             for k, v in data.items():
-                if k == "api_key" and v:
-                    existing.api_key_encrypted = encrypt_field(v)
-                elif hasattr(existing, k):
+                if k == "api_key":
+                    # 空值和前端占位 **** 都表示密钥未改
+                    if v and v != "****":
+                        existing.api_key_encrypted = encrypt_field(v)
+                    continue
+                if hasattr(existing, k):
                     setattr(existing, k, v)
             cfg = existing
         else:
@@ -90,18 +99,59 @@ class LlmConfigService:
             )
             db.add(cfg)
 
+        await db.flush()
+        if actor_id is not None:
+            after = self.to_audit_dict(cfg)
+            raw_key = data.get("api_key")
+            # 前端用 **** 占位表示密钥未改，不能当成一次密钥轮换
+            after["api_key_updated"] = bool(raw_key) and raw_key != "****"
+            await write_audit_log(
+                db,
+                tenant_id=tenant_id,
+                user_id=actor_id,
+                operation_type="llm.upsert",
+                target_type="llm_config",
+                target_id=cfg.id,
+                before=before,
+                after=after,
+                ip=ip,
+                ua=ua,
+            )
         await db.commit()
         await db.refresh(cfg)
         # 失效缓存
         self._invalidate_cache(tenant_id, scene)
         return cfg
 
-    async def delete(self, db: AsyncSession, tenant_id: UUID, scene: str) -> None:
+    async def delete(
+        self,
+        db: AsyncSession,
+        tenant_id: UUID,
+        scene: str,
+        *,
+        actor_id: UUID | None = None,
+        ip: str | None = None,
+        ua: str | None = None,
+    ) -> None:
         """删除某场景配置（fallback 到 env）。"""
         cfg = await self._get_one(db, tenant_id, scene)
         if not cfg:
             raise NotFoundError(f"场景 {scene} 不存在配置")
+        before = self.to_audit_dict(cfg)
+        target_id = cfg.id
         await db.delete(cfg)
+        if actor_id is not None:
+            await write_audit_log(
+                db,
+                tenant_id=tenant_id,
+                user_id=actor_id,
+                operation_type="llm.delete",
+                target_type="llm_config",
+                target_id=target_id,
+                before=before,
+                ip=ip,
+                ua=ua,
+            )
         await db.commit()
         self._invalidate_cache(tenant_id, scene)
 
@@ -187,6 +237,21 @@ class LlmConfigService:
         _cache_timestamps.clear()
 
     # ================ 安全序列化（不返回明文 API Key） ================
+
+    @staticmethod
+    def to_audit_dict(cfg: "LlmConfig") -> dict:
+        """审计快照。只记是否配置了 Key，不记明文或密文。"""
+        return {
+            "scene": cfg.scene,
+            "provider": cfg.provider,
+            "model": cfg.model,
+            "base_url": cfg.base_url,
+            "temperature": float(cfg.temperature) if cfg.temperature else 0.7,
+            "max_tokens": cfg.max_tokens,
+            "timeout_seconds": cfg.timeout_seconds,
+            "enabled": cfg.enabled,
+            "has_api_key": bool(cfg.api_key_encrypted),
+        }
 
     @staticmethod
     def to_safe_dict(cfg: "LlmConfig") -> dict:

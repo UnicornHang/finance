@@ -23,6 +23,7 @@ from app.chunking import (
 from app.config import settings
 from app.core.exceptions import BusinessError, ForbiddenError, NotFoundError
 from app.models import KbChunk, KbDocument, User
+from app.services.audit_service import write_audit_log
 from app.services.invoice_document import _extract_file_text, _guess_mime
 from app.services.kb_indexing import index_kb_document
 from app.services.milvus_service import milvus_kb_store
@@ -260,6 +261,16 @@ class KbService:
             config=cfg,
         )
         await db.refresh(row)
+        await write_audit_log(
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            operation_type="kb.upload",
+            target_type="kb",
+            target_id=row.id,
+            after=_kb_snapshot(row),
+        )
+        await db.commit()
         return self._serialize(row)
 
     async def reindex(
@@ -316,6 +327,16 @@ class KbService:
             config=cfg,
         )
         await db.refresh(row)
+        await write_audit_log(
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            operation_type="kb.reindex",
+            target_type="kb",
+            target_id=row.id,
+            after=_kb_snapshot(row),
+        )
+        await db.commit()
         return self._serialize(row)
 
     async def delete_document(
@@ -328,9 +349,31 @@ class KbService:
         """删除文档：先清 Milvus，再删 Postgres（级联 chunks）。"""
         self._assert_admin(user)
         row = await self.get_document(db, user=user, doc_id=doc_id)
+        before = _kb_snapshot(row)
         if milvus_kb_store.enabled:
             await asyncio.to_thread(milvus_kb_store.delete_by_doc_id, row.id)
         await db.delete(row)
+        await write_audit_log(
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            operation_type="kb.delete",
+            target_type="kb",
+            target_id=doc_id,
+            before=before,
+        )
         await db.commit()
+
+
+def _kb_snapshot(row: KbDocument) -> dict[str, Any]:
+    """知识库审计快照，不含正文。"""
+    return {
+        "title": row.title,
+        "doc_type": row.doc_type,
+        "status": row.status,
+        "source_file": row.source_file,
+        "chunk_strategy": row.chunk_strategy,
+    }
+
 
 kb_service = KbService()

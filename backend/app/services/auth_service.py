@@ -18,11 +18,20 @@ from app.services.audit_service import write_audit_log
 class AuthService:
     """用户认证 + 查询。"""
 
-    async def authenticate(self, db: AsyncSession, account: str, password: str) -> User:
+    async def authenticate(
+        self,
+        db: AsyncSession,
+        account: str,
+        password: str,
+        *,
+        ip: str | None = None,
+        ua: str | None = None,
+    ) -> User:
         """验证账号密码，返回用户对象。
 
         连续输错达到阈值后锁定一段时间。对「用户不存在」和「密码错误」
         返回相同文案，避免账号枚举；锁定后返回独立提示。
+        账号不存在时没有租户，不写审计；其余成功和失败都写入。
         """
         result = await db.execute(
             select(User).where(User.account == account).with_for_update()
@@ -35,20 +44,57 @@ class AuthService:
         self._release_expired_lock(user)
 
         if self._is_temporarily_locked(user):
+            await self._write_login_audit(
+                db,
+                user,
+                operation_type="login.locked",
+                result="failure",
+                error_message="账号已锁定",
+                ip=ip,
+                ua=ua,
+            )
             await db.commit()
             raise AccountLockedError(self._lock_error_message(user))
 
         if not verify_password(password, user.password_hash or ""):
             newly_locked = self._apply_failed_attempt(user)
+            await self._write_login_audit(
+                db,
+                user,
+                operation_type="login.locked" if newly_locked else "login.failed",
+                result="failure",
+                error_message="登录失败次数过多" if newly_locked else "密码错误",
+                ip=ip,
+                ua=ua,
+            )
             await db.commit()
             if newly_locked:
                 raise AccountLockedError(self._lock_error_message(user))
             raise UnauthorizedError("账号或密码错误")
 
         if user.status != "active":
+            await self._write_login_audit(
+                db,
+                user,
+                operation_type="login.failed",
+                result="failure",
+                error_message="账号已停用",
+                ip=ip,
+                ua=ua,
+            )
+            await db.commit()
             raise UnauthorizedError("账号已停用，请联系管理员")
 
         self._clear_lock_state(user)
+        await self._write_login_audit(
+            db,
+            user,
+            operation_type="login",
+            result="success",
+            error_message=None,
+            ip=ip,
+            ua=ua,
+        )
         await db.commit()
         return user
 
@@ -123,6 +169,32 @@ class AuthService:
             ua=ua,
         )
         await db.commit()
+
+    async def _write_login_audit(
+        self,
+        db: AsyncSession,
+        user: User,
+        *,
+        operation_type: str,
+        result: str,
+        error_message: str | None,
+        ip: str | None,
+        ua: str | None,
+    ) -> None:
+        """登录相关审计。不记录密码。"""
+        await write_audit_log(
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            operation_type=operation_type,
+            target_type="user",
+            target_id=user.id,
+            after={"account": user.account},
+            ip=ip,
+            ua=ua,
+            result=result,
+            error_message=error_message,
+        )
 
     def _utcnow(self) -> datetime:
         """当前 UTC 时间。"""

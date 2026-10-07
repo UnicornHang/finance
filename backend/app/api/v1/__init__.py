@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    audit,
     auth,
     chat,
     contracts,
@@ -28,6 +29,7 @@ api_router.include_router(exports.router, prefix="/exports", tags=["exports"])
 api_router.include_router(files.router, prefix="/files", tags=["files"])
 api_router.include_router(kb.router, prefix="/kb", tags=["kb"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(audit.router, prefix="/audit-logs", tags=["audit"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(llm.router, prefix="/llm", tags=["llm"])
 api_router.include_router(tools.router, prefix="/tools", tags=["tools"])
