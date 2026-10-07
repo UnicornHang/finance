@@ -12,6 +12,13 @@ import { UserManage } from '@/components/admin/UserManage'
 import { LLMSettings } from '@/components/admin/LLMSettings'
 import { ToolSettings } from '@/components/admin/ToolSettings'
 import { useAuthStore } from '@/stores/authStore'
+import type { UserRole } from '@/types'
+
+/** 无权限时的后台默认落地页 */
+function adminFallback(role: UserRole | undefined): string {
+  if (role === 'employee') return '/admin/invoices'
+  return '/admin'
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const hasHydrated = useAuthStore((s) => s.hasHydrated)
@@ -21,10 +28,28 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
+/** 按角色守卫路由；无权则跳到该角色可用的后台首页 */
+function RoleRoute({
+  roles,
+  children,
+}: {
+  roles: UserRole[]
+  children: React.ReactNode
+}) {
   const role = useAuthStore((s) => s.user?.role)
-  if (role !== 'admin') return <Navigate to="/admin" replace />
+  if (!role || !roles.includes(role)) {
+    return <Navigate to={adminFallback(role)} replace />
+  }
   return <>{children}</>
+}
+
+/** 数据概览：员工无权限，直接落到发票归档 */
+function AdminHome() {
+  const role = useAuthStore((s) => s.user?.role)
+  if (role === 'employee') {
+    return <Navigate to="/admin/invoices" replace />
+  }
+  return <Dashboard />
 }
 
 export default function App() {
@@ -47,21 +72,49 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Dashboard />} />
+        <Route index element={<AdminHome />} />
         <Route path="invoices" element={<InvoiceArchive />} />
         <Route path="contracts" element={<ContractArchive />} />
-        <Route path="kb" element={<KnowledgeBase />} />
-        <Route path="kb/:id" element={<KnowledgeBaseDetail />} />
+        <Route
+          path="kb"
+          element={
+            <RoleRoute roles={['admin']}>
+              <KnowledgeBase />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="kb/:id"
+          element={
+            <RoleRoute roles={['admin']}>
+              <KnowledgeBaseDetail />
+            </RoleRoute>
+          }
+        />
         <Route
           path="users"
           element={
-            <AdminOnlyRoute>
+            <RoleRoute roles={['admin']}>
               <UserManage />
-            </AdminOnlyRoute>
+            </RoleRoute>
           }
         />
-        <Route path="llm" element={<LLMSettings />} />
-        <Route path="tools" element={<ToolSettings />} />
+        <Route
+          path="llm"
+          element={
+            <RoleRoute roles={['admin']}>
+              <LLMSettings />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="tools"
+          element={
+            <RoleRoute roles={['admin']}>
+              <ToolSettings />
+            </RoleRoute>
+          }
+        />
       </Route>
       <Route path="/" element={<Navigate to="/chat" replace />} />
     </Routes>

@@ -14,7 +14,6 @@ import {
   Cpu,
   Wrench,
   ShieldCheck,
-  Search,
   Bell,
   HelpCircle,
   Settings,
@@ -26,7 +25,6 @@ import { cn } from '@/lib/utils'
 import { BrandLogo } from '@/components/ui/brand'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,24 +35,74 @@ import {
 import { AccountSettingsDialog } from '@/components/AccountSettingsDialog'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
+import type { UserRole } from '@/types'
 
-const NAV_ITEMS = [
-  { to: '/admin', label: '数据概览', icon: LayoutDashboard, end: true, adminOnly: false },
-  { to: '/admin/invoices', label: '发票归档', icon: Receipt, end: false, adminOnly: false },
-  { to: '/admin/contracts', label: '合同归档', icon: FileText, end: false, adminOnly: false },
-  { to: '/admin/kb', label: '知识库', icon: BookOpen, end: false, adminOnly: false },
-  { to: '/admin/users', label: '用户管理', icon: Users, end: false, adminOnly: true },
-  { to: '/admin/llm', label: 'LLM 设置', icon: Cpu, end: false, adminOnly: false },
-  { to: '/admin/tools', label: '工具配置', icon: Wrench, end: false, adminOnly: false },
+/** 菜单可见角色：管理员全部；财务三项；员工仅归档 */
+const NAV_ITEMS: {
+  to: string
+  label: string
+  icon: typeof LayoutDashboard
+  end: boolean
+  roles: UserRole[]
+}[] = [
+  {
+    to: '/admin',
+    label: '数据概览',
+    icon: LayoutDashboard,
+    end: true,
+    roles: ['admin', 'finance'],
+  },
+  {
+    to: '/admin/invoices',
+    label: '发票归档',
+    icon: Receipt,
+    end: false,
+    roles: ['admin', 'finance', 'employee'],
+  },
+  {
+    to: '/admin/contracts',
+    label: '合同归档',
+    icon: FileText,
+    end: false,
+    roles: ['admin', 'finance', 'employee'],
+  },
+  {
+    to: '/admin/kb',
+    label: '知识库',
+    icon: BookOpen,
+    end: false,
+    roles: ['admin'],
+  },
+  {
+    to: '/admin/users',
+    label: '用户管理',
+    icon: Users,
+    end: false,
+    roles: ['admin'],
+  },
+  {
+    to: '/admin/llm',
+    label: 'LLM 设置',
+    icon: Cpu,
+    end: false,
+    roles: ['admin'],
+  },
+  {
+    to: '/admin/tools',
+    label: '工具配置',
+    icon: Wrench,
+    end: false,
+    roles: ['admin'],
+  },
 ]
 
-const ROLE_LABEL: Record<string, string> = {
+const ROLE_LABEL: Record<UserRole, string> = {
   admin: '管理员',
   finance: '财务',
   employee: '员工',
 }
 
-const ROLE_TONE: Record<string, 'primary' | 'success' | 'neutral'> = {
+const ROLE_TONE: Record<UserRole, 'primary' | 'success' | 'neutral'> = {
   admin: 'primary',
   finance: 'success',
   employee: 'neutral',
@@ -65,12 +113,13 @@ export function Admin() {
   const { logout } = useAuth()
   const [accountOpen, setAccountOpen] = useState(false)
 
-  if (user?.role !== 'admin' && user?.role !== 'finance') {
-    return <Navigate to="/chat" replace />
+  // 未登录由外层 ProtectedRoute 拦截；此处只需按角色筛菜单
+  if (!user) {
+    return <Navigate to="/login" replace />
   }
 
-  const role = user?.role || 'employee'
-  const navItems = NAV_ITEMS.filter((item) => !item.adminOnly || role === 'admin')
+  const role = user.role
+  const navItems = NAV_ITEMS.filter((item) => item.roles.includes(role))
 
   return (
     <div className="flex h-screen flex-col bg-canvas text-ink">

@@ -661,14 +661,15 @@ function UserFooter() {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {user.role === 'admin' && (
-            <DropdownMenuItem asChild>
-              <Link to="/admin" target="_blank">
-                <ExternalLink className="h-3.5 w-3.5" />
-                后台管理
-              </Link>
-            </DropdownMenuItem>
-          )}
+          <DropdownMenuItem asChild>
+            <Link
+              to={user.role === 'employee' ? '/admin/invoices' : '/admin'}
+              target="_blank"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              {user.role === 'admin' ? '后台管理' : '归档管理'}
+            </Link>
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setAccountOpen(true)}>
             <Settings className="h-3.5 w-3.5" />
             账户设置

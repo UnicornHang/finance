@@ -54,9 +54,9 @@ class ToolConfigTest(BaseModel):
 
 
 def _require_admin(user: User) -> None:
-    """工具配置仅管理员/财务可改。"""
-    if user.role not in ("admin", "finance"):
-        raise ForbiddenError("需要管理员或财务权限")
+    """工具配置仅管理员可改（与菜单权限一致）。"""
+    if user.role != "admin":
+        raise ForbiddenError("需要管理员权限")
 
 
 def _tool_or_400(tool_name: str) -> str:

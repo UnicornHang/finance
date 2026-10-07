@@ -57,8 +57,9 @@ class LlmConfigTest(BaseModel):
 # ================ Helpers ================
 
 def _require_admin(user: User) -> None:
-    if user.role not in ("admin", "finance"):
-        raise ForbiddenError("需要管理员或财务权限")
+    """LLM 配置仅管理员可改（与菜单权限一致）。"""
+    if user.role != "admin":
+        raise ForbiddenError("需要管理员权限")
 
 
 def _scene_or_400(scene: str) -> str:
