@@ -143,6 +143,7 @@ async def presign_file(
     if not key.startswith(tenant_prefix):
         raise ForbiddenError("无权访问该文件", code="FILE_FORBIDDEN")
 
+    # exports 桶不在此白名单：导出下载须走 GET /exports/{id}/download（校验任务归属）
     allowed_buckets = {
         settings.minio_bucket_kb,
         settings.minio_bucket_invoice,

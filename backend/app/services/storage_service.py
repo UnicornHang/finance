@@ -43,11 +43,12 @@ class StorageService:
         self._ensure_buckets()
 
     def _business_buckets(self) -> list[str]:
-        """发票 / 合同 / 知识库（对话附件也在 kb 桶）。"""
+        """发票 / 合同 / 知识库 / 异步导出产物桶。"""
         return [
             settings.minio_bucket_invoice,
             settings.minio_bucket_contract,
             settings.minio_bucket_kb,
+            settings.minio_bucket_exports,
         ]
 
     def _ensure_buckets(self) -> None:

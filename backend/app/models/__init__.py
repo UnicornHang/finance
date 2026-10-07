@@ -440,6 +440,39 @@ class AuditLog(Base):
     )
 
 
+# ================ 异步导出任务 ================
+
+class ExportJob(Base):
+    """用户发起的异步导出任务台账（发票 xlsx / 合同报告 zip）。"""
+
+    __tablename__ = "export_jobs"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    resource_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    artifact_kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    filters: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    file_url: Mapped[str | None] = mapped_column(String(500))
+    file_name: Mapped[str | None] = mapped_column(String(300))
+    row_count: Mapped[int | None] = mapped_column(Integer)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    celery_task_id: Mapped[str | None] = mapped_column(String(255))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()")
+    )
+
+    __table_args__ = (
+        Index("idx_export_jobs_user_created", "tenant_id", "user_id", "created_at"),
+    )
+
+
 # 导出供 Alembic 自动生成迁移使用
 __all__ = [
     "Base",
@@ -455,6 +488,7 @@ __all__ = [
     "LlmConfig",
     "ToolConfig",
     "AuditLog",
+    "ExportJob",
     "UserRole",
     "InvoiceType",
     "RiskLevel",

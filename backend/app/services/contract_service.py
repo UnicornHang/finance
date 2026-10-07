@@ -15,7 +15,7 @@ from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.memory.entities import mark_contract_archived
@@ -144,6 +144,58 @@ class ContractService:
             .limit(200)
         )
         return list(result.scalars().all())
+
+    async def list_for_export(
+        self,
+        db: AsyncSession,
+        tenant_id: UUID,
+        *,
+        user: "User",
+        search: str | None = None,
+        risk_level: str | None = None,
+        page: int = 1,
+        page_size: int = 100,
+    ) -> tuple[list["Contract"], int]:
+        """导出用分页列表：排除 deleted；员工仅本人；无 200 条硬上限。"""
+        from app.models import Contract
+
+        page = max(1, page)
+        page_size = min(100, max(1, page_size))
+
+        conditions = [
+            Contract.tenant_id == tenant_id,
+            Contract.status != "deleted",
+        ]
+        if user.role == "employee":
+            conditions.append(Contract.user_id == user.id)
+        if risk_level:
+            conditions.append(Contract.risk_level == risk_level)
+        if search:
+            like = f"%{search}%"
+            conditions.append(
+                or_(
+                    Contract.contract_name.ilike(like),
+                    Contract.party_a.ilike(like),
+                    Contract.party_b.ilike(like),
+                    Contract.contract_no.ilike(like),
+                )
+            )
+
+        where = and_(*conditions)
+        total = (
+            await db.execute(select(func.count()).select_from(Contract).where(where))
+        ).scalar_one()
+        offset = (page - 1) * page_size
+        rows = (
+            await db.execute(
+                select(Contract)
+                .where(where)
+                .order_by(Contract.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+        ).scalars().all()
+        return list(rows), int(total)
 
     async def get(
         self,

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, FileText, Search } from 'lucide-react'
+import { Download, FileText, History, Search } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -27,11 +27,14 @@ import {
 import { Table, TBody, TD, TH, THead, TR, EmptyState, Toolbar } from '@/components/ui/table'
 import { RiskBadge } from '@/components/sidepanel/RiskBadge'
 import { contractApi } from '@/api/contract'
+import { exportApi } from '@/api/export'
 import { fileApi } from '@/api/file'
+import { readApiMessage } from '@/lib/apiError'
 import type { Contract } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
 import { ContractDetailDialog } from './ContractDetailDialog'
+import { ExportCenter } from './ExportCenter'
 
 export function ContractArchive() {
   const queryClient = useQueryClient()
@@ -44,6 +47,9 @@ export function ContractArchive() {
   const [riskFilter, setRiskFilter] = useState('')
   const [detail, setDetail] = useState<Contract | null>(null)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  /** 导出中心抽屉开关与高亮任务 */
+  const [exportCenterOpen, setExportCenterOpen] = useState(false)
+  const [exportHighlightId, setExportHighlightId] = useState<string | null>(null)
 
   const detailQuery = useQuery({
     queryKey: ['contract', detail?.id],
@@ -72,6 +78,37 @@ export function ContractArchive() {
     },
   })
 
+  /** 按当前 search/risk 创建异步合同导出任务（后端查库，不依赖当前页）。 */
+  const exportMutation = useMutation({
+    mutationFn: () =>
+      exportApi.create({
+        resource_type: 'contract',
+        filters: {
+          search,
+          risk_level: riskFilter || null,
+        },
+      }),
+    onSuccess: (job) => {
+      if (job.deduplicated) {
+        toast.info(job.message || '已有相同导出任务')
+      } else {
+        toast.success('已创建导出任务')
+      }
+      setExportHighlightId(job.id)
+      setExportCenterOpen(true)
+      void queryClient.invalidateQueries({ queryKey: ['exports'] })
+    },
+    onError: (err) => {
+      toast.error(readApiMessage(err) || '创建导出失败')
+    },
+  })
+
+  /** 打开导出中心（不强制高亮）。 */
+  function openExportCenter() {
+    setExportHighlightId(null)
+    setExportCenterOpen(true)
+  }
+
   const list = (contracts || []).filter((c) => {
     if (riskFilter && c.risk_level !== riskFilter) return false
     if (
@@ -96,10 +133,21 @@ export function ContractArchive() {
     <div className="space-y-6">
       <SectionHeader
         actions={
-          <Button size="md">
-            <Download className="h-4 w-4" />
-            导出报告
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" size="md" onClick={openExportCenter}>
+              <History className="h-4 w-4" />
+              导出记录
+            </Button>
+            <Button
+              type="button"
+              size="md"
+              disabled={exportMutation.isPending}
+              onClick={() => exportMutation.mutate()}
+            >
+              <Download className="h-4 w-4" />
+              导出报告
+            </Button>
+          </div>
         }
       />
 
@@ -231,6 +279,13 @@ export function ContractArchive() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ExportCenter
+        open={exportCenterOpen}
+        onOpenChange={setExportCenterOpen}
+        highlightId={exportHighlightId}
+        defaultResourceType="contract"
+      />
     </div>
   )
 }

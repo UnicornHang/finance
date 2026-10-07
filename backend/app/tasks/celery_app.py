@@ -13,6 +13,8 @@ celery_app = Celery(
         "app.tasks.ocr_task",
         "app.tasks.contract_task",
         "app.tasks.cleanup_task",
+        "app.tasks.export_task",
+        "app.tasks.export_cleanup_task",
     ],
 )
 
@@ -30,6 +32,10 @@ celery_app.conf.update(
         "cleanup-duplicate-files": {
             "task": "app.tasks.cleanup_task.cleanup_duplicate_files",
             "schedule": crontab(hour=3, minute=30, day_of_week="sun"),
+        },
+        "cleanup-expired-exports": {
+            "task": "app.tasks.export_cleanup_task.cleanup_expired_exports",
+            "schedule": crontab(hour=4, minute=0),
         },
     },
 )

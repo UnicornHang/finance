@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     minio_bucket_invoice: str = "invoices"
     minio_bucket_contract: str = "contracts"
     minio_bucket_kb: str = "knowledge-base"
+    minio_bucket_exports: str = "exports"
+
+    # ---- 异步导出 ----
+    export_retention_days: int = 7
+    export_max_inflight_per_user: int = 3
 
     # ---- JWT / 安全 ----
     jwt_secret: str = "change-me-to-a-32-char-secret"

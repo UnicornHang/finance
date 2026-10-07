@@ -368,6 +368,42 @@ export interface WebSource {
   published_at?: string
 }
 
+/** 异步导出资源类型 */
+export type ExportResourceType = 'invoice' | 'contract'
+
+/** 导出任务生命周期状态 */
+export type ExportJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'expired'
+
+/** 导出任务（与后端 /exports 序列化字段对齐） */
+export interface ExportJob {
+  id: string
+  resource_type: ExportResourceType
+  artifact_kind: 'xlsx' | 'zip'
+  status: ExportJobStatus
+  filters: Record<string, unknown>
+  row_count: number | null
+  file_name: string | null
+  error_message: string | null
+  deduplicated?: boolean
+  message?: string | null
+  created_at: string
+  finished_at: string | null
+}
+
+/** 预签名下载响应 */
+export interface ExportDownloadResponse {
+  url: string
+  expires_in: number
+}
+
+/** 导出任务分页列表 */
+export interface ExportJobListResponse {
+  items: ExportJob[]
+  total: number
+  page: number
+  page_size: number
+}
+
 // SSE 事件类型
 export type StreamEvent =
   | { type: 'text'; content: string; session_id?: string }

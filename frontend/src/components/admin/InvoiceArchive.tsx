@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Receipt, Search, Trash2 } from 'lucide-react'
+import { Download, History, Receipt, Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Card, CardContent } from '@/components/ui/card'
@@ -27,10 +27,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Table, TBody, TD, TH, THead, TR, EmptyState, Toolbar } from '@/components/ui/table'
+import { exportApi } from '@/api/export'
 import { invoiceApi } from '@/api/invoice'
+import { readApiMessage } from '@/lib/apiError'
 import type { Invoice } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 
+import { ExportCenter } from './ExportCenter'
 import { InvoiceDetailDialog } from './InvoiceDetailDialog'
 import { InvoiceListPager } from './InvoiceListPager'
 import { STATUS_LABEL, STATUS_TONE, TYPE_LABEL, TYPE_TONE } from './invoiceMeta'
@@ -44,59 +47,6 @@ const STATUS_OPTIONS = [
   { value: 'active', label: '已归档' },
 ] as const
 
-const CSV_COLUMNS: Array<{ key: keyof Invoice; label: string }> = [
-  { key: 'invoice_title', label: '发票抬头' },
-  { key: 'company', label: '开票公司' },
-  { key: 'tax_id', label: '纳税人识别号' },
-  { key: 'invoice_code', label: '发票代码' },
-  { key: 'invoice_number', label: '发票号码' },
-  { key: 'invoice_date', label: '开票日期' },
-  { key: 'amount_excl_tax', label: '不含税金额' },
-  { key: 'tax_amount', label: '税额' },
-  { key: 'amount_incl_tax', label: '含税合计' },
-  { key: 'invoice_type', label: '发票类型' },
-  { key: 'seller', label: '销售方' },
-  { key: 'buyer', label: '购买方' },
-  { key: 'remark', label: '备注' },
-  { key: 'status', label: '状态' },
-  { key: 'operator_name', label: '操作用户' },
-  { key: 'created_at', label: '归档时间' },
-]
-
-function escapeCsvCell(v: unknown): string {
-  if (v === null || v === undefined) return ''
-  const s = String(v)
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`
-  return s
-}
-
-function buildCsv(rows: Invoice[]): string {
-  const header = CSV_COLUMNS.map((c) => escapeCsvCell(c.label)).join(',')
-  const body = rows
-    .map((r) =>
-      CSV_COLUMNS.map((c) => {
-        const v = r[c.key]
-        if (c.key === 'invoice_type') return escapeCsvCell(TYPE_LABEL[String(v)] || v)
-        if (c.key === 'status') return escapeCsvCell(STATUS_LABEL[String(v)] || v)
-        return escapeCsvCell(v)
-      }).join(','),
-    )
-    .join('\n')
-  // 加 BOM 让 Excel 正确识别 UTF-8
-  return '﻿' + header + '\n' + body
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
 export function InvoiceArchive() {
   const queryClient = useQueryClient()
   const [searchInput, setSearchInput] = useState('')
@@ -109,6 +59,9 @@ export function InvoiceArchive() {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   /** 待确认删除的 id。单条来自详情，多条来自表格勾选。 */
   const [pendingDelete, setPendingDelete] = useState<string[] | null>(null)
+  /** 导出中心抽屉开关与高亮任务 */
+  const [exportCenterOpen, setExportCenterOpen] = useState(false)
+  const [exportHighlightId, setExportHighlightId] = useState<string | null>(null)
   const appliedSearch = useRef(search)
 
   // 输入停顿后再查，避免每个字都打一页接口
@@ -183,6 +136,32 @@ export function InvoiceArchive() {
     },
   })
 
+  /** 按当前筛选创建异步发票导出任务，并打开导出中心。 */
+  const exportMutation = useMutation({
+    mutationFn: () =>
+      exportApi.create({
+        resource_type: 'invoice',
+        filters: {
+          search,
+          invoice_type: typeFilter === 'all' ? null : typeFilter,
+          status_filter: statusFilter,
+        },
+      }),
+    onSuccess: (job) => {
+      if (job.deduplicated) {
+        toast.info(job.message || '已有相同导出任务')
+      } else {
+        toast.success('已创建导出任务')
+      }
+      setExportHighlightId(job.id)
+      setExportCenterOpen(true)
+      void queryClient.invalidateQueries({ queryKey: ['exports'] })
+    },
+    onError: (err) => {
+      toast.error(readApiMessage(err) || '创建导出失败')
+    },
+  })
+
   // 已删除记录再删会 404，当前页只允许勾选未删除的
   const selectableIds = list.filter((inv) => inv.status !== 'deleted').map((inv) => inv.id)
   const selectedOnPage = selectableIds.filter((id) => selectedIds.includes(id))
@@ -218,26 +197,31 @@ export function InvoiceArchive() {
     }
   }, [data, page, pageSize, total])
 
-  const handleExportCsv = () => {
-    if (list.length === 0) {
-      toast.warning('当前列表为空，无可导出数据')
-      return
-    }
-    const csv = buildCsv(list)
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    downloadBlob(blob, `invoices-${ts}.csv`)
-    toast.success(`已导出 ${list.length} 条记录`)
+  /** 打开导出中心（不强制高亮）。 */
+  function openExportCenter() {
+    setExportHighlightId(null)
+    setExportCenterOpen(true)
   }
 
   return (
     <div className="space-y-6">
       <SectionHeader
         actions={
-          <Button size="md" onClick={handleExportCsv}>
-            <Download className="h-4 w-4" />
-            导出 CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="secondary" size="md" onClick={openExportCenter}>
+              <History className="h-4 w-4" />
+              导出记录
+            </Button>
+            <Button
+              type="button"
+              size="md"
+              disabled={exportMutation.isPending}
+              onClick={() => exportMutation.mutate()}
+            >
+              <Download className="h-4 w-4" />
+              导出 Excel
+            </Button>
+          </div>
         }
       />
 
@@ -453,6 +437,13 @@ export function InvoiceArchive() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ExportCenter
+        open={exportCenterOpen}
+        onOpenChange={setExportCenterOpen}
+        highlightId={exportHighlightId}
+        defaultResourceType="invoice"
+      />
     </div>
   )
 }
