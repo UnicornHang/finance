@@ -2,9 +2,9 @@
 
 ## 产品文档（PRD）
 
-**版本**：V1.0
+**版本**：V1.1
 **阶段**：私有化单企业部署，预留 SaaS 多租户升级
-**日期**：2026-09-20
+**日期**：2026-10-07
 
 ---
 
@@ -45,7 +45,7 @@
 
 ### 1.2 产品机会
 
-大语言模型与 OCR 技术的成熟，使得「对话即操作」成为可能。员工不需要学习复杂的财务系统，只需在聊天窗口上传发票、提问制度，AI Agent 自动完成识别、结构化、审查、归档。
+大语言模型（含多模态视觉）的成熟，使得「对话即操作」成为可能。员工不需要学习复杂的财务系统，只需在聊天窗口上传发票、提问制度，AI Agent 自动完成识别、结构化、审查、归档。
 
 ### 1.3 产品定位
 
@@ -69,7 +69,7 @@
 AI 识别结果不直接入库，而是通过侧弹窗展示，用户可编辑、确认后再归档。既保证效率，又保留人工兜底，避免 AI 错误直接污染数据。
 
 **原则三：敏感数据边界清晰**
-发票、合同属于企业敏感数据。OCR 可走云服务，但合同合规审查的 LLM 调用需脱敏处理。原件加密存储，权限行级隔离。
+发票、合同属于企业敏感数据。发票识别走已配置的多模态大模型；合同合规审查的 LLM 调用需脱敏处理。原件加密存储，权限行级隔离。
 
 **原则四：为 SaaS 预留，但不为 SaaS 过度设计**
 当前私有化单企业部署，但所有数据表加 `tenant_id`，权限查询强制带租户过滤。未来升 SaaS 时，只需注入租户上下文，不改业务逻辑。
@@ -86,7 +86,7 @@ AI 识别结果不直接入库，而是通过侧弹窗展示，用户可编辑�
 |---|---|---|
 | 交互入口 | Chat 优先 | 降低学习成本 |
 | AI 结果处理 | 人工确认后入库 | 避免错误数据污染 |
-| OCR 部署 | 云 API 优先 | 成本低，MVP 快 |
+| 发票识别 | 多模态大模型（单据识别场景） | 与对话共用模型配置，无独立 OCR 引擎 |
 | 合同审查 LLM | 脱敏后外部 API | 平衡效果与合规 |
 | 原件存储 | 服务端加密 | 安全合规 |
 | 权限粒度 | 行级（tenant + user） | 为 SaaS 预留 |
@@ -172,7 +172,7 @@ AI 识别结果不直接入库，而是通过侧弹窗展示，用户可编辑�
 Agent 通过意图识别将用户输入路由到：
 - 闲聊 → 通用 LLM
 - 制度问答 → RAG 检索 + LLM
-- 发票上传 → OCR + 结构化
+- 发票上传 → 多模态大模型识别 + 结构化
 - 合同上传 → 解析 + 合规审查
 
 **消息类型**：
@@ -188,7 +188,7 @@ Agent 回复采用流式（SSE/WebSocket），提升体验。
 
 **流程**：
 ```
-上传 → OCR识别 → 结构化提取 → 侧弹窗展示 → 用户编辑 → 确定归档 → 入库+原件加密存储
+上传 → 多模态大模型识别 → 结构化提取 → 侧弹窗展示 → 用户编辑 → 确定归档 → 入库+原件加密存储
 ```
 
 **侧弹窗字段**：
@@ -211,7 +211,7 @@ Agent 回复采用流式（SSE/WebSocket），提升体验。
 
 **操作按钮**：
 - 确定归档：写入数据库，原件加密存储
-- 重新识别：重新调用 OCR
+- 重新识别：再次调用多模态大模型识别
 - 取消：关闭弹窗，不归档
 
 **去重校验**：
@@ -391,7 +391,7 @@ messages、session_memory、embeddings 全部带 session_id，查询强制过滤
 Agent 编排层不能有全局 memory 变量。每次请求创建独立 SessionContext，请求结束销毁。
 
 **原则四：异步任务回写原 session**
-OCR、合同审查是异步任务，完成后必须带 session_id 写回对应会话，不能写全局队列。
+合同审查等异步任务完成后必须带 session_id 写回对应会话，不能写全局队列。发票识别在请求内同步完成，结果经 SSE 推回原会话。
 
 ### 6.5 会话切换流程
 
@@ -522,7 +522,7 @@ def extract_entities(session_id, message):
 ## 8. 非功能需求
 
 **性能**：
-- OCR 识别 < 5s
+- 发票识别（多模态） < 15s
 - 合同审查 < 15s
 - RAG 问答 < 3s
 - 页面加载 < 2s
@@ -552,7 +552,7 @@ def extract_entities(session_id, message):
 **Phase 1（4–6 周）**
 - 登录 + Chat 主界面
 - 会话列表 + 会话隔离
-- 发票上传 → OCR → 侧弹窗 → 归档
+- 发票上传 → 多模态识别 → 侧弹窗 → 归档
 - 后台：发票归档、用户管理
 
 **Phase 2（4 周）**
@@ -576,7 +576,7 @@ def extract_entities(session_id, message):
 |---|---|---|
 | P1 | 登录 | 账号密码登录、3 次失败锁定、JWT 刷新 |
 | P1 | Chat 界面 | 会话列表、新建/重命名/删除、切换 |
-| P1 | 发票上传 | 输入框选文件 → **立刻**调 `POST /files/upload` 落 MinIO（不阻塞文本输入） → 用户点发送：`POST /chat/stream` JSON 体带 `file_url`+`file_hash`，由 LLM 决定调用 OCR → 右栏持久展示 → 编辑 → 归档全链路 |
+| P1 | 发票上传 | 输入框选文件 → **立刻**调 `POST /files/upload` 落 MinIO（不阻塞文本输入） → 用户点发送：`POST /chat/stream` JSON 体带 `file_url`+`file_hash`，由 LLM 分流后走多模态发票识别 → 右栏持久展示 → 编辑 → 归档全链路 |
 | P1 | 发票去重 | 同代码+号码重复归档时阻断 |
 | P2 | 合同审查 | 解析 → 脱敏 → 审查 → 风险等级展示 |
 | P2 | RAG 知识库 | 文档上传、切分、向量化、检索测试 |
@@ -588,7 +588,7 @@ def extract_entities(session_id, message):
 
 | 指标 | 目标 |
 |---|---|
-| OCR 识别 P95 | ≤ 5s |
+| 发票识别 P95 | ≤ 15s |
 | 合同审查 P95 | ≤ 15s |
 | RAG 问答 P95 | ≤ 3s |
 | Chat 首屏 P95 | ≤ 2s |
@@ -624,7 +624,7 @@ def extract_entities(session_id, message):
 |---|---|---|
 | 用户错误 | 输入类 | 上传非支持文件、必填字段为空、金额非法 |
 | 业务错误 | 校验类 | 发票重复、合同未签字、权限不足 |
-| 系统错误 | 依赖类 | OCR 超时、LLM 超时、数据库不可达 |
+| 系统错误 | 依赖类 | 发票识别超时、LLM 超时、数据库不可达 |
 | 严重错误 | 不可恢复 | 文件丢失、数据损坏、密钥失效 |
 
 ### 11.2 用户侧错误处理
@@ -633,8 +633,8 @@ def extract_entities(session_id, message):
 |---|---|---|
 | 文件格式不支持 | 「请上传 PDF / JPG / PNG / WEBP 文件」 | 阻断，不上传 |
 | 文件过大（> 20MB） | 「文件超过 20MB，请压缩或分片上传」 | 阻断 |
-| OCR 识别失败 | 「识别失败，请检查图片清晰度后重新上传」 | 保留上传，提供「重新识别」按钮 |
-| OCR 置信度低 | 字段标黄 + 「⚠ 识别置信度低，请核对」 | 允许归档但提示 |
+| 发票识别失败 | 「识别失败，请检查图片清晰度后重新上传」 | 保留上传，提供「重新识别」按钮 |
+| 识别字段不确定 | 字段标黄 + 「⚠ 请核对识别结果」 | 允许归档但提示 |
 | 发票重复 | 「该发票已归档（编号 xxx），是否查看？」 | 阻断归档 |
 | LLM 超时 | 「正在处理中，请稍候…」+ 轮询 | 后台继续处理，完成后通知 |
 | 权限不足 | 「您无权访问此资源」 | 阻断，记录审计 |
@@ -642,17 +642,20 @@ def extract_entities(session_id, message):
 
 ### 11.3 系统侧错误处理
 
-**OCR 失败重试**
+**发票识别失败**
 ```python
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-async def recognize_with_retry(file_bytes):
+async def recognize_invoice(file_bytes, *, content_type, filename, db, tenant_id):
     try:
-        return await ocr_service.recognize(file_bytes)
-    except OCRTimeout:
-        # 切换备用 OCR 提供商
-        return await fallback_ocr_service.recognize(file_bytes)
-    except OCRPermanentError:
-        # 标记为不可识别，要求人工处理
+        # 单据识别场景；无密钥时回落到日常对话模型；两者皆无则直接失败
+        return await invoice_vision_service.recognize(
+            file_bytes,
+            content_type=content_type,
+            filename=filename,
+            db=db,
+            tenant_id=tenant_id,
+        )
+    except Exception:
+        # 标记为不可识别，前端展示「重新识别」
         raise InvoiceUnrecognizable()
 ```
 
@@ -673,7 +676,7 @@ async def llm_call_with_fallback(prompt, scene):
 
 | 任务 | 失败处理 |
 |---|---|
-| OCR | 写入消息：「识别失败」，WebSocket 推送，前端展示重试按钮 |
+| 发票识别 | SSE 推送 error，写入消息：「识别失败」，前端展示重试按钮 |
 | 合同审查 | 写入消息：「审查超时，已转人工」,列表标红「待处理」 |
 | RAG 检索 | 返回「未找到相关制度」，不阻塞对话 |
 | 文件上传 | 上传到 99% 失败：保留临时文件 24h，允许断点续传 |
@@ -701,8 +704,8 @@ async def llm_call_with_fallback(prompt, scene):
 
 | 类型 | 优先级 | 推送时机 |
 |---|---|---|
-| OCR 完成 | 低 | 异步任务完成时 |
-| 合同审查完成 | 中 | 异步任务完成时 |
+| 发票识别完成 | 低 | SSE `sidepanel` 推送时 |
+| 合同审查完成 | 中 | 审查完成时 |
 | 合同高风险告警 | 高 | 风险等级 = 高时立即 |
 | 制度文档更新 | 低 | RAG 文档状态变更 |
 | 用户密码即将过期 | 中 | 提前 7 天 |
@@ -712,14 +715,14 @@ async def llm_call_with_fallback(prompt, scene):
 
 ```json
 {
-  "type": "ocr_done",
+  "type": "sidepanel",
   "session_id": "s456",
-  "payload": { "invoice_id": "inv_001", "data": {...} },
+  "payload": { "type": "invoice", "data": { "id": "inv_001", "status": "pending_review", "...": "..." } },
   "timestamp": "2026-09-20T10:30:00Z"
 }
 ```
 
-**消息类型**：`ocr_done` / `contract_done` / `contract_high_risk` / `session_locked` / `system_notice`
+**消息类型**：`sidepanel` / `contract_done` / `contract_high_risk` / `session_locked` / `system_notice`
 
 ### 12.4 重连与补拉
 
@@ -874,7 +877,7 @@ async def get_invoice(
 
 **默认配置**
 - LLM 默认选型（GPT-4o / 通义千问，可改）
-- OCR 默认腾讯云
+- 发票识别使用单据识别场景（`ocr_post`，历史命名）的多模态模型；无密钥时回落日常对话模型
 
 ### 15.3 升级方案
 
@@ -976,7 +979,7 @@ async def get_invoice(
 | Tenant | 租户，私有化部署下默认为单一企业 |
 | Session | 会话，用户与 Agent 的连续对话单元 |
 | Message | 消息，会话内的单条对话（用户或 Agent） |
-| Tool | 工具，Agent 可调用的能力（OCR / RAG / 审查） |
+| Tool | 工具，Agent 可调用的能力（发票识别 / RAG / 审查） |
 | RAG | 检索增强生成，结合知识库检索的 LLM 生成 |
 | Sidepanel | 侧弹窗，展示结构化识别结果 |
 | Stream | 流式输出，Agent 回复逐字推送给前端 |
@@ -989,25 +992,28 @@ async def get_invoice(
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | V1.0 | 2026-09-20 | 初版，覆盖产品定位、功能模块、用户旅程、数据模型 |
-| V1.1 | 2026-09-21 | **Phase A 完成**：发票 OCR 归档全链路验收（详见 §20） |
+| V1.1 | 2026-09-21 | **Phase A 完成**：发票识别归档全链路验收（详见 §20；当时曾用云 OCR，现已废止） |
 | V1.2 | 2026-09-23 | **Phase A+ UI/UX 增量**：shadcn/ui 全面替换手搓控件、LLM 设置编辑体验优化、错误提示与消息渲染重构、DeepSeek 风格会话侧栏（详见 §21） |
 | V1.3 | 2026-09-25 | **识别主路径切换**：大模型同步识别发票并按附件分流；附件回显；场景级 system_prompt；虚拟机 Docker 部署与运行手册（详见 §22） |
 | V1.4 | 2026-09-26 | **聊天附件表**：任意图片/文件进 `chat_files`，与消息绑定；识别状态与模型上下文摘要（详见 §23） |
 | V1.5 | 2026-09-26 | **归档时去重**：识别不再因重复失败；确认归档才与已归档记录查重。侧栏可从历史恢复；档案页可查看已删除与全部状态（详见 §24） |
 | V1.6 | 2026-09-27 | **档案页与文件正文**：发票详情改票面表格；列表分页、批量删除、操作用户；机动车销售统一发票；PDF/Word 抽正文后再识别；对话 Markdown 改用专业库（详见 §25） |
+| V1.7 | 2026-10-07 | **文档对齐**：正式废弃腾讯云 / 通用 OCR 引擎描述；发票识别仅以多模态大模型为准（与 §22 一致） |
 
 ---
 
-## 20. Phase A 验收清单（2026-09-21）
+## 20. Phase A 验收清单（2026-09-21，历史）
 
 **范围**：发票智能识别 + 人工确认 + 归档（旅程一）。
 
-### 20.1 端到端流程
+> **已废止说明**：本节保留当时验收事实。当时识别曾走 Celery 异步 + 云 OCR Provider（含 Mock 降级）。**现行主路径见 §22**：多模态大模型同步识别，SSE 推侧栏；不再使用任何 OCR 引擎（含腾讯云）。
+
+### 20.1 端到端流程（当时）
 
 ```
-用户上传 → chat_stream multipart → MinIO 存 + SHA-256
-  → Celery process_invoice_ocr → 腾讯云 OCR（或 Mock 降级）
-  → InvoiceOCRResult → invoice_service.create_pending(status='pending_review')
+用户上传 → chat_stream → MinIO 存 + SHA-256
+  → 异步识别任务 → 结构化结果
+  → invoice_service.create_pending(status='pending_review')
   → 前端轮询 GET /invoices/preview/by-hash/{hash}
   → 用户编辑 → POST /invoices/{id}/confirm → status='active'
   → 档案页可见
@@ -1027,21 +1033,20 @@ async def get_invoice(
 | 8 | LLM 设置编辑 system_prompt → 持久化 | `llm_configs.system_prompt` 列 + 迁移 002 | ✅ |
 | 9 | 测试全绿 | `pytest tests/test_invoice_archive.py tests/test_chat_with_file.py` | ✅ |
 | 10 | smoke.sh 11 步全绿 | 见 scripts/smoke.sh | ✅ |
-| 11 | Celery worker 自动接管 OCR 任务 | docker-compose worker 已挂载 | ✅ |
+| 11 | （当时）Worker 接管异步识别任务 | docker-compose worker 已挂载 | ✅ 历史 |
 
-### 20.3 关键设计决策
+### 20.3 关键设计决策（当时；部分已被 §22 取代）
 
-1. **不用 Redis pubsub**：前端轮询 `GET /invoices/preview/by-hash/{hash}`，避免长 SSE + 重连复杂度。
-2. **两阶段入库**：OCR 完成先 `status='pending_review'`，用户确认才 `active`，符合"AI 做识别，人做确认"原则。
-3. **去重策略**：硬拒绝（409 Conflict），不静默覆盖。重复上传时 OCR 任务主动跳过。
-4. **降级策略**：`TENCENT_OCR_SECRET_ID` 为空时返回 `MockOCRProvider`，开发环境无需真密钥。
+1. **不用 Redis pubsub**：当时前端轮询 `GET /invoices/preview/by-hash/{hash}`；现行识别完成即推 SSE `sidepanel`，轮询接口仍可作补偿。
+2. **两阶段入库**：识别完成先 `status='pending_review'`，用户确认才 `active`，符合"AI 做识别，人做确认"原则（仍有效）。
+3. **去重策略**：硬拒绝（409 Conflict），不静默覆盖（确认归档阶段仍有效；识别阶段策略见 §24）。
+4. **识别实现**：~~云 OCR + 无密钥 Mock~~ → **已废止**；现行仅多模态大模型，无密钥即失败（见 §22）。
 5. **审计日志**：编辑/确认/删除均写入 `audit_logs`，记录 `before_value` / `after_value` 快照。
 6. **行级权限**：员工只查自己发票，财务/管理员查全部；service 层用 `user.role` 强制过滤。
 
 ### 20.4 不在 Phase A 范围
 
 - 流式中断（`/chat/interrupt/{id}` 仍 MVP 占位）
-- LLM 归一（`_llm_normalize` 当前直接透传 OCR 结果；scene='ocr_post' 留给 Phase B）
 - 批量上传 / 拖拽上传 UI
 - 发票字段版本历史（仅快照当前值）
 - PDF 多页发票拆分识别
@@ -1118,7 +1123,7 @@ a8ea2b7 会话侧栏重构为 DeepSeek 风格：时间桶分组 + 用户底部�
 
 - **时间桶**：按 `今天 / 昨天 / 本周 / 本月 / 更早` 分组，会话项 hover 显示完整时间。
 - **用户底部信息条**：侧栏底部固定一条用户卡片（头像 + 邮箱 + 设置入口），不再依赖顶栏 Avatar Dropdown。
-- **会话项**：左侧 icon 区（"普通对话" / "OCR" / "审查" 三种状态色），右侧"更多"菜单（`DropdownMenu`：重命名 / 删除）。
+- **会话项**：左侧 icon 区（"普通对话" / "识别" / "审查" 三种状态色），右侧"更多"菜单（`DropdownMenu`：重命名 / 删除）。
 - **状态库**：[`sessionStore.ts`](frontend/src/stores/sessionStore.ts) 增加 `groupByTimeBucket()` 纯函数 + `activeSessionId` 选择器；UI 用 Zustand 订阅。
 
 **改动文件**：[`SessionList.tsx`](frontend/src/components/chat/SessionList.tsx)（侧栏主体）、[`sessionStore.ts`](frontend/src/stores/sessionStore.ts)（状态层）、[`uiStore.ts`](frontend/src/stores/uiStore.ts)（侧栏折叠状态）、[`Chat.tsx`](frontend/src/pages/Chat.tsx)（整体布局调整）。
@@ -1146,7 +1151,7 @@ a8ea2b7 会话侧栏重构为 DeepSeek 风格：时间桶分组 + 用户底部�
 
 ## 22. 当前进度（2026-09-25）
 
-**定位**：Phase A 发票归档链路保留。识别从「腾讯云 OCR + Celery 异步 + 前端轮询」改为「大模型同步识别，SSE 直接推侧栏」。§20 记录的是当时的验收事实；下面是现在的主路径。
+**定位**：Phase A 发票归档链路保留。识别已固定为「多模态大模型同步识别，SSE 直接推侧栏」。§20 为历史验收；下面是现行主路径。不使用任何 OCR 引擎。
 
 ### 22.1 端到端流程（现行）
 
@@ -1154,13 +1159,13 @@ a8ea2b7 会话侧栏重构为 DeepSeek 风格：时间桶分组 + 用户底部�
 选文件 → POST /files/upload 落 MinIO（选完即传）
   → 发送 POST /chat/stream（JSON：message + file_url + file_hash）
   → 大模型 classify：invoice | contract | chat
-  → invoice：多模态/抽文本识别 → 入库 pending_review → SSE sidepanel + 带字段回复
+  → invoice：invoice_vision_service（多模态/抽文本）→ 入库 pending_review → SSE sidepanel + 带字段回复
   → contract：合同审查场景模型文本审查（未归档、无 RAG）
   → chat：日常对话场景带着文件内容回答
   → 用户确认发票 → status=active
 ```
 
-图片走 `image_url`；PDF/Word 先抽文本再交给同一模型。单据识别场景没有密钥时，改用日常对话里已配置的模型。两条都没有密钥则直接报错，不再回落 OCR 或 Mock。
+图片走 `image_url`；PDF/Word 先抽文本再交给同一模型。单据识别场景（`ocr_post`）没有密钥时，改用日常对话里已配置的模型。两条都没有密钥则直接报错，不回落 Mock 或其它识别引擎。
 
 ### 22.2 已完成
 
@@ -1186,14 +1191,14 @@ a8ea2b7 会话侧栏重构为 DeepSeek 风格：时间桶分组 + 用户底部�
 | 合同归档与合规 RAG | 当前只是审查场景的一次文本回复，没有风险等级入库和规则检索 |
 | 知识库 / 制度问答 | Phase 2 / Phase 3，未开始交付 |
 | 会话摘要与结构化记忆 | Phase 2，未开始交付 |
-| Celery OCR 任务 | 代码仍在，主链路不再 `.delay()`，后续可删或改作补偿任务 |
+| 历史异步识别任务残留 | 主链路不再派发；可删或改作补偿任务（与 OCR 引擎无关） |
 
 ### 22.4 与 §20 的差异
 
 | §20 当时 | 现在 |
 |---|---|
-| Celery `process_invoice_ocr` 异步识别 | 请求内同步识别并推 SSE |
-| 腾讯云 OCR，无密钥走 Mock | 只用已配置的大模型，无密钥即失败 |
+| Celery 异步识别 | 请求内同步识别并推 SSE |
+| 云 OCR Provider + 无密钥 Mock | 只用已配置的多模态大模型，无密钥即失败；**OCR 引擎已废弃** |
 | 前端轮询 `/invoices/preview/by-hash/{hash}` 等结果 | 识别完成即推 `sidepanel`；轮询接口仍可用 |
 | 合同审查不在范围 | 分流已接到审查场景，归档与 RAG 仍未做 |
 

@@ -2,9 +2,9 @@
 
 ## 技术选型与架构设计文档
 
-**版本**：V1.0
+**版本**：V1.1
 **阶段**：私有化单企业部署，预留 SaaS 多租户升级
-**日期**：2026-09-20
+**日期**：2026-10-07
 **技术栈**：React + shadcn/ui + TailwindCSS + SSE / FastAPI / LangChain
 
 ---
@@ -17,7 +17,7 @@
 4. 后端技术方案
 5. Agent 编排方案
 6. 多轮对话与会话隔离实现
-7. OCR 方案
+7. 发票识别方案（多模态大模型）
 8. 合同审查方案
 9. RAG 方案
 10. LLM 网关方案
@@ -56,7 +56,7 @@
 │  意图识别 → 路由 → Tool 调用 → 流式输出               │
 ├─────────────────────────────────────────────────────┤
 │  能力层                                              │
-│  OCR | 合同解析 | RAG | LLM 网关                     │
+│  发票识别（Vision）| 合同解析 | RAG | LLM 网关       │
 ├─────────────────────────────────────────────────────┤
 │  数据层                                              │
 │  PostgreSQL + pgvector | Redis | MinIO               │
@@ -69,9 +69,9 @@
 **数据流**：
 ```
 用户输入 → React 前端 → FastAPI → LangChain Agent
-  → 意图识别 → Tool 调用（OCR/RAG/LLM）
+  → 意图识别 / 附件分流 → 发票识别 / RAG / LLM
   → SSE 流式返回 → 前端渲染
-  → 异步任务（OCR/合同审查）→ 写回 session → WebSocket 通知
+  → 合同审查等异步任务 → 写回 session → 通知前端
 ```
 
 ---
@@ -314,7 +314,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 | 框架 | FastAPI | 异步、高性能、自动文档 |
 | ORM | SQLAlchemy 2.0 + Alembic | 成熟，迁移方便 |
 | 校验 | Pydantic v2 | FastAPI 原生 |
-| 任务队列 | Celery + Redis | OCR/合同审查异步 |
+| 任务队列 | Celery + Redis | 合同审查等异步任务（发票识别在请求内同步） |
 | 认证 | JWT + OAuth2 | 标准 |
 | 流式 | SSE（StreamingResponse） | 轻量，兼容好 |
 | 文件上传 | python-multipart + 分片 | 大文件支持 |
@@ -341,16 +341,14 @@ app/
 │   ├── orchestrator.py        # LangChain Agent 编排
 │   ├── context.py             # SessionContext
 │   ├── router.py              # 意图识别路由
-│   ├── tools/
-│   │   ├── ocr_tool.py
-│   │   ├── contract_tool.py
-│   │   ├── rag_tool.py
-│   │   └── archive_tool.py
+│   ├── upload_graph.py        # 附件分流（invoice/contract/chat）
+│   ├── tools/                 # 工具骨架（归档禁止由模型直接落库）
 │   └── memory/
 │       ├── summary.py         # 摘要更新
 │       └── entities.py        # 实体抽取
 ├── services/
-│   ├── ocr_service.py
+│   ├── invoice_vision_service.py  # 多模态发票识别（主路径）
+│   ├── invoice_rerecognize.py     # 重新识别
 │   ├── contract_service.py
 │   ├── rag_service.py
 │   ├── llm_service.py
@@ -361,8 +359,7 @@ app/
 │   ├── security.py            # JWT、加密
 │   └── exceptions.py
 └── tasks/                     # Celery 任务
-    ├── ocr_task.py
-    └── contract_task.py
+    └── contract_task.py       # 合同审查等；发票识别不走 Celery
 ```
 
 ### 4.3 SSE 流式接口
@@ -388,11 +385,8 @@ async def chat_stream(
     # 2. 创建独立 SessionContext
     ctx = await SessionContext.load(session_id, user.id, user.tenant_id)
     
-    # 3. 文件处理（异步触发 OCR）
-    if file:
-        task = ocr_task.delay(session_id, file.filename, await file.read())
-        # 先返回文件已接收消息
-        ...
+    # 3. 文件已由 POST /files/upload 落 MinIO；此处带 file_url/file_hash
+    #    编排器 classify 后，发票走 invoice_vision_service 同步识别并 SSE 推侧栏
     
     # 4. Agent 流式处理
     async def event_generator():
@@ -532,21 +526,21 @@ async def route_intent(input: str, file_type: str | None) -> str:
 
 ### 5.4 Tools 定义
 
-```python
-# agent/tools/ocr_tool.py
-from langchain.tools import tool
+发票识别**不是** Agent Tool，由编排器在附件分流为 `invoice` 后直接调用
+`invoice_vision_service.recognize()`，结果经 SSE `sidepanel` 推送；归档须用户确认。
 
-@tool
-async def ocr_invoice(file_url: str) -> dict:
-    """识别发票，返回结构化数据"""
-    result = await ocr_service.recognize_invoice(file_url)
-    return {
-        "抬头": result.invoice_title,
-        "公司": result.company,
-        "税号": result.tax_id,
-        "金额": result.amount,
-        # ...
-    }
+```python
+# services/invoice_vision_service.py（示意）
+async def recognize(
+    file_bytes: bytes,
+    *,
+    content_type: str | None,
+    filename: str | None,
+    db,
+    tenant_id: str,
+) -> tuple[InvoiceOCRResult, str]:
+    """多模态大模型提取发票字段；source 固定为 llm。"""
+    ...
 
 @tool
 async def review_contract(file_url: str, tenant_id: str) -> dict:
@@ -639,66 +633,70 @@ async def extract_entities(session_id: str, message: str):
 | 前端状态隔离 | Zustand 中 messages 按 sessionId 分组 |
 | 会话切换 | 只加载当前 session 上下文，不混入其他 |
 
-### 6.5 异步任务回写
+### 6.5 识别结果写回会话
+
+发票识别在请求内同步完成，经 SSE 写回原 `session_id`，不经全局队列：
 
 ```python
-# tasks/ocr_task.py
-@celery_app.task
-def ocr_task(session_id: str, filename: str, file_bytes: bytes):
-    result = ocr_service.recognize(file_bytes)
-    # 写回原 session
-    save_message(session_id, {
-        "role": "assistant",
-        "content": "发票识别完成",
-        "tool_calls": [{"tool": "ocr_invoice", "result": result}],
-    })
-    # WebSocket 通知前端
-    notify_session(session_id, {"type": "ocr_done", "data": result})
+# chat_service._stream_invoice_recognize（示意）
+yield {"type": "sidepanel", "payload": {"type": "invoice", "data": {"status": "processing", ...}}}
+result, source = await invoice_vision_service.recognize(...)  # source == "llm"
+inv = await invoice_service.create_pending(...)
+yield {"type": "sidepanel", "payload": {"type": "invoice", "data": invoice_dict(inv)}}
+# 再流式回复字段摘要
 ```
+
+合同审查等仍可走 Celery；任务必须带 `session_id`，结果写回原会话。
 
 ---
 
-## 7. OCR 方案
+## 7. 发票识别方案（多模态大模型）
 
-### 7.1 选型对比
+### 7.1 决策
 
-| 方案 | 成本 | 准确率 | 适用 |
-|---|---|---|---|
-| 腾讯云通用印刷体 | 0.15元/次（<1万），0.06元/次（>10万），预付费0.05元/次 | 高 | MVP 首选 |
-| 阿里云 OCR | 约 0.012 美元/次起 | 高 | 备选 |
-| PaddleOCR 本地 | GPU 服务器成本 | 94%-96% | 数据不出域时 |
+**不使用独立 OCR 引擎**（含腾讯云票据识别、PaddleOCR 等）。发票字段提取统一由
+`invoice_vision_service` 调用已配置的多模态 / 文本大模型完成；`source` 固定为 `"llm"`。
 
-### 7.2 决策
+| 方案 | 说明 | 状态 |
+|---|---|---|
+| 多模态大模型（单据识别场景 `ocr_post`） | 图片 `image_url`；PDF/Word 先抽文本，抽不到再发内嵌图 | **现行** |
+| 日常对话模型回落 | 单据识别场景无密钥时使用 chitchat 模型 | 支持 |
+| 云 OCR / 本地 OCR / Mock | — | **废弃，不回落** |
 
-MVP 阶段用**腾讯云 API**，月成本可控在百元内。预留 OCR 接口抽象层，未来可切本地 PaddleOCR。
+### 7.2 流程
 
-### 7.3 接口抽象
-
-```python
-# services/ocr_service.py
-class OCRProvider(Protocol):
-    async def recognize_invoice(self, file_bytes: bytes) -> InvoiceResult: ...
-
-class TencentOCRProvider:
-    async def recognize_invoice(self, file_bytes: bytes) -> InvoiceResult:
-        # 调用腾讯云 API
-        ...
-
-class PaddleOCRProvider:
-    async def recognize_invoice(self, file_bytes: bytes) -> InvoiceResult:
-        # 本地模型
-        ...
-
-# 配置切换
-OCR_PROVIDER = os.getenv("OCR_PROVIDER", "tencent")
-ocr_service = TencentOCRProvider() if OCR_PROVIDER == "tencent" else PaddleOCRProvider()
+```
+选文件 → POST /files/upload → MinIO
+  → POST /chat/stream（file_url + file_hash）
+  → classify：invoice | contract | chat
+  → invoice：download_bytes → invoice_vision_service.recognize
+  → create_pending(pending_review) → SSE sidepanel + 字段回复
+  → 用户确认 → status=active
 ```
 
-### 7.4 本地部署说明
+重新识别走 `invoice_rerecognize`，同样调用 `invoice_vision_service.recognize`。
 
-- 基础 CPU 方案：4核16G，1.2 张/秒，准确率 94%
-- GPU 方案：RTX 3060，8.7 张/秒，准确率 96%
-- 显存占用：PP-OCRv3 全流程约 1GB
+### 7.3 实现要点
+
+```python
+# services/invoice_vision_service.py
+class InvoiceVisionService:
+    async def classify(...) -> Literal["invoice", "contract", "chat"]: ...
+    async def recognize(...) -> tuple[InvoiceOCRResult, Literal["llm"]]: ...
+```
+
+- 场景键 `ocr_post` 为历史命名，语义为「单据识别（Vision）」，不是 OCR 引擎。
+- 数据结构名 `InvoiceOCRResult` 可保留以兼容既有类型；不代表调用 OCR。
+- 至少识别出发票号码或价税合计之一，否则视为失败。
+- 无单据识别密钥且无日常对话密钥 → 直接报错，不提供 Mock。
+
+### 7.4 与历史路径的差异
+
+| 历史（已废止） | 现行 |
+|---|---|
+| Celery + 云 OCR Provider | 请求内同步多模态识别 |
+| 无密钥 → MockOCR | 无密钥 → 失败 |
+| 前端轮询预览接口等结果 | SSE 推 `sidepanel`；轮询可作补偿 |
 
 ---
 
@@ -956,7 +954,7 @@ CREATE TABLE invoices (
     remark TEXT,
     file_url VARCHAR(500),
     file_hash VARCHAR(64),
-    ocr_confidence JSONB,           -- 各字段识别置信度
+    ocr_confidence JSONB,           -- 各字段识别置信度（历史列名；现行来自多模态识别）
     status VARCHAR(20) DEFAULT 'active',  -- active / withdrawn / deleted
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -1032,7 +1030,7 @@ CREATE INDEX idx_kb_chunks_tenant ON kb_chunks(tenant_id);
 CREATE TABLE llm_configs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL,
-    scene VARCHAR(50) NOT NULL,      -- chitchat / policy_query / ocr_post / contract_review
+    scene VARCHAR(50) NOT NULL,      -- chitchat / policy_query / ocr_post(单据识别 Vision) / contract_review
     model VARCHAR(100) NOT NULL,     -- gpt-4o / claude-3.5 / qwen-plus ...
     provider VARCHAR(50),            -- openai / anthropic / aliyun / local
     api_key_encrypted TEXT,          -- AES-256 加密存储
@@ -1078,7 +1076,7 @@ REVOKE UPDATE, DELETE ON audit_logs FROM PUBLIC;
 | `user:{id}:active_sessions` | 用户当前活跃 session 集合 | 30 min |
 | `ratelimit:{user_id}:{scene}` | 用户级限流计数 | 1 min / 1 hour |
 | `llm:cache:{hash}` | LLM 响应缓存（同类问题复用） | 24 h |
-| `ocr:result:{file_hash}` | OCR 结果去重（同文件不重复识别） | 7 d |
+| `invoice:result:{file_hash}` | 发票识别结果去重（同文件不重复识别） | 7 d |
 | `celery:*` | Celery 任务队列 | — |
 | `socket:{session_id}` | WebSocket 连接记录 | 连接存续期 |
 
@@ -1100,7 +1098,7 @@ REVOKE UPDATE, DELETE ON audit_logs FROM PUBLIC;
 |---|---|---|
 | 会话消息 | 永久（用户可控） | 用户删除触发级联 |
 | 软删发票/合同 | 30 天回收站 | 30 天后硬删 + 文件清理 |
-| OCR 临时文件 | 24 h | 定时清理 |
+| 上传临时文件 | 24 h | 定时清理 |
 | 审计日志 | 1 年 | 1 年后归档到冷存储 |
 | 失败任务记录 | 7 天 | 自动清理 |
 | WebSocket 离线消息 | 24 h | 自动清理 |
@@ -1331,7 +1329,7 @@ alembic downgrade -1
 | 租户路由 | 配置中固定 | 子域名 `tenant.app.com` 或 Header `X-Tenant-ID` |
 | 租户管理 | 无 | 超级管理员后台：创建租户、配置独立域名、计费 |
 | 资源配额 | 无 | 每租户：用户数、存储、Token 配额 |
-| 计费 | 无 | 用量打点（OCR/次数、LLM Token、存储 GB）+ 计费引擎 |
+| 计费 | 无 | 用量打点（发票识别次数、LLM Token、存储 GB）+ 计费引擎 |
 | 数据迁移 | 无 | 私有化→SaaS：ETL 工具，支持结构化导出 |
 | 跨租户查询 | 不允许 | 仅超级管理员 + 审计留痕 |
 | 独立密钥 | 预留 | 每租户独立 KMS 数据密钥 |
@@ -1380,7 +1378,7 @@ class TenantQuota:
     max_users: int = 100
     max_storage_gb: int = 100
     monthly_llm_tokens: int = 1_000_000
-    monthly_ocr_calls: int = 10_000
+    monthly_invoice_recognize: int = 10_000
     
     def check(self, usage: dict) -> bool:
         # 调用前校验，超额返回 429
@@ -1393,9 +1391,9 @@ class TenantQuota:
 # 用量事件统一打点
 emit_usage_event(
     tenant_id="t1",
-    event_type="ocr_call",
+    event_type="invoice_recognize",
     quantity=1,
-    metadata={"provider": "tencent", "doc_type": "invoice"}
+    metadata={"source": "llm", "scene": "ocr_post", "doc_type": "invoice"}
 )
 ```
 
@@ -1413,7 +1411,7 @@ emit_usage_event(
 - `agent_invocations_total{scene, result}`
 - `agent_invocation_duration_seconds{scene}`（Histogram）
 - `llm_tokens_total{tenant, scene, model}`
-- `ocr_calls_total{provider, result}`
+- `invoice_recognize_total{source, result}`
 - `active_sessions_count`
 - `rag_retrieval_duration_seconds`
 
@@ -1429,7 +1427,7 @@ emit_usage_event(
 | 指标 | SLI | SLO 目标 |
 |---|---|---|
 | API 可用性 | 成功请求 / 总请求 | ≥ 99.5% |
-| OCR P95 延迟 | 识别接口响应时间 | ≤ 5s |
+| 发票识别 P95 延迟 | 多模态识别完成时间 | ≤ 15s |
 | 合同审查 P95 | 审查完成时间 | ≤ 15s |
 | RAG 问答 P95 | 问答响应时间 | ≤ 3s |
 | 会话切换 P95 | 切换加载时间 | ≤ 500ms |
@@ -1470,7 +1468,7 @@ logger.info(
 | 告警 | 触发条件 | 级别 |
 |---|---|---|
 | API 错误率 | 5xx 占比 > 1%（5 分钟） | P2 |
-| OCR 错误率 | OCR 失败 > 10%（10 分钟） | P3 |
+| 发票识别错误率 | 识别失败 > 10%（10 分钟） | P3 |
 | LLM 调用超时 | 超时率 > 5%（5 分钟） | P2 |
 | 数据库连接耗尽 | 活跃连接 > 80% | P1 |
 | 磁盘空间 | 使用 > 80% | P2 |
@@ -1493,7 +1491,7 @@ async def chat_stream(): ...
 
 # 租户级限流
 @limiter.limit("10000/hour", scope="tenant")
-async def ocr_endpoint(): ...
+async def invoice_recognize_endpoint(): ...
 
 # 全局限流（防恶意）
 @limiter.limit("1000/minute", scope="global", key_func=get_remote_address)
@@ -1510,11 +1508,10 @@ async def public_endpoint(): ...
 
 | 项目 | 单价 | 月用量 | 月成本 |
 |---|---|---|---|
-| 腾讯云 OCR | 0.15 元/次 | 5000 次 | 750 元 |
-| GPT-4o（输入） | $2.5/M tokens | 5M tokens | $12.5 |
-| GPT-4o（输出） | $10/M tokens | 2M tokens | $20 |
+| GPT-4o（输入，含发票 Vision） | $2.5/M tokens | 6M tokens | $15 |
+| GPT-4o（输出） | $10/M tokens | 2.5M tokens | $25 |
 | Embedding | $0.02/M tokens | 3M tokens | $0.06 |
-| 总计 LLM | | | ~$32.5 |
+| 总计 LLM | | | ~$40 |
 
 **基础设施**
 
@@ -1527,15 +1524,15 @@ async def public_endpoint(): ...
 | 带宽 | 5TB | ¥200 |
 | 总计 | | **¥1350** |
 
-**总计：约 ¥2200 / 月（含 LLM 约 ¥2400）**
+**总计：约 ¥1600 / 月（含 LLM 约 ¥1650；已无独立 OCR 费用）**
 
 ### 16.2 成本优化策略
 
 | 策略 | 节省 | 实现 |
 |---|---|---|
 | LLM 响应缓存（同类问题） | 30-50% | Redis 缓存 prompt hash → response |
-| OCR 缓存（同文件不重复） | 10-20% | 文件 hash 去重 |
-| 选择更小模型 | 50% | 闲聊用 GPT-4o-mini，识别用 gpt-4o |
+| 发票识别缓存（同文件不重复） | 10-20% | 文件 hash 去重 |
+| 选择更小模型 | 50% | 闲聊用 GPT-4o-mini，识别用多模态模型 |
 | 本地模型替代 | 60%+ | 闲聊/分类用本地 GLM-4 / Qwen2.5 |
 | 向量库压缩 | 20% | pgvector 量化 |
 | 按租户配额 | 防止滥用 | 配额校验 |
@@ -1558,7 +1555,7 @@ async def public_endpoint(): ...
 |---|---|---|---|
 | LLM 幻觉（错误识别） | 高 | 数据污染 | 强制人工确认、置信度低字段标黄、定期抽样审计 |
 | LLM 服务中断 | 高 | 业务不可用 | 多模型配置（4o + Claude + 国产），降级到本地小模型 |
-| OCR 准确率不足 | 中 | 用户反复修改 | 多 OCR 引擎投票、置信度提示、字段级反馈 |
+| 发票识别不准 | 中 | 用户反复修改 | 强制人工确认、字段标黄、重新识别、抽样审计 |
 | 上下文窗口溢出 | 中 | 会话丢失 | 四层策略（短/中/长/RAG）已设计 |
 | Embedding 模型升级 | 中 | 向量库失效 | 灰度切换 + 旧向量保留 30 天兼容 |
 | RAG 召回不准 | 中 | 问答答非所问 | 重排序 + 混合检索 + 用户反馈闭环 |
@@ -1608,10 +1605,11 @@ async def public_endpoint(): ...
 
 **单元测试**
 ```python
-# services/test_ocr_service.py
-def test_invoice_field_extraction():
+# services/test_invoice_vision_service.py
+async def test_invoice_field_extraction():
     raw = load_fixture("invoice_sample.jpg")
-    result = ocr_service.recognize(raw)
+    result, source = await invoice_vision_service.recognize(raw, ...)
+    assert source == "llm"
     assert result.invoice_code == "011002100311"
     assert result.amount_incl_tax == Decimal("1130.00")
 
@@ -1623,10 +1621,10 @@ def test_policy_retrieval():
 ```
 
 **集成测试**
-- API 端到端：登录 → 上传 → OCR → 归档
+- API 端到端：登录 → 上传 → 多模态识别 → 归档
 - 数据库迁移：Alembic 升级 + 回滚
 - Redis 缓存：序列化 / 反序列化
-- Celery 任务：异步 OCR / 合同审查
+- Celery 任务：合同审查等异步任务
 
 **覆盖率目标**：核心服务 ≥ 80%，Agent / Tools ≥ 60%
 
@@ -1825,5 +1823,6 @@ alembic upgrade head  # 部署前自动备份
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | V1.0 | 2026-09-20 | 初版，覆盖技术选型、架构、前后端方案、Agent、RAG、安全、部署、测试、CI/CD |
+| V1.1 | 2026-10-07 | 废弃腾讯云 / 通用 OCR 方案；§7 改为多模态发票识别；成本、指标、目录结构与主路径对齐 |
 
 ---
