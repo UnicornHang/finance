@@ -103,11 +103,14 @@ export const invoiceApi = {
       .get<InvoicePreviewResponse>(`/invoices/preview/by-hash/${fileHash}`)
       .then((r) => r.data),
 
-  /** 获取 MinIO 预签名下载 URL */
-  downloadUrl: (id: string, expires = 3600) =>
+  /**
+   * 获取 MinIO 预签名 URL。
+   * download=true 时强制附件下载，避免图片/PDF 在浏览器内联预览。
+   */
+  downloadUrl: (id: string, expires = 3600, download = false) =>
     apiClient
       .get<InvoiceFileResponse>(`/invoices/${id}/file`, {
-        params: { expires },
+        params: { expires, download },
       })
       .then((r) => r.data),
 }

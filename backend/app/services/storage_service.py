@@ -5,6 +5,7 @@ from datetime import timedelta
 from io import BytesIO
 import logging
 from typing import BinaryIO
+from urllib.parse import quote
 
 from minio import Minio
 from minio.error import S3Error
@@ -16,6 +17,16 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _SSE_HEADER = "x-amz-server-side-encryption"
+
+
+def _attachment_content_disposition(filename: str) -> str:
+    """生成 Content-Disposition，兼容中文文件名。"""
+    safe = (filename or "download").replace('"', "").replace("\r", "").replace("\n", "")
+    ascii_name = safe.encode("ascii", "ignore").decode() or "download"
+    return (
+        f'attachment; filename="{ascii_name}"; '
+        f"filename*=UTF-8''{quote(safe)}"
+    )
 
 
 def object_encrypted_sse_s3(stat: object) -> bool:
@@ -91,12 +102,30 @@ class StorageService:
         )
         return f"s3://{bucket}/{object_name}"
 
-    def get_presigned_url(self, bucket: str, object_name: str, expires: int = 3600) -> str:
-        """生成临时下载 URL。"""
+    def get_presigned_url(
+        self,
+        bucket: str,
+        object_name: str,
+        expires: int = 3600,
+        *,
+        filename: str | None = None,
+        as_attachment: bool = False,
+    ) -> str:
+        """生成临时预览/下载 URL。
+
+        as_attachment=True 时附带 Content-Disposition，浏览器会下载而非内联预览。
+        """
+        response_headers = None
+        if as_attachment:
+            name = filename or object_name.rsplit("/", 1)[-1] or "download"
+            response_headers = {
+                "response-content-disposition": _attachment_content_disposition(name),
+            }
         return self.client.presigned_get_object(
             bucket_name=bucket,
             object_name=object_name,
             expires=timedelta(seconds=expires),
+            response_headers=response_headers,
         )
 
     def delete_file(self, bucket: str, object_name: str) -> None:

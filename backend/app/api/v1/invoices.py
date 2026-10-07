@@ -300,6 +300,10 @@ async def get_invoice_file(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     expires: int = Query(default=3600, ge=60, le=86400),
+    download: bool = Query(
+        default=False,
+        description="true 时强制附件下载，避免浏览器内联预览",
+    ),
 ):
     """返回 MinIO 预签名下载 URL，并记一条下载审计。"""
     url = await invoice_service.get_presigned_download_url(
@@ -308,6 +312,7 @@ async def get_invoice_file(
         user=user,
         invoice_id=invoice_id,
         expires_seconds=expires,
+        as_attachment=download,
     )
     ip = request.client.host if request.client else None
     await write_audit_log(

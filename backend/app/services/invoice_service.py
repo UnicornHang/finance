@@ -515,6 +515,7 @@ class InvoiceService:
         user: "User",
         invoice_id: UUID,
         expires_seconds: int = 3600,
+        as_attachment: bool = False,
     ) -> str:
         from app.config import settings
 
@@ -527,12 +528,25 @@ class InvoiceService:
         # file_url 格式 s3://bucket/key
         if not inv.file_url.startswith("s3://"):
             # 兼容直接存的相对路径
+            key = inv.file_url
+            filename = key.rsplit("/", 1)[-1]
             return storage_service.get_presigned_url(
-                settings.minio_bucket_invoice, inv.file_url, expires=expires_seconds
+                settings.minio_bucket_invoice,
+                key,
+                expires=expires_seconds,
+                filename=filename,
+                as_attachment=as_attachment,
             )
         _, _, rest = inv.file_url.partition("s3://")
         bucket, _, key = rest.partition("/")
-        return storage_service.get_presigned_url(bucket, key, expires=expires_seconds)
+        filename = key.rsplit("/", 1)[-1]
+        return storage_service.get_presigned_url(
+            bucket,
+            key,
+            expires=expires_seconds,
+            filename=filename,
+            as_attachment=as_attachment,
+        )
 
 
 def _serialize_snapshot(inv: "Invoice") -> dict[str, Any]:

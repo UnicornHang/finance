@@ -112,6 +112,12 @@ export function InvoiceArchive() {
     refetch: fileQuery.refetch,
     cachedUrl: fileQuery.data?.url,
     isFetching: fileQuery.isFetching,
+    fetchDownloadUrl: async () => {
+      if (!detail) throw new Error('请先打开发票详情')
+      const result = await invoiceApi.downloadUrl(detail.id, 3600, true)
+      if (!result.url) throw new Error('获取下载链接失败')
+      return result.url
+    },
   })
 
   const list = (data?.items ?? []).filter((inv) => inv.status !== 'deleted')

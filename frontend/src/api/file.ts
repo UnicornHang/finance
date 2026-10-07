@@ -40,11 +40,14 @@ export const fileApi = {
       .then((r) => r.data)
   },
 
-  /** 根据 s3:// URL 换取临时预览/下载链接 */
-  presign: (fileUrl: string, expires = 3600) =>
+  /**
+   * 根据 s3:// URL 换取临时预览/下载链接。
+   * download=true 时后端带 Content-Disposition: attachment，浏览器会下载而非预览。
+   */
+  presign: (fileUrl: string, expires = 3600, download = false) =>
     apiClient
       .get<FilePresignResponse>('/files/presign', {
-        params: { file_url: fileUrl, expires },
+        params: { file_url: fileUrl, expires, download },
       })
       .then((r) => r.data),
 

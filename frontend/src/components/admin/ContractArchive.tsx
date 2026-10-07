@@ -99,6 +99,13 @@ export function ContractArchive() {
     refetch: fileQuery.refetch,
     cachedUrl: fileQuery.data?.url,
     isFetching: fileQuery.isFetching,
+    fetchDownloadUrl: async () => {
+      const fileUrl = detailQuery.data?.file_url
+      if (!fileUrl) throw new Error('缺少合同原件地址')
+      const result = await fileApi.presign(fileUrl, 3600, true)
+      if (!result.url) throw new Error('获取下载链接失败')
+      return result.url
+    },
   })
 
   const list = data?.items ?? []

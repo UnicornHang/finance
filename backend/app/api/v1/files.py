@@ -150,6 +150,9 @@ async def presign_file(
     db: Annotated[AsyncSession, Depends(get_db)],
     file_url: Annotated[str, Query(description="s3://bucket/key 形式的对象地址")],
     expires: Annotated[int, Query(ge=60, le=86400)] = 3600,
+    download: Annotated[
+        bool, Query(description="true 时强制附件下载，避免浏览器内联预览")
+    ] = False,
 ) -> dict[str, Any]:
     """为已上传文件生成临时预览/下载 URL（仅允许访问本租户路径下的对象）。"""
     bucket, key = _parse_s3_url(file_url)
@@ -166,13 +169,18 @@ async def presign_file(
     if bucket not in allowed_buckets:
         raise ForbiddenError("无权访问该文件", code="FILE_FORBIDDEN")
 
+    filename = key.rsplit("/", 1)[-1]
     try:
-        url = storage_service.get_presigned_url(bucket, key, expires=expires)
+        url = storage_service.get_presigned_url(
+            bucket,
+            key,
+            expires=expires,
+            filename=filename,
+            as_attachment=download,
+        )
     except Exception as exc:
         logger.exception("presign failed: %s", file_url)
         raise BusinessError(f"生成预览链接失败：{exc}", code="PRESIGN_FAILED") from exc
-
-    filename = key.rsplit("/", 1)[-1]
     await write_audit_log(
         db,
         tenant_id=user.tenant_id,
