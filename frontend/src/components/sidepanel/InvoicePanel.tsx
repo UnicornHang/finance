@@ -28,6 +28,11 @@ import { Badge } from '@/components/ui/badge'
 import { useUIStore, type InvoiceSidePanelData } from '@/stores/uiStore'
 import { invoiceApi } from '@/api/invoice'
 import { readApiMessage } from '@/lib/apiError'
+import {
+  invoiceRerecognizeInflight,
+  runInvoiceRerecognize,
+} from '@/lib/documentInflight'
+import { useInflightPending } from '@/lib/inflightByKey'
 import { resolveInvoiceArchiveStatus } from '@/lib/sidePanelHistory'
 import { invoiceSchema, type InvoiceInput } from '@/lib/validators'
 import { formatCurrency } from '@/lib/utils'
@@ -39,7 +44,6 @@ const POLL_MAX_ATTEMPTS = 30 // ~60s
 export function InvoicePanel() {
   const { sidePanelData, closeSidePanel, clearSidePanel, openSidePanel } = useUIStore()
   const [submitting, setSubmitting] = useState(false)
-  const [retrying, setRetrying] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [pollAttempts, setPollAttempts] = useState(0)
   const [pollError, setPollError] = useState<string | null>(null)
@@ -68,6 +72,8 @@ export function InvoicePanel() {
     if (typeof rec.id === 'string' && rec.id) return rec.id
     return undefined
   })()
+  // 跨侧栏开关/切会话仍保留进行中态，避免重复打识别接口
+  const retrying = useInflightPending(invoiceRerecognizeInflight, invoiceId)
 
   /** 已归档只展示核对结果，不再提供「确定归档」。 */
   const alreadyArchived =
@@ -182,10 +188,14 @@ export function InvoicePanel() {
       toast.error('缺少发票记录，请重新上传后再识别')
       return
     }
-    setRetrying(true)
+    // 已有进行中请求时直接忽略，防止关侧栏后再次点击重复发起
+    if (invoiceRerecognizeInflight.isPending(invoiceId)) {
+      toast.info('识别进行中，请稍候')
+      return
+    }
     setSubmitError(null)
     try {
-      const inv = await invoiceApi.rerecognize(invoiceId)
+      const inv = await runInvoiceRerecognize(invoiceId)
       const archiveStatus = resolveInvoiceArchiveStatus(inv)
       openSidePanel('invoice', {
         ...inv,
@@ -198,8 +208,6 @@ export function InvoicePanel() {
       const msg = readApiMessage(err) || '重新识别失败'
       setSubmitError(msg)
       toast.error(msg)
-    } finally {
-      setRetrying(false)
     }
   }
 

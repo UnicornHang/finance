@@ -11,6 +11,11 @@ import { Badge } from '@/components/ui/badge'
 import { RiskBadge } from './RiskBadge'
 import { contractApi } from '@/api/contract'
 import { readApiMessage } from '@/lib/apiError'
+import {
+  contractReReviewInflight,
+  runContractReReview,
+} from '@/lib/documentInflight'
+import { useInflightPending } from '@/lib/inflightByKey'
 import { useUIStore } from '@/stores/uiStore'
 import { formatCurrency } from '@/lib/utils'
 
@@ -52,10 +57,12 @@ export function ContractPanel() {
   const { sidePanelData, closeSidePanel, clearSidePanel, openSidePanel } = useUIStore()
   const queryClient = useQueryClient()
   const [submitting, setSubmitting] = useState(false)
-  const [retrying, setRetrying] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const data = (sidePanelData ?? null) as ContractPanelData | null
+  const contractId = data?.contract_id || data?.id || null
+  // 跨侧栏开关/切会话仍保留进行中态，避免重复打审查接口
+  const retrying = useInflightPending(contractReReviewInflight, contractId)
 
   const [contractName, setContractName] = useState('')
   const [partyA, setPartyA] = useState('')
@@ -150,18 +157,20 @@ export function ContractPanel() {
     }
   }
 
-  const contractId = data.contract_id || data.id || null
-
   /** 用同一份原件再跑审查，覆盖摘要和概览字段。 */
   const onRereview = async () => {
     if (!contractId) {
       toast.error('缺少合同记录，请重新上传后再审查')
       return
     }
-    setRetrying(true)
+    // 已有进行中请求时直接忽略，防止关侧栏后再次点击重复发起
+    if (contractReReviewInflight.isPending(contractId)) {
+      toast.info('审查进行中，请稍候')
+      return
+    }
     setSubmitError(null)
     try {
-      const row = await contractApi.reReview(contractId)
+      const row = await runContractReReview(contractId)
       const archiveStatus =
         row.status === 'active' || row.archive_status === 'archived'
           ? 'archived'
@@ -182,8 +191,6 @@ export function ContractPanel() {
       const msg = readApiMessage(err) || '重新审查失败'
       setSubmitError(msg)
       toast.error(msg)
-    } finally {
-      setRetrying(false)
     }
   }
 
