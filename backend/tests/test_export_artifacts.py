@@ -105,6 +105,34 @@ def test_contract_pdf_with_violations_builds():
     assert len(pdf) > 200
 
 
+def test_contract_pdf_summary_renders_markdown_not_raw_markers():
+    """审查摘要应渲染 Markdown，不把 #### / ** 原样打进 PDF 文本层。"""
+    from pypdf import PdfReader
+
+    summary = (
+        "#### 一、核心风险与规则命中（优先处理）\n"
+        "\n"
+        "**1. 相对方尽职调查缺失（高风险）**\n"
+        "***规则引用：*** 示例规则\n"
+        "***审查意见：*** 缺少尽调材料\n"
+    )
+    pdf = build_contract_report_pdf(
+        ContractView(
+            contract_name="Markdown合同",
+            contract_no="C-MD",
+            summary=summary,
+            violations=[],
+        )
+    )
+    reader = PdfReader(BytesIO(pdf))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "核心风险与规则命中" in text
+    assert "相对方尽职调查缺失" in text
+    assert "####" not in text
+    assert "***" not in text
+    assert "**1." not in text
+
+
 def test_zip_contains_n_pdfs():
     """zip 内文件数等于 PDF 份数；N=1 仍为 zip。"""
     pdf_a = build_contract_report_pdf(

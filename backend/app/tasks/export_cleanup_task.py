@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.celery_async import run_celery_async
 from app.core.database import async_session_factory
 from app.models import ExportJob
 from app.services.storage_service import parse_s3_url, storage_service
@@ -99,4 +99,4 @@ async def _cleanup_expired_exports() -> dict[str, Any]:
 @celery_app.task(name="app.tasks.export_cleanup_task.cleanup_expired_exports")
 def cleanup_expired_exports() -> dict[str, Any]:
     """Celery Beat 入口：每日清理过期导出文件。"""
-    return asyncio.run(_cleanup_expired_exports())
+    return run_celery_async(_cleanup_expired_exports())

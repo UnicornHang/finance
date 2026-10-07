@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date, datetime
 from typing import Any
@@ -16,6 +15,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from app.config import settings
+from app.core.celery_async import run_celery_async
 from app.core.database import async_session_factory
 from app.models import Contract, ExportJob, Invoice, User
 from app.services import export_service
@@ -309,26 +309,40 @@ async def _build_contract_artifact(
     return data, _ZIP_CONTENT_TYPE, file_name, len(zip_items)
 
 
+async def _mark_job_failed(job_id: UUID, message: str) -> None:
+    """尽力把非终态任务标为 failed，便于前端重试。"""
+    try:
+        async with async_session_factory() as db:
+            job = await export_service.load_export_job(db, job_id)
+            if job is not None and not export_service.is_terminal_status(job.status):
+                await export_service.mark_export_failed(
+                    db, job, error_message=message or "导出失败"
+                )
+                await db.commit()
+    except Exception:
+        logger.exception("export_artifact: mark failed also errored job=%s", job_id)
+
+
 async def _run_export(job_id: UUID) -> dict[str, Any]:
     """实际执行：加载 job → running → 生成 → 上传 → succeeded/failed。"""
-    async with async_session_factory() as db:
-        job = await export_service.load_export_job(db, job_id)
-        if job is None:
-            logger.warning("export_artifact: job not found id=%s", job_id)
-            return {"status": "missing", "job_id": str(job_id)}
-
-        if export_service.is_terminal_status(job.status):
-            logger.info(
-                "export_artifact: skip terminal job id=%s status=%s",
-                job_id,
-                job.status,
-            )
-            return {"status": job.status, "job_id": str(job_id), "skipped": True}
-
-        await export_service.mark_export_running(db, job)
-        await db.commit()
-
     try:
+        async with async_session_factory() as db:
+            job = await export_service.load_export_job(db, job_id)
+            if job is None:
+                logger.warning("export_artifact: job not found id=%s", job_id)
+                return {"status": "missing", "job_id": str(job_id)}
+
+            if export_service.is_terminal_status(job.status):
+                logger.info(
+                    "export_artifact: skip terminal job id=%s status=%s",
+                    job_id,
+                    job.status,
+                )
+                return {"status": job.status, "job_id": str(job_id), "skipped": True}
+
+            await export_service.mark_export_running(db, job)
+            await db.commit()
+
         async with async_session_factory() as db:
             job = await export_service.load_export_job(db, job_id)
             if job is None:
@@ -380,14 +394,7 @@ async def _run_export(job_id: UUID) -> dict[str, Any]:
             }
     except Exception as exc:
         logger.exception("export_artifact: failed job=%s", job_id)
-        # 单独会话写失败态，避免生成阶段脏事务
-        async with async_session_factory() as db:
-            job = await export_service.load_export_job(db, job_id)
-            if job is not None and not export_service.is_terminal_status(job.status):
-                await export_service.mark_export_failed(
-                    db, job, error_message=str(exc) or "导出失败"
-                )
-                await db.commit()
+        await _mark_job_failed(job_id, str(exc) or "导出失败")
         return {
             "status": "failed",
             "job_id": str(job_id),
@@ -398,4 +405,13 @@ async def _run_export(job_id: UUID) -> dict[str, Any]:
 @celery_app.task(name="app.tasks.export_task.export_artifact")
 def export_artifact(job_id: str) -> dict:
     """Celery 入口：根据 job_id 异步生成导出产物。"""
-    return asyncio.run(_run_export(UUID(job_id)))
+    try:
+        return run_celery_async(_run_export(UUID(job_id)))
+    except Exception as exc:
+        # asyncio/引擎层异常未进 _run_export 时，再尽力标失败
+        logger.exception("export_artifact: outer failure job=%s", job_id)
+        try:
+            run_celery_async(_mark_job_failed(UUID(job_id), str(exc) or "导出失败"))
+        except Exception:
+            logger.exception("export_artifact: outer mark failed job=%s", job_id)
+        return {"status": "failed", "job_id": job_id, "error": str(exc)}
