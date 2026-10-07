@@ -29,6 +29,7 @@ import {
 import { Table, TBody, TD, TH, THead, TR, EmptyState, Toolbar } from '@/components/ui/table'
 import { exportApi } from '@/api/export'
 import { invoiceApi } from '@/api/invoice'
+import { usePresignedFileActions } from '@/hooks/usePresignedFileActions'
 import { readApiMessage } from '@/lib/apiError'
 import type { Invoice } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -100,11 +101,17 @@ export function InvoiceArchive() {
     enabled: !!detail,
   })
 
+  // 按需换取 MinIO 预签名；不在打开详情时自动请求
   const fileQuery = useQuery({
     queryKey: ['invoice-file', detail?.id],
     queryFn: () => invoiceApi.downloadUrl(detail!.id),
-    enabled: !!detail && detailQuery.isSuccess,
+    enabled: false,
     retry: false,
+  })
+  const { copyDownloadLink, downloadOriginal, fileLoading } = usePresignedFileActions({
+    refetch: fileQuery.refetch,
+    cachedUrl: fileQuery.data?.url,
+    isFetching: fileQuery.isFetching,
   })
 
   const list = (data?.items ?? []).filter((inv) => inv.status !== 'deleted')
@@ -393,12 +400,14 @@ export function InvoiceArchive() {
         preview={detail}
         invoice={detailQuery.data}
         loading={detailQuery.isLoading}
-        fileUrl={fileQuery.data?.url}
-        fileLoading={fileQuery.isFetching}
+        fileLoading={fileLoading}
         deleting={removeMutation.isPending}
         onClose={() => setDetail(null)}
-        onRequestFile={() => {
-          void fileQuery.refetch()
+        onCopyDownloadLink={() => {
+          void copyDownloadLink()
+        }}
+        onDownloadOriginal={() => {
+          void downloadOriginal()
         }}
         onRequestDelete={() => {
           if (!detail) return

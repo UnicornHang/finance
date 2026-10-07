@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Download, ExternalLink, Loader2, Trash2 } from 'lucide-react'
+import { Copy, Download, Loader2, Trash2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,11 +22,13 @@ export interface InvoiceDetailDialogProps {
   /** 详情接口返回的完整记录 */
   invoice: Invoice | undefined
   loading: boolean
-  fileUrl?: string
   fileLoading: boolean
   deleting: boolean
   onClose: () => void
-  onRequestFile: () => void
+  /** 换取临时预签名 URL 并复制到剪贴板 */
+  onCopyDownloadLink: () => void
+  /** 换取临时 URL 后打开/下载原件 */
+  onDownloadOriginal: () => void
   onRequestDelete: () => void
 }
 
@@ -38,14 +40,15 @@ export function InvoiceDetailDialog({
   preview,
   invoice,
   loading,
-  fileUrl,
   fileLoading,
   deleting,
   onClose,
-  onRequestFile,
+  onCopyDownloadLink,
+  onDownloadOriginal,
   onRequestDelete,
 }: InvoiceDetailDialogProps) {
   const title = invoice?.invoice_title || preview?.invoice_title || '查看发票完整字段'
+  const canFile = Boolean(invoice)
 
   return (
     <Dialog open={!!preview} onOpenChange={(open) => !open && onClose()}>
@@ -70,24 +73,32 @@ export function InvoiceDetailDialog({
         <DialogFooter>
           <Button
             variant="secondary"
-            onClick={onRequestFile}
-            disabled={fileLoading || !invoice}
+            type="button"
+            onClick={onCopyDownloadLink}
+            disabled={fileLoading || !canFile}
+            title="复制约 1 小时有效的临时下载链接"
+          >
+            {fileLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Copy className="h-4 w-4" />
+            )}
+            获取下载链接
+          </Button>
+          <Button
+            variant="primary"
+            type="button"
+            onClick={onDownloadOriginal}
+            disabled={fileLoading || !canFile}
+            title="下载发票原件"
           >
             {fileLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Download className="h-4 w-4" />
             )}
-            获取下载链接
+            下载原件
           </Button>
-          {fileUrl && (
-            <Button asChild variant="primary">
-              <a href={fileUrl} target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-4 w-4" />
-                下载原件
-              </a>
-            </Button>
-          )}
           {invoice && invoice.status !== 'deleted' && (
             <Button
               variant="danger"

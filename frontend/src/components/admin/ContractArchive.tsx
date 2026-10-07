@@ -30,6 +30,7 @@ import { RiskBadge } from '@/components/sidepanel/RiskBadge'
 import { contractApi } from '@/api/contract'
 import { exportApi } from '@/api/export'
 import { fileApi } from '@/api/file'
+import { usePresignedFileActions } from '@/hooks/usePresignedFileActions'
 import { readApiMessage } from '@/lib/apiError'
 import type { Contract } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -87,12 +88,17 @@ export function ContractArchive() {
     enabled: !!detail,
   })
 
-  // 合同原件走通用预签名，无独立 /contracts/{id}/file
+  // 合同原件走通用预签名，按需换取，无独立 /contracts/{id}/file
   const fileQuery = useQuery({
     queryKey: ['contract-file', detail?.id, detailQuery.data?.file_url],
     queryFn: () => fileApi.presign(detailQuery.data!.file_url!),
-    enabled: !!detail && !!detailQuery.data?.file_url,
+    enabled: false,
     retry: false,
+  })
+  const { copyDownloadLink, downloadOriginal, fileLoading } = usePresignedFileActions({
+    refetch: fileQuery.refetch,
+    cachedUrl: fileQuery.data?.url,
+    isFetching: fileQuery.isFetching,
   })
 
   const list = data?.items ?? []
@@ -352,12 +358,14 @@ export function ContractArchive() {
         preview={detail}
         contract={detailQuery.data}
         loading={detailQuery.isLoading}
-        fileUrl={fileQuery.data?.url}
-        fileLoading={fileQuery.isFetching}
+        fileLoading={fileLoading}
         deleting={removeMutation.isPending}
         onClose={() => setDetail(null)}
-        onRequestFile={() => {
-          void fileQuery.refetch()
+        onCopyDownloadLink={() => {
+          void copyDownloadLink()
+        }}
+        onDownloadOriginal={() => {
+          void downloadOriginal()
         }}
         onRequestDelete={() => {
           if (!detail) return
