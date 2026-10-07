@@ -21,31 +21,10 @@ from app.core.database import async_session_factory
 from app.core.exceptions import ConflictError
 from app.services.invoice_service import invoice_service
 from app.services.invoice_vision_service import invoice_vision_service
-from app.services.storage_service import storage_service
+from app.services.storage_service import parse_s3_url, storage_service
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_s3_url(s3_url: str) -> tuple[str, str]:
-    """s3://bucket/key → (bucket, key)"""
-    if not s3_url.startswith("s3://"):
-        raise ValueError(f"invalid s3 url: {s3_url}")
-    rest = s3_url[len("s3://"):]
-    bucket, _, key = rest.partition("/")
-    if not bucket or not key:
-        raise ValueError(f"invalid s3 url: {s3_url}")
-    return bucket, key
-
-
-def _download_from_minio(bucket: str, key: str) -> bytes:
-    """从 MinIO 下载文件到 bytes。"""
-    obj = storage_service.client.get_object(bucket_name=bucket, object_name=key)
-    try:
-        return obj.read()
-    finally:
-        obj.close()
-        obj.release_conn()
 
 
 async def _llm_normalize(ocr_result, user_message: str | None) -> dict:
@@ -80,9 +59,9 @@ async def _run_ocr_pipeline(
     user_message: str | None,
 ) -> None:
     """实际执行：下载 → 通用大模型识别 → 归一 → 写 Invoice。"""
-    bucket, obj_key = _parse_s3_url(file_url)
-    file_bytes = _download_from_minio(bucket, obj_key)
-    logger.info("recognize task: downloaded %d bytes from s3://%s/%s", len(file_bytes), bucket, obj_key)
+    _, obj_key = parse_s3_url(file_url)
+    file_bytes = storage_service.download_bytes(file_url)
+    logger.info("recognize task: downloaded %d bytes from %s", len(file_bytes), file_url)
 
     async with async_session_factory() as db:
         ocr_result, _source = await invoice_vision_service.recognize(

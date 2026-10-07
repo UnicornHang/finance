@@ -154,9 +154,9 @@ async def test_ocr_pipeline_writes_pending_invoice(db_session):
     async def fake_recognize(_bytes, **_kwargs):
         return mock_result, "llm"
 
-    with patch("app.tasks.ocr_task._download_from_minio", return_value=fake_bytes), \
+    with patch("app.tasks.ocr_task.storage_service.download_bytes", return_value=fake_bytes), \
          patch("app.tasks.ocr_task.invoice_vision_service.recognize", fake_recognize):
-        # file_url 必须能被 _parse_s3_url 解析
+        # file_url 必须能被 parse_s3_url 解析
         file_url = "s3://invoices/test/mock.pdf"
         await _run_ocr_pipeline(
             tenant_id=tenant_id,
@@ -223,7 +223,7 @@ async def test_ocr_pipeline_dedup_blocks_duplicate(db_session):
     async def fake_recognize(_bytes, **_kwargs):
         return mock_result, "llm"
 
-    with patch("app.tasks.ocr_task._download_from_minio", return_value=fake_bytes), \
+    with patch("app.tasks.ocr_task.storage_service.download_bytes", return_value=fake_bytes), \
          patch("app.tasks.ocr_task.invoice_vision_service.recognize", fake_recognize):
         file_url = "s3://invoices/test/dedup.pdf"
 
@@ -261,3 +261,10 @@ async def test_ocr_pipeline_dedup_blocks_duplicate(db_session):
     # 清理
     await db_session.execute(delete(Invoice).where(Invoice.tenant_id == tenant_id))
     await db_session.commit()
+
+
+def test_ocr_task_has_no_direct_minio_download():
+    """禁止 OCR 任务直连 get_object。"""
+    import app.tasks.ocr_task as ocr_task
+
+    assert not hasattr(ocr_task, "_download_from_minio")

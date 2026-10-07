@@ -248,6 +248,8 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # 本地静态 KMS，SSE-S3 必需；不是 Vault/KES。格式 name:base64(32字节)
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY:-finance-local:ZmluYW5jZS1taW5pby1rbXMta2V5LWNoYW5nZS1tZSE=}
     ports:
       - "${MINIO_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
