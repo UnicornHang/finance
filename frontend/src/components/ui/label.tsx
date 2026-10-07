@@ -18,7 +18,8 @@ export const Label = React.forwardRef<
   <LabelPrimitive.Root
     ref={ref}
     className={cn(
-      'block text-label-md font-semibold uppercase tracking-wider text-ink-tertiary mb-1.5',
+      // 表单标签统一跟弹窗字段一致：常规字重、正常字距，避免英文大写加宽
+      'block text-body-sm font-medium normal-case tracking-normal text-ink-secondary mb-1',
       'peer-disabled:cursor-not-allowed peer-disabled:opacity-70',
       className,
     )}

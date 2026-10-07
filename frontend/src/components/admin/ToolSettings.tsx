@@ -377,11 +377,13 @@ function EditToolDialog({
               <Input
                 type={reveal ? 'text' : 'password'}
                 autoComplete="off"
+                spellCheck={false}
                 placeholder={cfg.has_api_key ? '已配置，留空则不修改' : '粘贴 API Key'}
                 value={state.api_key_input}
                 onChange={(e) =>
                   setState((s) => ({ ...s, api_key_input: e.target.value }))
                 }
+                className="pr-10 font-mono"
               />
               <button
                 type="button"
@@ -399,6 +401,7 @@ function EditToolDialog({
               value={state.base_url}
               placeholder="留空使用提供商默认地址"
               onChange={(e) => setState((s) => ({ ...s, base_url: e.target.value }))}
+              className="font-mono text-body-sm"
             />
           </FieldInline>
 
@@ -410,7 +413,9 @@ function EditToolDialog({
                 setState((s) => ({ ...s, enabled: v === true }))
               }
             />
-            <Label htmlFor="tool-enabled">启用此工具</Label>
+            <Label htmlFor="tool-enabled" className="mb-0">
+              启用此工具
+            </Label>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -477,6 +482,7 @@ function EditToolDialog({
           <Button
             type="button"
             variant="secondary"
+            size="md"
             onClick={() => testDraft.mutate()}
             disabled={testDraft.isPending}
           >
@@ -485,6 +491,7 @@ function EditToolDialog({
           </Button>
           <Button
             type="button"
+            size="md"
             onClick={() => save.mutate()}
             disabled={save.isPending}
             className="text-white"
@@ -505,7 +512,7 @@ function FieldInline({
   children: ReactNode
 }) {
   return (
-    <div className="space-y-1.5">
+    <div>
       <Label>{label}</Label>
       {children}
     </div>

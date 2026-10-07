@@ -31,9 +31,9 @@ export function Field({
       data-slot="field"
       className={cn('space-y-1.5', className)}
     >
-      <label className="block text-label-md font-semibold uppercase tracking-wider text-ink-tertiary">
+      <label className="block text-body-sm font-medium normal-case tracking-normal text-ink-secondary">
         {label}
-        {required && <span className="ml-1 text-danger normal-case">*</span>}
+        {required && <span className="ml-1 text-danger">*</span>}
       </label>
       {children}
       {hint && !error && (

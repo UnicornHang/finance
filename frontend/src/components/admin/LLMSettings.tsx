@@ -576,9 +576,7 @@ function FieldInline({
 }) {
   return (
     <div>
-      <Label className="normal-case tracking-normal text-body-sm font-medium text-ink-secondary mb-1">
-        {label}
-      </Label>
+      <Label>{label}</Label>
       {children}
     </div>
   )
