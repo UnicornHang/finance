@@ -110,12 +110,17 @@ class ContractService:
         tenant_id: UUID,
         *,
         user: "User",
+        page: int = 1,
+        page_size: int = 20,
         search: str | None = None,
         risk_level: str | None = None,
         status_filter: str = "active",
-    ) -> list["Contract"]:
-        """当前租户合同列表；员工只看自己的。"""
+    ) -> tuple[list["Contract"], int]:
+        """当前租户合同列表（分页）；员工只看自己的。"""
         from app.models import Contract
+
+        page = max(1, page)
+        page_size = min(100, max(1, page_size))
 
         conditions = [Contract.tenant_id == tenant_id]
         if status_filter:
@@ -137,13 +142,58 @@ class ContractService:
                 )
             )
 
-        result = await db.execute(
-            select(Contract)
-            .where(*conditions)
-            .order_by(Contract.created_at.desc())
-            .limit(200)
-        )
-        return list(result.scalars().all())
+        where = and_(*conditions)
+        total = (
+            await db.execute(select(func.count()).select_from(Contract).where(where))
+        ).scalar_one()
+        offset = (page - 1) * page_size
+        rows = (
+            await db.execute(
+                select(Contract)
+                .where(where)
+                .order_by(Contract.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+        ).scalars().all()
+        return list(rows), int(total)
+
+    async def count_by_risk(
+        self,
+        db: AsyncSession,
+        tenant_id: UUID,
+        *,
+        user: "User",
+        status_filter: str = "active",
+    ) -> dict[str, int]:
+        """按风险等级统计可见合同数（不受列表 search/risk 筛选影响）。"""
+        from app.models import Contract
+
+        conditions = [Contract.tenant_id == tenant_id]
+        if status_filter:
+            conditions.append(Contract.status == status_filter)
+        else:
+            conditions.append(Contract.status != "deleted")
+        if user.role == "employee":
+            conditions.append(Contract.user_id == user.id)
+
+        rows = (
+            await db.execute(
+                select(Contract.risk_level, func.count())
+                .where(*conditions)
+                .group_by(Contract.risk_level)
+            )
+        ).all()
+
+        counts = {"high": 0, "medium": 0, "low": 0}
+        for level, n in rows:
+            key = level or "low"
+            if key in counts:
+                counts[key] = int(n)
+            else:
+                # 未知等级并入 low，避免卡片总和不对
+                counts["low"] += int(n)
+        return counts
 
     async def list_for_export(
         self,

@@ -266,7 +266,7 @@ async def _page_contracts(
     search: str | None,
     risk_level: str | None,
 ) -> list[Contract]:
-    """按 page_size 翻页拉全量合同（排除 deleted；不走 list_by_tenant 的 200 上限）。"""
+    """按 page_size 翻页拉全量合同（排除 deleted；走 list_for_export 而非列表分页接口）。"""
     collected: list[Contract] = []
     page = 1
     while True:

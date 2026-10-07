@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, FileText, History, Search } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Download, FileText, History, Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -35,21 +36,50 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 
 import { ContractDetailDialog } from './ContractDetailDialog'
 import { ExportCenter } from './ExportCenter'
+import { InvoiceListPager } from './InvoiceListPager'
+
+const DEFAULT_PAGE_SIZE = 10
 
 export function ContractArchive() {
   const queryClient = useQueryClient()
-  const { data: contracts, isLoading } = useQuery({
-    queryKey: ['contracts'],
-    queryFn: () => contractApi.list(),
-  })
-
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [riskFilter, setRiskFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [detail, setDetail] = useState<Contract | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  /** 待确认删除的 id。单条来自详情，多条来自表格勾选。 */
+  const [pendingDelete, setPendingDelete] = useState<string[] | null>(null)
   /** 导出中心抽屉开关与高亮任务 */
   const [exportCenterOpen, setExportCenterOpen] = useState(false)
   const [exportHighlightId, setExportHighlightId] = useState<string | null>(null)
+  const appliedSearch = useRef(search)
+
+  // 输入停顿后再查，避免每个字都打一页接口
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchInput.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [searchInput])
+
+  useEffect(() => {
+    if (appliedSearch.current === search) return
+    appliedSearch.current = search
+    setPage(1)
+    setSelectedIds([])
+  }, [search])
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['contracts', page, pageSize, riskFilter, search],
+    queryFn: () =>
+      contractApi.list({
+        page,
+        page_size: pageSize,
+        search: search || undefined,
+        risk_level: riskFilter || undefined,
+      }),
+    placeholderData: keepPreviousData,
+  })
 
   const detailQuery = useQuery({
     queryKey: ['contract', detail?.id],
@@ -65,16 +95,33 @@ export function ContractArchive() {
     retry: false,
   })
 
+  const list = data?.items ?? []
+  const total = data?.total ?? 0
+  const stats = data?.risk_counts ?? { high: 0, medium: 0, low: 0 }
+
   const removeMutation = useMutation({
-    mutationFn: (id: string) => contractApi.remove(id),
-    onSuccess: () => {
-      toast.success('已删除')
-      setDetail(null)
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(ids.map((id) => contractApi.remove(id)))
+      const failed = results.filter((result) => result.status === 'rejected').length
+      return { ok: ids.length - failed, failed }
+    },
+    onSuccess: (result, ids) => {
+      if (result.failed === 0) {
+        toast.success(ids.length === 1 ? '已删除' : `已删除 ${result.ok} 条`)
+      } else if (result.ok === 0) {
+        toast.error('删除失败')
+      } else {
+        toast.warning(`已删除 ${result.ok} 条，${result.failed} 条失败`)
+      }
+      setDetail((current) => (current && ids.includes(current.id) ? null : current))
+      setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)))
       setPendingDelete(null)
       queryClient.invalidateQueries({ queryKey: ['contracts'] })
-    },
-    onError: () => {
-      toast.error('删除失败')
+      // 当前页被删空时退回上一页
+      const targeted = list.filter((item) => ids.includes(item.id))
+      const pageCleared =
+        result.ok > 0 && targeted.length === list.length && result.ok >= targeted.length
+      if (pageCleared && page > 1) setPage((current) => current - 1)
     },
   })
 
@@ -109,25 +156,39 @@ export function ContractArchive() {
     setExportCenterOpen(true)
   }
 
-  const list = (contracts || []).filter((c) => {
-    if (riskFilter && c.risk_level !== riskFilter) return false
-    if (
-      search &&
-      !`${c.contract_name} ${c.party_a} ${c.party_b}`.toLowerCase().includes(search.toLowerCase())
-    )
-      return false
-    return true
-  })
+  const selectableIds = list.map((c) => c.id)
+  const selectedOnPage = selectableIds.filter((id) => selectedIds.includes(id))
+  const allChecked = selectableIds.length > 0 && selectedOnPage.length === selectableIds.length
+  const someChecked = selectedOnPage.length > 0 && !allChecked
 
-  // Risk summary
-  const stats = (contracts || []).reduce(
-    (acc, c) => {
-      const level = c.risk_level || 'low'
-      acc[level] = (acc[level] || 0) + 1
-      return acc
-    },
-    {} as Record<string, number>,
-  )
+  /** 勾选或取消当前页全部合同。 */
+  function togglePage(checked: boolean) {
+    setSelectedIds((prev) => {
+      if (checked) return [...new Set([...prev, ...selectableIds])]
+      const pageIds = new Set(selectableIds)
+      return prev.filter((id) => !pageIds.has(id))
+    })
+  }
+
+  /** 勾选或取消单行。 */
+  function toggleOne(id: string, checked: boolean) {
+    setSelectedIds((prev) => (checked ? [...prev, id] : prev.filter((item) => item !== id)))
+  }
+
+  function changePage(next: number) {
+    setPage(next)
+    setSelectedIds([])
+  }
+
+  // 筛选或删除后总页数变少，避免停在空白页
+  useEffect(() => {
+    if (!data) return
+    const pages = Math.max(1, Math.ceil(total / pageSize))
+    if (page > pages) {
+      setPage(pages)
+      setSelectedIds([])
+    }
+  }, [data, page, pageSize, total])
 
   return (
     <div className="space-y-6">
@@ -165,11 +226,18 @@ export function ContractArchive() {
             <Input
               placeholder="搜索合同 / 甲方 / 乙方"
               className="h-9 pl-8"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
             />
           </div>
-          <Select value={riskFilter} onValueChange={setRiskFilter}>
+          <Select
+            value={riskFilter}
+            onValueChange={(v) => {
+              setRiskFilter(v)
+              setPage(1)
+              setSelectedIds([])
+            }}
+          >
             <SelectTrigger className="h-9 w-40">
               <SelectValue placeholder="全部风险" />
             </SelectTrigger>
@@ -180,9 +248,24 @@ export function ContractArchive() {
               <SelectItem value="low">低风险</SelectItem>
             </SelectContent>
           </Select>
-          <span className="ml-auto text-body-sm text-ink-tertiary tabular-nums">
-            共 {list.length} 份
-          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {selectedIds.length > 0 && (
+              <>
+                <span className="text-body-sm tabular-nums text-ink-secondary">
+                  已选 {selectedIds.length} 条
+                </span>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setPendingDelete(selectedIds)}
+                  disabled={removeMutation.isPending}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  删除
+                </Button>
+              </>
+            )}
+          </div>
         </Toolbar>
 
         <CardContent className="p-0">
@@ -198,6 +281,14 @@ export function ContractArchive() {
             <Table>
               <THead>
                 <TR>
+                  <TH className="w-12">
+                    <Checkbox
+                      checked={allChecked ? true : someChecked ? 'indeterminate' : false}
+                      disabled={selectableIds.length === 0}
+                      onCheckedChange={(value) => togglePage(value === true)}
+                      aria-label="全选当前页"
+                    />
+                  </TH>
                   <TH>合同名称</TH>
                   <TH>甲方</TH>
                   <TH>乙方</TH>
@@ -210,9 +301,18 @@ export function ContractArchive() {
                 {list.map((c) => (
                   <TR
                     key={c.id}
-                    className="cursor-pointer"
+                    className={
+                      selectedIds.includes(c.id) ? 'cursor-pointer bg-primary-tint' : 'cursor-pointer'
+                    }
                     onClick={() => setDetail(c)}
                   >
+                    <TD onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.includes(c.id)}
+                        onCheckedChange={(value) => toggleOne(c.id, value === true)}
+                        aria-label={`选择 ${c.contract_name || '合同'}`}
+                      />
+                    </TD>
                     <TD className="font-semibold text-primary hover:underline">
                       {c.contract_name || '-'}
                     </TD>
@@ -232,6 +332,19 @@ export function ContractArchive() {
               </TBody>
             </Table>
           )}
+          {!(isLoading && !data) && (
+            <InvoiceListPager
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPageChange={changePage}
+              onPageSizeChange={(size) => {
+                setPageSize(size)
+                setPage(1)
+                setSelectedIds([])
+              }}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -248,7 +361,7 @@ export function ContractArchive() {
         }}
         onRequestDelete={() => {
           if (!detail) return
-          setPendingDelete(detail.id)
+          setPendingDelete([detail.id])
         }}
       />
 
@@ -260,9 +373,13 @@ export function ContractArchive() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>确定删除该合同？</AlertDialogTitle>
+            <AlertDialogTitle>
+              {(pendingDelete?.length ?? 0) > 1
+                ? `确定删除选中的 ${pendingDelete?.length} 份合同？`
+                : '确定删除该合同？'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              删除后该合同将从档案列表中移除。
+              删除后这些合同将从档案列表中移除。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -270,11 +387,11 @@ export function ContractArchive() {
             <AlertDialogAction
               disabled={removeMutation.isPending}
               onClick={() => {
-                if (!pendingDelete) return
+                if (!pendingDelete?.length) return
                 removeMutation.mutate(pendingDelete)
               }}
             >
-              确认删除
+              {removeMutation.isPending ? '删除中...' : '确定'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

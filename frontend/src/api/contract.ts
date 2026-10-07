@@ -1,9 +1,29 @@
 import { apiClient } from './client'
 import type { Contract } from '@/types'
 
+export interface ContractListParams {
+  page?: number
+  page_size?: number
+  search?: string
+  risk_level?: string
+}
+
+export interface ContractListResponse {
+  items: Contract[]
+  total: number
+  page: number
+  page_size: number
+  /** 全部已归档合同的风险分布（不受 search/risk 筛选影响） */
+  risk_counts: {
+    high: number
+    medium: number
+    low: number
+  }
+}
+
 export const contractApi = {
-  list: (params?: Record<string, unknown>) =>
-    apiClient.get<Contract[]>('/contracts/', { params }).then((r) => r.data),
+  list: (params?: ContractListParams) =>
+    apiClient.get<ContractListResponse>('/contracts/', { params }).then((r) => r.data),
   get: (id: string) => apiClient.get<Contract>(`/contracts/${id}`).then((r) => r.data),
   /** 兼容旧入口：仅写入 pending_review，不直接归档 */
   archive: (

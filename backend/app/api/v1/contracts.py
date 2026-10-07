@@ -93,18 +93,31 @@ def _serialize(row, archive_status: str | None = None) -> dict[str, Any]:
 async def list_contracts(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     search: str | None = Query(default=None),
     risk_level: str | None = Query(default=None),
 ):
-    """合同列表（管理后台）。"""
-    rows = await contract_service.list_by_tenant(
+    """合同列表（管理后台，分页）。"""
+    rows, total = await contract_service.list_by_tenant(
         db,
         user.tenant_id,
         user=user,
+        page=page,
+        page_size=page_size,
         search=search,
         risk_level=risk_level,
     )
-    return [_serialize(row) for row in rows]
+    risk_counts = await contract_service.count_by_risk(
+        db, user.tenant_id, user=user
+    )
+    return {
+        "items": [_serialize(row) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "risk_counts": risk_counts,
+    }
 
 
 @router.post("/archive")
