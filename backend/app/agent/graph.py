@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from contextvars import ContextVar
 from typing import Any, TypedDict
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 
@@ -23,6 +25,17 @@ from app.agent.policy import (
 from app.agent.router import Intent
 
 logger = logging.getLogger(__name__)
+
+_RESOLVE_ARGS_TEXT = (
+    "你刚才没有调用工具。请阅读上面的整段对话，理解用户本轮真正要问的对象，"
+    "只输出一个 JSON 对象，不要解释。\n"
+    "工具：{tool}\n"
+    "用户本轮原话：{question}\n"
+    "search_official_data 使用 query、region、period、topic；"
+    "query_policy 使用 question。\n"
+    "query 或 question 必须能单独拿去检索，请按对话语义补全指代和省略。"
+    "没有把握的字段填 null。用户换了话题或地区时以本轮语义为准，不要机械复制上一轮。"
+)
 
 # 本请求的 llm / tools，避免依赖 LangGraph 是否把 config 传进节点
 graph_runtime: ContextVar[dict[str, Any]] = ContextVar("text_agent_runtime")
@@ -54,14 +67,15 @@ def _intent(state: AgentState) -> Intent:
 
 
 def _arg_for_tool(name: str, display_msg: str, args: dict | None) -> dict:
-    """无参时把用户原话填进工具的字符串字段。"""
-    if args:
-        return args
+    """主查询字段为空时才回填用户原话，其余参数保持模型给出的值。"""
+    data = dict(args or {})
     if name == TOOL_QUERY_POLICY:
-        return {"question": display_msg}
-    if name == TOOL_SEARCH_OFFICIAL:
-        return {"query": display_msg}
-    return {"query": display_msg}
+        if not str(data.get("question") or "").strip():
+            data["question"] = display_msg
+        return data
+    if not str(data.get("query") or "").strip():
+        data["query"] = display_msg
+    return data
 
 
 async def gate_node(state: AgentState) -> dict:
@@ -82,60 +96,112 @@ def after_gate(state: AgentState) -> str:
     return "finalize"
 
 
-def _slot_in_question(value: object, question: str) -> bool:
-    """槽位必须是本轮原话的连续子串，避免带上上一轮的地区或期间。"""
+def _parse_json_object(text: str) -> dict | None:
+    """从模型输出中抽出 JSON 对象。解析失败则交给调用方兜底。"""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, re.IGNORECASE)
+    if fence:
+        raw = fence.group(1).strip()
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            obj = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _text_slot(value: object) -> str | None:
+    """保留模型给出的非空字符串；null 和空白视为未判断。"""
     if not isinstance(value, str):
-        return False
+        return None
     token = value.strip()
-    return bool(token) and token in question
+    if not token or token.lower() == "null":
+        return None
+    return token
 
 
-def _anchor_call(name: str, question: str, call: dict) -> dict:
-    """必调工具的主查询改成本轮用户原话，并丢掉不属于本轮的槽位。"""
-    args = dict(call.get("args") or {})
+def _call_from_resolution(name: str, payload: dict) -> dict | None:
+    """把模型的 JSON 判断转成一次工具调用，不改写字段内容。"""
     if name == TOOL_QUERY_POLICY:
-        args["question"] = question or str(args.get("question") or "")
-    elif name == TOOL_SEARCH_OFFICIAL:
-        args["query"] = question or str(args.get("query") or "")
-        for key in ("region", "period", "topic"):
-            if not _slot_in_question(args.get(key), question):
-                args.pop(key, None)
-    return {
-        "id": str(call.get("id") or uuid4()),
-        "name": name,
-        "args": args,
-    }
+        question = _text_slot(payload.get("question")) or _text_slot(payload.get("query"))
+        if not question:
+            return None
+        return {"id": str(uuid4()), "name": name, "args": {"question": question}}
+    if name != TOOL_SEARCH_OFFICIAL:
+        return None
+    query = _text_slot(payload.get("query"))
+    if not query:
+        return None
+    args: dict[str, str] = {"query": query}
+    for key in ("region", "period", "topic"):
+        slot = _text_slot(payload.get(key))
+        if slot:
+            args[key] = slot
+    return {"id": str(uuid4()), "name": name, "args": args}
 
 
-def _anchor_required_calls(
+async def _semantic_required_call(
+    llm: ChatFinanceLLM,
+    messages: list[BaseMessage],
+    question: str,
+    name: str,
+) -> dict | None:
+    """模型漏调工具时，再请它根据对话语义给出参数。"""
+    ai = await llm.ainvoke(
+        [
+            *messages,
+            HumanMessage(content=_RESOLVE_ARGS_TEXT.format(tool=name, question=question)),
+        ],
+        tools=None,
+    )
+    content = ai.content if isinstance(ai.content, str) else str(ai.content or "")
+    payload = _parse_json_object(content)
+    if payload is None:
+        return None
+    return _call_from_resolution(name, payload)
+
+
+def _fallback_required_call(name: str, question: str) -> dict:
+    """语义结果无法解析时，仍用本轮原话检索，避免这一轮完全不查。"""
+    if name == TOOL_QUERY_POLICY:
+        args: dict[str, str] = {"question": question}
+    else:
+        args = {"query": question}
+    return {"id": str(uuid4()), "name": name, "args": args}
+
+
+async def _ensure_required_call(
+    llm: ChatFinanceLLM,
     intent: Intent,
     allowed: list[str],
     question: str,
     legal: list[dict],
+    messages: list[BaseMessage],
 ) -> list[dict]:
-    """保证必调工具执行一次。模型已调用时仍把查询词锚定到本轮原话。"""
+    """必调工具已由模型给出时，原样采用其参数。漏调时再做一次语义解析。"""
     required = required_tool_for_intent(intent)
     if not required or required not in allowed:
         return legal
-    anchored: list[dict] = []
-    found = False
-    for call in legal:
-        if call.get("name") != required:
-            anchored.append(call)
-            continue
-        if found:
-            continue
-        found = True
-        anchored.append(_anchor_call(required, question, call))
-    if found:
-        return anchored
+    if any(call.get("name") == required for call in legal):
+        return legal
+    resolved = await _semantic_required_call(llm, messages, question, required)
+    if resolved is not None:
+        record("semantic_tool_args", tool=required, intent=intent.value)
+        return [resolved, *legal]
     record("force_tool", tool=required, intent=intent.value)
-    anchored.insert(0, _anchor_call(required, question, {"name": required, "args": {}}))
-    return anchored
+    return [_fallback_required_call(required, question), *legal]
 
 
 async def agent_node(state: AgentState) -> dict:
-    """绑白名单工具调用模型；必调工具漏调时用本轮原话补上，不再放行空检索。"""
+    """绑白名单工具调用模型。模型给出的参数原样执行；漏调时再请它做语义解析。"""
     rt = _runtime()
     llm: ChatFinanceLLM = rt["llm"]
     tools: list[BaseTool] = rt.get("bound_tools") or []
@@ -166,7 +232,9 @@ async def agent_node(state: AgentState) -> dict:
         logger.info("max tool rounds reached, ignore further calls")
         legal = []
     elif round_n < MAX_TOOL_ROUNDS and not already:
-        legal = _anchor_required_calls(_intent(state), allowed, display_msg, legal)
+        legal = await _ensure_required_call(
+            llm, _intent(state), allowed, display_msg, legal, messages
+        )
 
     return {
         "messages": messages + [ai],

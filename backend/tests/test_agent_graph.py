@@ -98,7 +98,7 @@ async def test_graph_forces_policy_tool_when_model_skips():
         )
     finally:
         graph_runtime.reset(token)
-    assert llm.calls == 1
+    assert llm.calls == 2
     assert "住宿 500" in (final.get("tool_result") or "")
     query_mock.assert_awaited_once_with(question)
     search_mock.assert_not_awaited()
@@ -106,7 +106,7 @@ async def test_graph_forces_policy_tool_when_model_skips():
 
 @pytest.mark.asyncio
 async def test_graph_forces_official_search_for_followup():
-    """公开财税追问未调工具时，按本轮原话检索，不沿用上一轮检索词。"""
+    """语义结果无法解析时，用本轮原话检索，不把上一轮地区写进去。"""
     query_mock = AsyncMock()
     search_mock = AsyncMock()
     bound = [
@@ -133,7 +133,7 @@ async def test_graph_forces_official_search_for_followup():
         )
     finally:
         graph_runtime.reset(token)
-    assert llm.calls == 1
+    assert llm.calls == 2
     assert "总局公告" in (final.get("tool_result") or "")
     search_mock.assert_awaited_once_with(
         question, region=None, period=None, topic=None
@@ -142,8 +142,132 @@ async def test_graph_forces_official_search_for_followup():
 
 
 @pytest.mark.asyncio
-async def test_graph_drops_stale_slots_from_previous_turn():
-    """模型若带上上一轮地区，检索词和槽位仍以本轮原话为准。"""
+async def test_graph_keeps_model_resolution_of_deixis():
+    """模型把「那边」判成海南时，代码不改写它的检索参数。"""
+    search_mock = AsyncMock()
+    bound = [_search_tool(search_mock, "海南税收")]
+    question = "那边的企业税收是怎样的？"
+    llm = _FakeLLM(
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "s1",
+                    "name": TOOL_SEARCH_OFFICIAL,
+                    "args": {
+                        "query": "2026年海南省企业税收政策",
+                        "region": "海南省",
+                        "period": "2026年",
+                        "topic": "企业税收",
+                    },
+                }
+            ],
+        )
+    )
+    token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+    try:
+        await get_text_graph().ainvoke(
+            {
+                "intent": Intent.PUBLIC_TAX.value,
+                "display_msg": question,
+                "messages": [
+                    HumanMessage(content="2026年海南省的收入怎样"),
+                    AIMessage(content="上半年地方一般公共预算收入510.5亿元"),
+                    HumanMessage(content=question),
+                ],
+                "tool_round": 0,
+                "pending_calls": [],
+                "tool_result": "",
+            }
+        )
+    finally:
+        graph_runtime.reset(token)
+    assert llm.calls == 1
+    search_mock.assert_awaited_once_with(
+        "2026年海南省企业税收政策",
+        region="海南省",
+        period="2026年",
+        topic="企业税收",
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_semantic_json_fills_skipped_tool():
+    """模型没调工具时，采用它随后给出的 JSON 参数，而不是词表改写。"""
+    search_mock = AsyncMock()
+    bound = [_search_tool(search_mock, "海南税收")]
+    question = "那边的企业税收是怎样的？"
+    llm = _SequencedLLM(
+        [
+            AIMessage(content="我先不搜", tool_calls=[]),
+            AIMessage(
+                content=(
+                    '{"query":"2026年海南省企业税收政策","region":"海南省",'
+                    '"period":null,"topic":"企业税收"}'
+                ),
+                tool_calls=[],
+            ),
+        ]
+    )
+    token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+    try:
+        await get_text_graph().ainvoke(
+            {
+                "intent": Intent.PUBLIC_TAX.value,
+                "display_msg": question,
+                "messages": [
+                    HumanMessage(content="2026年海南省的收入怎样"),
+                    AIMessage(content="上半年收入510.5亿元"),
+                    HumanMessage(content=question),
+                ],
+                "tool_round": 0,
+                "pending_calls": [],
+                "tool_result": "",
+            }
+        )
+    finally:
+        graph_runtime.reset(token)
+    assert llm.calls == 2
+    search_mock.assert_awaited_once_with(
+        "2026年海南省企业税收政策",
+        region="海南省",
+        period=None,
+        topic="企业税收",
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_national_followup_does_not_inherit_province():
+    """语义结果无法解析时，不靠词表把上一轮的省写进检索。"""
+    search_mock = AsyncMock()
+    bound = [_search_tool(search_mock, "全国政策")]
+    question = "全国小微企业政策呢？"
+    llm = _FakeLLM(AIMessage(content="无法解析", tool_calls=[]))
+    token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+    try:
+        await get_text_graph().ainvoke(
+            {
+                "intent": Intent.PUBLIC_TAX.value,
+                "display_msg": question,
+                "messages": [
+                    HumanMessage(content="2026年海南省的收入怎样"),
+                    HumanMessage(content=question),
+                ],
+                "tool_round": 0,
+                "pending_calls": [],
+                "tool_result": "",
+            }
+        )
+    finally:
+        graph_runtime.reset(token)
+    search_mock.assert_awaited_once_with(
+        question, region=None, period=None, topic=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_keeps_model_tool_args_verbatim():
+    """模型已给出参数时原样执行，代码不按字面槽位改写。"""
     query_mock = AsyncMock()
     search_mock = AsyncMock()
     bound = [
@@ -184,14 +308,17 @@ async def test_graph_drops_stale_slots_from_previous_turn():
         graph_runtime.reset(token)
     assert "福建资料" in (final.get("tool_result") or "")
     search_mock.assert_awaited_once_with(
-        question, region=None, period=None, topic=None
+        "广东省2026年一季度财政收支",
+        region="广东省",
+        period="2026年一季度",
+        topic="财政收支",
     )
     query_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_graph_keeps_slots_that_appear_in_current_question():
-    """本轮原话里写明的地区、期间、主题仍然传给检索。"""
+    """模型填写的检索词和槽位原样传给检索。"""
     search_mock = AsyncMock()
     bound = [_search_tool(search_mock, "广东资料")]
     question = "广东省2026年一季度财报"
@@ -227,7 +354,7 @@ async def test_graph_keeps_slots_that_appear_in_current_question():
     finally:
         graph_runtime.reset(token)
     search_mock.assert_awaited_once_with(
-        question,
+        "全国财政收支",
         region="广东省",
         period="2026年一季度",
         topic="财报",
