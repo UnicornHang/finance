@@ -1,0 +1,287 @@
+# 生产编排：无热重载、无自动 seed、基础设施端口不对宿主机暴露
+# 用法：
+#   cp .env.prod.example .env.prod   # 填密钥与 LLM Key
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# 可选 TLS：将 fullchain.pem / privkey.pem 放到 ./certs/ 后重建 nginx
+# 可选监控：加 --profile monitoring
+
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: finance-prod-backend
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      APP_ENV: production
+      MILVUS_HOST: milvus
+      MILVUS_PORT: "19530"
+      MILVUS_ENABLED: "true"
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      MINIO_HOST: minio
+      BACKEND_WORKERS: ${BACKEND_WORKERS:-2}
+    volumes:
+      - backend_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    networks:
+      - finance-prod-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # 不对宿主机暴露 8000；仅经 nginx 访问
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: finance-prod-celery-worker
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      APP_ENV: production
+      MILVUS_HOST: milvus
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      MINIO_HOST: minio
+    volumes:
+      - backend_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - finance-prod-net
+    command: >
+      celery -A app.tasks.celery_app worker
+      --loglevel=info
+      --concurrency=${CELERY_WORKER_CONCURRENCY:-2}
+    healthcheck:
+      disable: true
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: finance-prod-celery-beat
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      APP_ENV: production
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      MINIO_HOST: minio
+    volumes:
+      - backend_storage:/app/storage
+    depends_on:
+      celery-worker:
+        condition: service_started
+      minio:
+        condition: service_healthy
+    networks:
+      - finance-prod-net
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    healthcheck:
+      disable: true
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    container_name: finance-prod-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - finance-prod-net
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: finance-prod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - finance-prod-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # 不对宿主机暴露数据库端口
+
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.16
+    container_name: finance-prod-milvus-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: >
+      etcd -advertise-client-urls=http://127.0.0.1:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
+    volumes:
+      - milvus_etcd_data:/etcd
+    networks:
+      - finance-prod-net
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus-minio:
+    image: quay.io/minio/minio:latest
+    container_name: finance-prod-milvus-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: ${MILVUS_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MILVUS_MINIO_SECRET_KEY:-minioadmin}
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - milvus_minio_data:/minio_data
+    networks:
+      - finance-prod-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus:
+    image: milvusdb/milvus:v2.4.15
+    container_name: finance-prod-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MINIO_ACCESS_KEY_ID: ${MILVUS_MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MILVUS_MINIO_SECRET_KEY:-minioadmin}
+    volumes:
+      - milvus_data:/var/lib/milvus
+    depends_on:
+      milvus-etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_healthy
+    networks:
+      - finance-prod-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 20s
+      retries: 5
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    container_name: finance-prod-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - finance-prod-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    # 与 infra 一致：优先 quay，避免 Docker Hub 匿名限流
+    image: quay.io/minio/minio:latest
+    container_name: finance-prod-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_KMS_SECRET_KEY: ${MINIO_KMS_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    networks:
+      - finance-prod-net
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:latest
+    container_name: finance-prod-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./nginx/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - finance-prod-net
+    # 不对公网暴露；需要时临时加 ports 或经跳板访问
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:latest
+    container_name: finance-prod-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - finance-prod-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  backend_storage:
+  prometheus_data:
+  grafana_data:
+  nginx_logs:
+  milvus_etcd_data:
+  milvus_minio_data:
+  milvus_data:
+
+networks:
+  finance-prod-net:
+    driver: bridge

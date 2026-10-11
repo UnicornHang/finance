@@ -1,0 +1,10 @@
+# 生产 Prometheus：仅抓取 Docker 内网 backend（不经公网 Nginx）
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: finance-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8000"]

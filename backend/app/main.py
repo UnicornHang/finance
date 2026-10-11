@@ -29,13 +29,15 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """工厂函数创建 FastAPI 实例。"""
+    # 生产环境关闭 Swagger / ReDoc，降低攻击面
+    is_prod = settings.app_env == "production"
     app = FastAPI(
         title="Finance AI Agent API",
         version=settings.app_version,
         description="企业财务 AI Agent 平台后端服务",
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url=f"{settings.api_v1_prefix}/openapi.json",
+        docs_url=None if is_prod else "/docs",
+        redoc_url=None if is_prod else "/redoc",
+        openapi_url=None if is_prod else f"{settings.api_v1_prefix}/openapi.json",
         lifespan=lifespan,
     )
 

@@ -1,0 +1,44 @@
+# 后端生产镜像：仅运行依赖 + gunicorn（无热重载、无 [dev]）
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        libpq-dev \
+        gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# 先装依赖层：占位包满足 setuptools，再覆盖真实代码
+COPY pyproject.toml ./
+RUN printf '%s\n' '# finance-backend' > README.md \
+    && mkdir -p app \
+    && touch app/__init__.py \
+    && pip install --upgrade pip \
+    && pip install . \
+    && rm -rf app
+
+COPY alembic.ini ./
+COPY alembic ./alembic
+COPY app ./app
+COPY scripts ./scripts
+
+# 以最终代码重新安装包，避免 site-packages 残留占位模块
+RUN pip install --no-deps --force-reinstall .
+
+RUN useradd -m -u 1000 appuser \
+    && mkdir -p /app/storage /app/logs \
+    && chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+# 仅迁移后启动；不自动 seed
+CMD ["sh", "-c", "alembic upgrade head && gunicorn app.main:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 -w ${BACKEND_WORKERS:-2} --timeout 300 --graceful-timeout 30 --access-logfile - --error-logfile -"]

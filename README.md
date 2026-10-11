@@ -197,9 +197,12 @@ finance/
 │   ├── agent-langchain-langgraph.md
 │   └── superpowers/              # specs（设计）+ plans（实现计划）
 ├── images/                       # README 截图
-├── docker-compose.yml            # 全套服务一键启动
+├── docker-compose.yml            # 开发/演示一键启动
+├── docker-compose.prod.yml       # 生产编排（gunicorn + 静态前端）
 ├── docker-compose.infra.yml      # 仅基础设施（本机拆分开发）
-├── .env.example                  # 环境变量模板
+├── .env.example                  # 开发环境变量模板
+├── .env.prod.example             # 生产环境变量模板
+├── certs/                        # 可选 TLS 证书（fullchain/privkey）
 └── AGENT.md                      # 工程规约（给协作者 / Agent）
 ```
 
@@ -287,12 +290,26 @@ npm run dev
 - [PRD 产品需求文档](docs/PRD.md)
 - [TD 技术选型与架构设计](docs/TD.md)
 - [Agent / LangGraph 说明](docs/agent-langchain-langgraph.md)
+- [生产部署指南](docs/deploy-production.md)
 
-> 虚拟机部署可用 `scripts/deploy-vm.sh`
+> 开发用虚拟机部署：`scripts/deploy-vm.sh`；生产：`scripts/deploy-prod.sh`
+
+### 生产部署
+
+开发栈（`docker-compose.yml`）含热重载与自动 seed，**不要**直接用于对用户环境。生产请用：
+
+```bash
+./scripts/deploy-prod.sh          # 首次生成 .env.prod 并随机化密钥
+# 编辑 .env.prod 填入 LLM API Key
+./scripts/deploy-prod.sh          # 构建并启动
+./scripts/deploy-prod.sh --seed   # 可选：演示账号（仅内网试点）
+```
+
+Windows：`.\scripts\deploy-prod.ps1`。启用 HTTPS：将 `fullchain.pem` / `privkey.pem` 放入 `certs/` 后重建 nginx。完整说明见 [生产部署指南](docs/deploy-production.md)。
 
 ### 后续方向
 
-- 运维与私有化：场景 Key 管理、部署手册与监控告警打磨
+- 运维与私有化：限流落地、监控告警规则、备份自动化
 - 工程补强：流式真正可中断、清理历史 OCR 异步残留、稀疏检索等
 - 产品演进：合规规则库运营、权限与看板深化、多租户 SaaS
 
