@@ -64,6 +64,15 @@ function formatKpiAmount(value: number): string {
   }).format(value)
 }
 
+/** Token 纵轴刻度：大数用紧凑写法，避免左侧被裁切。 */
+function formatTokenAxisTick(value: number): string {
+  return new Intl.NumberFormat('zh-CN', {
+    notation: 'compact',
+    compactDisplay: 'short',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
+
 /**
  * 首页数据概览：接 /dashboard/overview，展示 KPI、归档趋势、风险与 Token 消耗。
  */
@@ -427,7 +436,7 @@ function TokenTrendChart({ points }: { points: DashboardTokenTrendPoint[] }) {
   return (
     <div className="min-h-[7.5rem] w-full flex-1">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={points} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barCategoryGap={dense ? '20%' : '28%'}>
+        <BarChart data={points} margin={{ top: 4, right: 4, left: 8, bottom: 0 }} barCategoryGap={dense ? '20%' : '28%'}>
           <CartesianGrid stroke="#e6e9f0" strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey={dense ? 'label' : 'weekday'}
@@ -440,7 +449,8 @@ function TokenTrendChart({ points }: { points: DashboardTokenTrendPoint[] }) {
             allowDecimals={false}
             axisLine={false}
             tickLine={false}
-            width={36}
+            width={48}
+            tickFormatter={formatTokenAxisTick}
             tick={{ fontSize: 11, fill: '#6b7691' }}
           />
           <Tooltip cursor={{ fill: '#f3f5f9' }} content={<TokenTrendTooltip />} />
