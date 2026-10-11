@@ -147,6 +147,7 @@ _FISCAL_QUERY_DOMAINS: tuple[str, ...] = (
 
 _FISCAL_DATA_QUERY_HINTS: tuple[str, ...] = (
     "财政收支",
+    "财报",
     "财政收入",
     "财政支出",
     "财政数据",

@@ -6,7 +6,7 @@ pytest.importorskip("langgraph")
 
 from unittest.mock import AsyncMock, MagicMock
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import StructuredTool
 
 from app.agent.graph import after_agent, after_gate, get_text_graph, graph_runtime, tools_node
@@ -74,8 +74,8 @@ def _search_tool(mock: AsyncMock, result: str) -> StructuredTool:
 
 
 @pytest.mark.asyncio
-async def test_graph_soft_remind_then_empty_when_still_no_tool():
-    """首轮无 call 时软提醒；第二次仍无 call 则空结果，不强制执行工具。"""
+async def test_graph_forces_policy_tool_when_model_skips():
+    """制度问题未调工具时，用本轮原话补查知识库，不再空检索放行。"""
     query_mock = AsyncMock()
     search_mock = AsyncMock()
     bound = [
@@ -84,12 +84,13 @@ async def test_graph_soft_remind_then_empty_when_still_no_tool():
     ]
     llm = _FakeLLM(AIMessage(content="我直接答", tool_calls=[]))
     token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+    question = "差旅住宿补贴怎么报？"
     try:
         final = await get_text_graph().ainvoke(
             {
                 "intent": Intent.POLICY_QUERY.value,
-                "display_msg": "差旅住宿补贴怎么报？",
-                "messages": [HumanMessage(content="差旅住宿补贴怎么报？")],
+                "display_msg": question,
+                "messages": [HumanMessage(content=question)],
                 "tool_round": 0,
                 "pending_calls": [],
                 "tool_result": "",
@@ -97,54 +98,34 @@ async def test_graph_soft_remind_then_empty_when_still_no_tool():
         )
     finally:
         graph_runtime.reset(token)
-    assert llm.calls == 2
-    assert final.get("soft_reminded") is True
-    assert not (final.get("tool_result") or "").strip()
-    query_mock.assert_not_awaited()
+    assert llm.calls == 1
+    assert "住宿 500" in (final.get("tool_result") or "")
+    query_mock.assert_awaited_once_with(question)
     search_mock.assert_not_awaited()
-    remind = [
-        m for m in (final.get("messages") or []) if isinstance(m, SystemMessage)
-    ]
-    assert remind
-    assert "search_official_data" in remind[-1].content
 
 
 @pytest.mark.asyncio
-async def test_graph_soft_remind_then_tool_on_second_turn():
-    """软提醒后模型补调官方检索。"""
+async def test_graph_forces_official_search_for_followup():
+    """公开财税追问未调工具时，按本轮原话检索，不沿用上一轮检索词。"""
     query_mock = AsyncMock()
     search_mock = AsyncMock()
     bound = [
         _query_tool(query_mock, "库内"),
         _search_tool(search_mock, "总局公告"),
     ]
-    llm = _SequencedLLM(
-        [
-            AIMessage(content="", tool_calls=[]),
-            AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "id": "s1",
-                        "name": TOOL_SEARCH_OFFICIAL,
-                        "args": {
-                            "query": "财政收支",
-                            "region": "广东",
-                            "period": "2026年一季度",
-                            "topic": "fiscal",
-                        },
-                    }
-                ],
-            ),
-        ]
-    )
+    llm = _FakeLLM(AIMessage(content="我直接答", tool_calls=[]))
+    question = "2026年福建省一季度财报"
     token = graph_runtime.set({"llm": llm, "bound_tools": bound})
     try:
         final = await get_text_graph().ainvoke(
             {
                 "intent": Intent.PUBLIC_TAX.value,
-                "display_msg": "2026广东省一季度财政",
-                "messages": [HumanMessage(content="2026广东省一季度财政")],
+                "display_msg": question,
+                "messages": [
+                    HumanMessage(content="广东省2026年一季度财报"),
+                    AIMessage(content="全国一般公共预算收入61613亿元"),
+                    HumanMessage(content=question),
+                ],
                 "tool_round": 0,
                 "pending_calls": [],
                 "tool_result": "",
@@ -152,10 +133,105 @@ async def test_graph_soft_remind_then_tool_on_second_turn():
         )
     finally:
         graph_runtime.reset(token)
-    assert llm.calls == 2
+    assert llm.calls == 1
     assert "总局公告" in (final.get("tool_result") or "")
-    search_mock.assert_awaited()
+    search_mock.assert_awaited_once_with(
+        question, region=None, period=None, topic=None
+    )
     query_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_graph_drops_stale_slots_from_previous_turn():
+    """模型若带上上一轮地区，检索词和槽位仍以本轮原话为准。"""
+    query_mock = AsyncMock()
+    search_mock = AsyncMock()
+    bound = [
+        _query_tool(query_mock, "库内"),
+        _search_tool(search_mock, "福建资料"),
+    ]
+    question = "2026年福建省一季度财报"
+    llm = _FakeLLM(
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "s1",
+                    "name": TOOL_SEARCH_OFFICIAL,
+                    "args": {
+                        "query": "广东省2026年一季度财政收支",
+                        "region": "广东省",
+                        "period": "2026年一季度",
+                        "topic": "财政收支",
+                    },
+                }
+            ],
+        )
+    )
+    token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+    try:
+        final = await get_text_graph().ainvoke(
+            {
+                "intent": Intent.PUBLIC_TAX.value,
+                "display_msg": question,
+                "messages": [HumanMessage(content=question)],
+                "tool_round": 0,
+                "pending_calls": [],
+                "tool_result": "",
+            }
+        )
+    finally:
+        graph_runtime.reset(token)
+    assert "福建资料" in (final.get("tool_result") or "")
+    search_mock.assert_awaited_once_with(
+        question, region=None, period=None, topic=None
+    )
+    query_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_graph_keeps_slots_that_appear_in_current_question():
+    """本轮原话里写明的地区、期间、主题仍然传给检索。"""
+    search_mock = AsyncMock()
+    bound = [_search_tool(search_mock, "广东资料")]
+    question = "广东省2026年一季度财报"
+    llm = _FakeLLM(
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "s1",
+                    "name": TOOL_SEARCH_OFFICIAL,
+                    "args": {
+                        "query": "全国财政收支",
+                        "region": "广东省",
+                        "period": "2026年一季度",
+                        "topic": "财报",
+                    },
+                }
+            ],
+        )
+    )
+    token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+    try:
+        await get_text_graph().ainvoke(
+            {
+                "intent": Intent.PUBLIC_TAX.value,
+                "display_msg": question,
+                "messages": [HumanMessage(content=question)],
+                "tool_round": 0,
+                "pending_calls": [],
+                "tool_result": "",
+            }
+        )
+    finally:
+        graph_runtime.reset(token)
+    search_mock.assert_awaited_once_with(
+        question,
+        region="广东省",
+        period="2026年一季度",
+        topic="财报",
+    )
 
 
 @pytest.mark.asyncio
@@ -241,10 +317,9 @@ def test_after_gate_skips_agent_without_tools():
     assert after_gate({"allowed_tools": [TOOL_QUERY_POLICY]}) == "agent"
 
 
-def test_after_agent_routes_pending_and_retry():
+def test_after_agent_routes_pending():
     assert after_agent({"pending_calls": [{"name": "x"}]}) == "tools"
-    assert after_agent({"pending_calls": [], "retry_agent": True}) == "agent"
-    assert after_agent({"pending_calls": [], "retry_agent": False}) == "finalize"
+    assert after_agent({"pending_calls": []}) == "finalize"
 
 
 @pytest.mark.asyncio

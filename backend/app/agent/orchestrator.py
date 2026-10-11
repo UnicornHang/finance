@@ -211,10 +211,10 @@ class AgentOrchestrator:
                     (
                         f"{current_date_instruction()}\n\n"
                         f"{display_msg}\n\n"
-                        "可调用 query_policy（企业知识库）和/或 search_official_data（权威公开数据）。"
-                        "公司内部制度、差旅报销、补贴优先 query_policy；"
-                        "国家/地方公开政策或财政数据用 search_official_data，并尽量填写 region/period/topic；"
-                        "需要对照时两者都可调用。"
+                        "本轮必须针对上面的用户原话调用 query_policy；"
+                        "若同时涉及国家或地方公开数据，再调用 search_official_data，query 也用用户原话。"
+                        "上文回答过同类问题也不能跳过，禁止复用上一轮的检索词。"
+                        "region/period/topic 只填本轮原话里出现的信息。"
                         "若知识库暂无规定，明确告知，禁止用外网冒充公司制度。"
                     ),
                     "policy_query",
@@ -225,10 +225,12 @@ class AgentOrchestrator:
                     (
                         f"{current_date_instruction()}\n\n"
                         f"{display_msg}\n\n"
-                        "可调用 search_official_data（权威公开数据）和/或 query_policy（企业知识库）。"
-                        "国家/地方公开政策、财政收支、预算执行优先 search_official_data，"
-                        "并尽量填写 region/period/topic；若还需对照本公司执行口径可再调 query_policy。"
-                        "用「我联网查了公开网页，并优先采信权威官方来源」过渡；禁止臆造文号与财政数字。"
+                        "本轮必须针对上面的用户原话调用 search_official_data，"
+                        "query 用用户原话；上文回答过同类问题也不能跳过。"
+                        "禁止复用上一轮的检索词、地区或财政数字。"
+                        "region/period/topic 只填本轮原话里出现的信息。"
+                        "需要对照本公司口径时再调用 query_policy。"
+                        "不要在未调用工具时直接给出税率、文号或财政数字。"
                     ),
                     "chitchat",
                 )
@@ -333,6 +335,8 @@ class AgentOrchestrator:
                             "请用「我联网查了公开网页，并优先采信权威官方来源」自然过渡，"
                             "再按核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
                             "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
+                            "本轮数字、文号和链接只能来自本次检索资料，"
+                            "禁止把对话历史里的财政数字挪用来回答本轮问题。"
                         )
                     else:
                         system_prompt = POLICY_SYSTEM_PROMPT
@@ -362,6 +366,8 @@ class AgentOrchestrator:
                         "请用「我联网查了公开网页，并优先采信权威官方来源」自然过渡，再按"
                         "核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
                         "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
+                        "本轮数字、文号和链接只能来自本次检索资料，"
+                        "禁止把对话历史里的财政数字挪用来回答本轮问题。"
                         "若用户还问本公司制度而资料中没有，明确说明未查到公司制度。"
                         "资料里若已有全国一般公共预算等数字，必须引用，禁止声称尚未公布；"
                         "不要用地市财政局材料冒充全国数据。"
@@ -387,10 +393,16 @@ class AgentOrchestrator:
                             f"{current_date_instruction()}\n"
                             "本轮未取得可用的企业制度或权威网站资料。"
                             "请明确告知暂无可靠检索结果，禁止编造税率、文号、财政数字或公司规定。"
+                            "禁止使用「我联网查了公开网页」的口吻，"
+                            "禁止把对话历史里的数字、文号复述为本轮结论。"
                             "不要臆测「数据尚未发布」——除非检索资料里明确写了发布时间或未公布说明；"
                             "可给出财政部、中国政府网等可自行查阅的入口。"
                         )
-                    user_content = display_msg
+                    user_content = (
+                        f"{display_msg}\n\n"
+                        "本轮没有检索到可用资料。请直接说明暂无可靠结果，"
+                        "不要声称已经联网，也不要复述上文中的财政数字或文号。"
+                    )
                     scene = "chitchat"
             case (
                 Intent.CHITCHAT
