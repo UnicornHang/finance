@@ -20,6 +20,7 @@ from app.agent.memory.entities import (
 from app.agent.observe import record
 from app.agent.policy import (
     TOOL_SEARCH_OFFICIAL,
+    needs_retrieval,
     status_event_for_tools,
     tools_for_intent,
 )
@@ -67,9 +68,11 @@ class AgentOrchestrator:
             return
 
         allowed = tools_for_intent(intent)
-        status = status_event_for_tools(allowed)
-        if status:
-            yield status
+        # 闲聊可以调用工具，但问候不必预先显示「正在检索」。
+        if needs_retrieval(intent):
+            status = status_event_for_tools(allowed)
+            if status:
+                yield status
 
         system_prompt, user_content, scene = await self._opening_prompt(
             service, db, user, intent, display_msg
@@ -244,7 +247,21 @@ class AgentOrchestrator:
                     ),
                     "chitchat",
                 )
-            case Intent.CHITCHAT | Intent.CONFIRM_PENDING:
+            case Intent.CHITCHAT:
+                system_prompt = await service._effective_system_prompt(
+                    db, user.tenant_id, "chitchat"
+                )
+                user_content = (
+                    f"{current_date_instruction()}\n\n"
+                    f"{display_msg}\n\n"
+                    "可以调用 search_official_data 或 query_policy，由你判断要不要查。"
+                    "天气、当地情况、时事等需要公开信息时，调用 search_official_data，"
+                    "query 保留对话中的地区，时间不改写，并填写 region/period。"
+                    "问候和自我介绍不必调用工具。"
+                    "没有调用工具就不要说已经联网，也不要编造气温、来源编号或官方数据。"
+                )
+                return system_prompt, user_content, "chitchat"
+            case Intent.CONFIRM_PENDING:
                 system_prompt = await service._effective_system_prompt(
                     db, user.tenant_id, "chitchat"
                 )
@@ -421,9 +438,38 @@ class AgentOrchestrator:
                         "也不要复述上文中的财政数字或文号。"
                     )
                     scene = "chitchat"
+            case Intent.CHITCHAT:
+                if _official_usable(tool_result):
+                    system_prompt = PUBLIC_TAX_SYSTEM_PROMPT
+                    user_content = (
+                        f"{current_date_instruction()}\n\n"
+                        f"【权威网站检索资料】\n{tool_result}\n\n"
+                        f"【用户问题】\n{display_msg}\n\n"
+                        "请用「我联网查了公开网页，并优先采信权威官方来源」自然过渡。"
+                        "只依据本次检索资料回答，数字、时间和地点必须来自资料。"
+                        "资料没有的气温或日期不要编造；月份以当前日期或资料中的时间为准。"
+                        f"\n{_citation_rule}"
+                    )
+                elif _policy_usable(tool_result):
+                    system_prompt = POLICY_SYSTEM_PROMPT
+                    user_content = (
+                        f"【知识库参考资料】\n{tool_result}\n\n"
+                        f"【用户问题】\n{display_msg}\n\n"
+                        "请基于参考资料作答。资料未覆盖时说明知识库暂无相关规定，"
+                        "不要说已经联网查了公开网页。"
+                    )
+                else:
+                    system_prompt = opening_system
+                    user_content = (
+                        f"{current_date_instruction()}\n\n"
+                        f"{display_msg}\n\n"
+                        "本轮没有检索。禁止说「我联网查了」，禁止使用来源编号，"
+                        "禁止编造气温、月份、统计数字或官方发布。"
+                        "可以简短回应，并说明没有查询实时数据。"
+                    )
+                scene = "chitchat"
             case (
-                Intent.CHITCHAT
-                | Intent.OFFICIAL_PORTAL
+                Intent.OFFICIAL_PORTAL
                 | Intent.INVOICE_UPLOAD
                 | Intent.CONTRACT_UPLOAD
                 | Intent.CONFIRM_PENDING

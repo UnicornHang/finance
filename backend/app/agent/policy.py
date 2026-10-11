@@ -19,7 +19,7 @@ _INTENT_TOOLS: dict[Intent, tuple[str, ...]] = {
     Intent.POLICY_QUERY: _BOTH_RETRIEVAL_TOOLS,
     Intent.PUBLIC_TAX: _BOTH_RETRIEVAL_TOOLS,
     Intent.OFFICIAL_PORTAL: (),
-    Intent.CHITCHAT: (),
+    Intent.CHITCHAT: _BOTH_RETRIEVAL_TOOLS,
     Intent.INVOICE_UPLOAD: (),
     Intent.CONTRACT_UPLOAD: (),
     Intent.CONFIRM_PENDING: (),
@@ -48,12 +48,12 @@ _RETRIEVAL_INTENTS = frozenset({Intent.PUBLIC_TAX, Intent.POLICY_QUERY})
 
 
 def needs_retrieval(intent: Intent) -> bool:
-    """公开财税与企业制度都要先检索再回答，但不指定唯一工具。"""
+    """公开财税与企业制度必须先检索。闲聊可以调用工具，但不强制。"""
     return intent in _RETRIEVAL_INTENTS
 
 
 def tools_for_intent(intent: Intent) -> list[str]:
-    """返回该意图允许调用的工具名；未知意图视为闲聊（无工具）。"""
+    """返回该意图允许调用的工具名。闲聊也可检索，门户和单据流程除外。"""
     names = _INTENT_TOOLS.get(intent)
     if names is None:
         return []
