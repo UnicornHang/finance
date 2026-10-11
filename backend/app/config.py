@@ -138,7 +138,8 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://localhost:6379/2"
     celery_worker_concurrency: int = 2
 
-    # ---- Langfuse（可选） ----
+    # ---- 观测：本地决策日志默认开启；Langfuse 有密钥时额外上报 ----
+    observe_enabled: bool = True
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_host: str = "https://cloud.langfuse.com"

@@ -1,4 +1,4 @@
-"""可选 Langfuse 观测：无密钥或未安装 SDK 时为零开销空操作。"""
+"""Agent 决策观测。本地日志默认开启；Langfuse 仅在配置了密钥时额外上报。"""
 
 from __future__ import annotations
 
@@ -12,13 +12,28 @@ _client: Any = None
 _client_tried = False
 
 
-def is_enabled() -> bool:
-    """同时有公钥和私钥才上报。"""
+def _settings():
+    """读取配置；配置模块异常时视为未启用。"""
     try:
         from app.config import get_settings
 
-        settings = get_settings()
+        return get_settings()
     except Exception:
+        return None
+
+
+def is_enabled() -> bool:
+    """本地观测开关，默认开启。"""
+    settings = _settings()
+    if settings is None:
+        return False
+    return bool(settings.observe_enabled)
+
+
+def _langfuse_configured() -> bool:
+    """公钥和私钥都有才向 Langfuse 上报。"""
+    settings = _settings()
+    if settings is None:
         return False
     return bool(settings.langfuse_public_key and settings.langfuse_secret_key)
 
@@ -39,9 +54,9 @@ def _safe_attrs(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _get_client() -> Any:
-    """懒加载 Langfuse；失败后本进程不再重试。"""
+    """懒加载 Langfuse。未配密钥或加载失败时只保留本地日志。"""
     global _client, _client_tried
-    if not is_enabled():
+    if not is_enabled() or not _langfuse_configured():
         return None
     if _client_tried:
         return _client
@@ -49,22 +64,22 @@ def _get_client() -> Any:
     try:
         from langfuse import Langfuse
 
-        from app.config import get_settings
-
-        settings = get_settings()
+        settings = _settings()
         _client = Langfuse(
             public_key=settings.langfuse_public_key,
             secret_key=settings.langfuse_secret_key,
             host=settings.langfuse_host or None,
         )
     except Exception:
-        logger.info("langfuse unavailable, observe disabled")
+        logger.info("langfuse unavailable, local observe still on")
         _client = None
     return _client
 
 
 def record(name: str, **attrs: Any) -> None:
-    """记一条决策事件；关闭时只走 structlog。"""
+    """记一条决策事件。观测关闭时直接返回。"""
+    if not is_enabled():
+        return
     payload = _safe_attrs(attrs)
     logger.info("agent.observe event=%s attrs=%s", name, payload)
     client = _get_client()
