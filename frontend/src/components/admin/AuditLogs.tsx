@@ -117,8 +117,6 @@ export function AuditLogs() {
   return (
     <div className="space-y-6">
       <SectionHeader
-        title="审计日志"
-        description="保留最近一年。记录只追加，不能修改或删除。"
         actions={
           <Button
             size="md"
