@@ -75,7 +75,7 @@ def _search_tool(mock: AsyncMock, result: str) -> StructuredTool:
 
 @pytest.mark.asyncio
 async def test_graph_forces_policy_tool_when_model_skips():
-    """制度问题未调工具时，用本轮原话补查知识库，不再空检索放行。"""
+    """未调工具且语义结果无法解析时，用本轮原话做公开检索。"""
     query_mock = AsyncMock()
     search_mock = AsyncMock()
     bound = [
@@ -99,9 +99,11 @@ async def test_graph_forces_policy_tool_when_model_skips():
     finally:
         graph_runtime.reset(token)
     assert llm.calls == 2
-    assert "住宿 500" in (final.get("tool_result") or "")
-    query_mock.assert_awaited_once_with(question)
-    search_mock.assert_not_awaited()
+    assert "总局公告" in (final.get("tool_result") or "")
+    search_mock.assert_awaited_once_with(
+        question, region=None, period=None, topic=None
+    )
+    query_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from app.agent.memory.entities import (
+    DIALOGUE_TOPIC,
     LAST_INTENT,
     PENDING_TASK,
     QUERIED_POLICIES,
@@ -119,6 +120,28 @@ class SessionContext:
                 session_id, user_id, tenant_id, summary=fallback_summary
             )
 
+    def dialogue_topic_line(self) -> str:
+        """上一轮检索话题，供本轮理解指代。"""
+        raw = self.entities.get(DIALOGUE_TOPIC)
+        if not isinstance(raw, dict):
+            return ""
+        domain = {"public": "公开数据", "company": "本公司制度"}.get(
+            str(raw.get("domain") or ""), str(raw.get("domain") or "")
+        )
+        parts: list[str] = []
+        if domain:
+            parts.append(f"范围={domain}")
+        for key, label in (
+            ("region", "地区"),
+            ("period", "时间"),
+            ("topic", "主题"),
+            ("query", "查询"),
+        ):
+            value = str(raw.get(key) or "").strip()
+            if value:
+                parts.append(f"{label}={value}")
+        return "；".join(parts)
+
     def last_intent(self) -> Intent | None:
         """上一轮最终采用的意图。"""
         raw = self.entities.get(LAST_INTENT)
@@ -169,7 +192,8 @@ class SessionContext:
             f"pending_ids: {pending_id or '（无）'}\n"
             f"uploaded_invoices: {', '.join(invoice_ids) or '（无）'}\n"
             f"uploaded_contracts: {', '.join(contract_ids) or '（无）'}\n"
-            f"queried_policies: {', '.join(titles) or '（无）'}"
+            f"queried_policies: {', '.join(titles) or '（无）'}\n"
+            f"dialogue_topic: {self.dialogue_topic_line() or '（无）'}"
         )
         if related_history.strip():
             block += (

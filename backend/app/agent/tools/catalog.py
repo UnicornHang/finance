@@ -86,8 +86,9 @@ def build_text_tools(
     ) -> str:
         """检索公开网页上的财税政策与财政数据（全网检索，官方来源优先展示）。
 
-        结合整段对话理解本轮问题后再填参数。指代和省略要还原成可独立检索的 query，
-        并尽量填写 region / period / topic；换了地区或改问全国时以本轮语义为准。
+        结合整段对话理解本轮问题后再填参数。query 只写一句问话，保留对话中的年份和地区，
+        不要并列堆砌多个主题，不要改年份。指代按对话补全，并尽量填写 region / period / topic。
+        换了地区或改问全国时以本轮为准。部门预决算不是全区、全省总收入。
         回答时请用 [n] 引用返回条目。
         不用于本公司差旅报销制度，也不可假装完成发票查验或工商查询。
         """
@@ -107,6 +108,7 @@ def build_text_tools(
         sources = search_result.get("sources") or sources_from_hits(hits)
         trace["search"] = {
             "tool": TOOL_SEARCH_OFFICIAL,
+            "question": query,
             "query": search_result.get("query"),
             "region": region,
             "period": period,

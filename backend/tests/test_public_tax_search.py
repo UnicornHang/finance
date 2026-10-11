@@ -74,14 +74,16 @@ def test_provincial_quarterly_finance_prefers_official_search():
     assert looks_like_public_tax_query(q)
     assert should_use_official_search(q)
     assert heuristic_intent(q) == Intent.PUBLIC_TAX
-    assert "财政部 国库司 全国一般公共预算" in boost_official_policy_query(q)
+    assert boost_official_policy_query(q) == q
+    assert "财政部 国库司" not in boost_official_policy_query(q)
 
 
 def test_national_fiscal_overview_uses_fiscal_boost_not_policy_terms():
     """「国家财政」应按财政数据检索，且不再拼接 site: 限定。"""
     q = "2025年国家财政"
     boosted = boost_official_policy_query(q)
-    assert "财政部 国库司 全国一般公共预算" in boosted
+    assert boosted == q
+    assert "财政部 国库司" not in boosted
     assert "政策 法规" not in boosted
     assert "site:" not in boosted
     domains = official_search_domains(q)
@@ -145,8 +147,8 @@ def test_invoice_verify_is_portal_not_search():
 def test_boost_query_pins_official_sites():
     """检索词含主题增强，但不拼接 site: 限定。"""
     boosted = boost_official_policy_query("增值税税率")
-    assert "增值税税率" in boosted
-    assert "政策 法规" in boosted
+    assert boosted == "增值税税率"
+    assert "政策 法规" not in boosted
     assert "site:" not in boosted
 
 
@@ -199,7 +201,7 @@ def test_region_param_selects_provincial_domain():
     assert "site:" not in boosted
     assert "2026年一季度" in boosted
     assert "广东" in boosted
-    assert "财政部 国库司 全国一般公共预算" in boosted
+    assert "财政部 国库司" not in boosted
 
 
 def test_region_param_overrides_unrelated_question_text():
@@ -231,6 +233,43 @@ def test_url_helpers_reject_invalid_port():
     bad = "https://example.com:bad/path?ref=mof.gov.cn"
     assert not is_allowed_official_url(bad)
     assert not is_safe_http_url(bad)
+
+
+def test_rank_hits_prefers_aggregate_income_over_department_accounts():
+    """问全年收入时，全区财政收支排在部门决算前面。"""
+    hits = [
+        {
+            "title": "新疆维吾尔自治区财政厅2025年部门决算公开",
+            "url": "https://czt.xinjiang.gov.cn/dept.htm",
+            "snippet": "一般公共预算支出",
+            "source_kind": "official",
+        },
+        {
+            "title": "2025年新疆维吾尔自治区财政收支情况",
+            "url": "https://czt.xinjiang.gov.cn/fiscal.htm",
+            "snippet": "一般公共预算收入",
+            "source_kind": "official",
+        },
+    ]
+    ranked = OfficialPolicyService._rank_hits(
+        hits,
+        question="2025年新疆全年收入",
+        region="新疆",
+        topic="财政总收入",
+    )
+    assert ranked[0]["title"].startswith("2025年新疆")
+
+
+def test_boost_strips_legacy_national_fiscal_suffix():
+    """旧的全国财政模板不进入检索词。"""
+    boosted = boost_official_policy_query(
+        "2025年新疆省全年收入 财政部 国库司 全国一般公共预算 财政收支情况",
+        region="新疆",
+        period="2025",
+        topic="财政总收入",
+    )
+    assert boosted == "2025年新疆省全年收入"
+    assert "国库司" not in boosted
 
 
 def test_rank_hits_does_not_boost_spoofed_official_in_query():
@@ -353,6 +392,60 @@ async def test_search_and_fetch_always_open_web(monkeypatch):
     assert result["hits"][0]["url"].startswith("https://www.mof.gov.cn")
     assert len(result["sources"]) == len(result["hits"])
     assert result["sources"][0]["index"] == 1
+
+
+@pytest.mark.asyncio
+async def test_search_retries_raw_question_when_boosted_query_misses(monkeypatch):
+    """补上的地区导致零命中时，再用模型原词搜一次。"""
+    from app.services.web_search_service import WebSearchRuntime
+
+    calls: list[str] = []
+
+    async def fake_search(query, *, runtime=None, max_results=None, include_domains=None):
+        calls.append(query)
+        if len(calls) == 1:
+            return {"ok": True, "provider": "bocha", "query": query, "hits": [], "error": None}
+        return {
+            "ok": True,
+            "provider": "bocha",
+            "query": query,
+            "hits": [
+                {
+                    "title": "湖南居民收入",
+                    "url": "https://www.hunan.gov.cn/income.htm",
+                    "snippet": "人均可支配收入",
+                }
+            ],
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "app.services.official_policy_service.web_search_service.search",
+        fake_search,
+    )
+    svc = OfficialPolicyService()
+    rt = WebSearchRuntime(
+        enabled=True,
+        provider="bocha",
+        api_key="x",
+        base_url="",
+        timeout=5,
+        max_results=8,
+        fetch_pages=0,
+        fetch_max_chars=1000,
+    )
+    result = await svc.search_and_fetch(
+        "2025年湖南省全年收入",
+        runtime=rt,
+        region="湖南省",
+        period="1-12月",
+        topic="财政收支",
+    )
+    assert calls[0] == "2025年湖南省全年收入 1-12月"
+    assert "财政部" not in calls[0]
+    assert calls[1] == "2025年湖南省全年收入"
+    assert result["broadened"] is True
+    assert result["hits"][0]["title"] == "湖南居民收入"
 
 
 def test_format_context_marks_supplemental_and_pages():

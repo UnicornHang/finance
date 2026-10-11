@@ -346,17 +346,27 @@ def _normalize_topic(topic: str | None) -> str | None:
     return "other"
 
 
-def _query_topic_terms(question: str, topic: str | None = None) -> str:
-    """按政策或财政数据场景补充检索词，避免季度数据被法规词稀释。"""
-    if _is_fiscal_question(question, topic=topic):
-        # 锚定国库司/全国口径，减少地市财政局噪声
-        return "财政部 国库司 全国一般公共预算 财政收支情况"
-    normalized = _normalize_topic(topic)
-    if normalized == "tax":
-        return "税收 政策 法规"
-    if normalized == "policy":
-        return "政策 法规"
-    return "政策 法规"
+_LEGACY_FISCAL_SUFFIX = "财政部 国库司 全国一般公共预算 财政收支情况"
+_DEPT_DOC_MARKERS = ("部门决算", "部门预算", "机关决算", "单位决算", "本级单位决算")
+_AGGREGATE_MARKERS = (
+    "财政收支情况",
+    "预算执行情况",
+    "统计公报",
+    "国民经济和社会发展",
+    "居民人均可支配收入",
+    "一般公共预算收入",
+)
+
+
+def _strip_legacy_fiscal_suffix(question: str) -> str:
+    """去掉旧模板追加的全国财政词，避免把地方收入搜成部门决算。"""
+    text = (question or "").replace(_LEGACY_FISCAL_SUFFIX, " ")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _asks_department_doc(text: str) -> bool:
+    """用户是否就在问某个部门自己的预决算。"""
+    return any(marker in (text or "") for marker in ("部门决算", "部门预算"))
 
 
 def boost_official_policy_query(
@@ -366,8 +376,8 @@ def boost_official_policy_query(
     period: str | None = None,
     topic: str | None = None,
 ) -> str:
-    """检索词加上期间、地区与主题增强；不再拼接 site:（全网检索）。"""
-    q = (question or "").strip()
+    """查询词只补上缺失的地区和时间。topic 不写入查询词，避免改写成另一类问题。"""
+    q = _strip_legacy_fiscal_suffix(question)
     if not q:
         return q
     extras: list[str] = []
@@ -377,7 +387,6 @@ def boost_official_policy_query(
     region_s = (region or "").strip()
     if region_s and region_s not in q:
         extras.append(region_s)
-    extras.append(_query_topic_terms(q, topic=topic))
     return " ".join([q, *extras]).strip()
 
 
@@ -485,37 +494,27 @@ class OfficialPolicyService:
     ) -> dict[str, Any]:
         """单次全网检索；官方加权排序；原文抓取仍限白名单 HTTPS。"""
         rt = runtime or WebSearchRuntime.from_settings()
+        raw_question = _strip_legacy_fiscal_suffix(question)
         query = boost_official_policy_query(
             question, region=region, period=period, topic=topic
         )
-        search = await web_search_service.search(
-            query,
-            runtime=rt,
-            max_results=rt.max_results,
-            include_domains=None,
+        search, hits, pages = await self._search_once(
+            query, runtime=rt, question=question, region=region, topic=topic
         )
-        hits = self._filter_hits(search.get("hits") or [], allow_open_web=True)
-        hits = self._rank_hits(
-            hits, question=question, region=region, topic=topic
-        )
-        hits = hits[: rt.max_results]
-
-        pages: list[dict[str, str]] = []
-        fetch_n = rt.fetch_pages
-        if fetch_n > 0 and hits:
-            # 只抓取权威官网正文，开网摘要不发 HTTP 抓取（防 SSRF）
-            official_first = [h for h in hits if h.get("source_kind") == "official"]
-            to_fetch = official_first[:fetch_n]
-            for h in to_fetch:
-                page = await self.fetch_official_page(h.get("url") or "", runtime=rt)
-                if page.get("ok") and page.get("text"):
-                    pages.append(
-                        {
-                            "url": str(page.get("final_url") or h.get("url") or ""),
-                            "title": str(page.get("title") or h.get("title") or ""),
-                            "text": str(page.get("text") or ""),
-                        }
-                    )
+        broadened = False
+        # 补上的地区/时间导致零命中时，再用模型原词搜一次。
+        if not hits and not pages and query != raw_question and raw_question:
+            retry_search, retry_hits, retry_pages = await self._search_once(
+                raw_question,
+                runtime=rt,
+                question=question,
+                region=region,
+                topic=topic,
+            )
+            if retry_hits or retry_pages or retry_search.get("ok"):
+                search, hits, pages = retry_search, retry_hits, retry_pages
+                query = raw_question
+                broadened = bool(retry_hits or retry_pages)
 
         ok = bool(search.get("ok"))
         error = search.get("error")
@@ -528,9 +527,44 @@ class OfficialPolicyService:
             "hits": hits,
             "pages": pages,
             "sources": sources_from_hits(hits),
-            "broadened": False,
+            "broadened": broadened,
             "error": None if (ok and (hits or pages)) else error,
         }
+
+    async def _search_once(
+        self,
+        query: str,
+        *,
+        runtime: WebSearchRuntime,
+        question: str,
+        region: str | None,
+        topic: str | None,
+    ) -> tuple[dict[str, Any], list[dict[str, str]], list[dict[str, str]]]:
+        """执行一次检索、排序和官网正文抓取。"""
+        search = await web_search_service.search(
+            query,
+            runtime=runtime,
+            max_results=runtime.max_results,
+            include_domains=None,
+        )
+        hits = self._filter_hits(search.get("hits") or [], allow_open_web=True)
+        hits = self._rank_hits(hits, question=question, region=region, topic=topic)
+        hits = hits[: runtime.max_results]
+        pages: list[dict[str, str]] = []
+        fetch_n = runtime.fetch_pages
+        if fetch_n > 0 and hits:
+            official_first = [h for h in hits if h.get("source_kind") == "official"]
+            for h in official_first[:fetch_n]:
+                page = await self.fetch_official_page(h.get("url") or "", runtime=runtime)
+                if page.get("ok") and page.get("text"):
+                    pages.append(
+                        {
+                            "url": str(page.get("final_url") or h.get("url") or ""),
+                            "title": str(page.get("title") or h.get("title") or ""),
+                            "text": str(page.get("text") or ""),
+                        }
+                    )
+        return search, hits, pages
 
     @staticmethod
     def _filter_hits(
@@ -608,11 +642,18 @@ class OfficialPolicyService:
             if _host_matches(host, "people.com.cn"):
                 points += 60
 
-            if fiscal:
-                if "全国" in blob or "一般公共预算" in blob:
-                    points += 40
-                if "财政部" in blob or "国库司" in blob:
-                    points += 30
+            title = item.get("title") or ""
+            # 「一般公共预算」几乎每份部门预决算都有，不能据此抬高。
+            if any(marker in title or marker in blob for marker in _DEPT_DOC_MARKERS):
+                if not _asks_department_doc(f"{question} {topic or ''}"):
+                    points -= 80
+            if any(marker in title for marker in _AGGREGATE_MARKERS):
+                points += 50
+            if fiscal and ("财政收支情况" in title or "预算执行情况" in title):
+                points += 20
+            # 全国财政问题仍优先财政部页面，但不因正文出现「一般公共预算」抬高部门决算。
+            if fiscal and _host_matches(host, "mof.gov.cn"):
+                points += 45
 
             if (
                 host.endswith(".gov.cn")

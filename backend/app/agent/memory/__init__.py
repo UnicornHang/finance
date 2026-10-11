@@ -1,9 +1,11 @@
 """会话记忆管理。"""
 
 from app.agent.memory.entities import (
+    dialogue_topic_from_trace,
     mark_contract_archived,
     mark_invoice_archived,
     remember_contract_pending,
+    remember_dialogue_topic,
     remember_invoice_pending,
     remember_policy_title,
     set_last_intent,
@@ -11,10 +13,12 @@ from app.agent.memory.entities import (
 from app.agent.memory.summary import fold_outside_window, update_summary
 
 __all__ = [
+    "dialogue_topic_from_trace",
     "fold_outside_window",
     "mark_contract_archived",
     "mark_invoice_archived",
     "remember_contract_pending",
+    "remember_dialogue_topic",
     "remember_invoice_pending",
     "remember_policy_title",
     "set_last_intent",

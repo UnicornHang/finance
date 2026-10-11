@@ -19,7 +19,7 @@ from app.agent.policy import (
     MAX_TOOL_ROUNDS,
     TOOL_QUERY_POLICY,
     TOOL_SEARCH_OFFICIAL,
-    required_tool_for_intent,
+    needs_retrieval,
     tools_for_intent,
 )
 from app.agent.router import Intent
@@ -27,15 +27,17 @@ from app.agent.router import Intent
 logger = logging.getLogger(__name__)
 
 _RESOLVE_ARGS_TEXT = (
-    "你刚才没有调用工具。请阅读上面的整段对话，理解用户本轮真正要问的对象，"
-    "只输出一个 JSON 对象，不要解释。\n"
-    "工具：{tool}\n"
+    "你刚才没有调用工具。请阅读上面的整段对话和上一轮话题，"
+    "判断本轮该查公开数据还是本公司制度，只输出一个 JSON 对象，不要解释。\n"
     "用户本轮原话：{question}\n"
-    "search_official_data 使用 query、region、period、topic；"
-    "query_policy 使用 question。\n"
-    "query 或 question 必须能单独拿去检索，请按对话语义补全指代和省略。"
-    "没有把握的字段填 null。用户换了话题或地区时以本轮语义为准，不要机械复制上一轮。"
+    '工具名 tool 只能是 "search_official_data" 或 "query_policy"。\n'
+    "公开的收入、财政、税收、政策用 search_official_data，字段为 query、region、period、topic。\n"
+    "只有用户明确在问本公司制度、差旅报销、内部补贴时才用 query_policy，字段为 question。\n"
+    "query 只写一句问话，保留对话里的年份和地区，不要并列堆砌主题，不要改年份。"
+    "没有把握的字段填 null。用户换了话题或地区时以本轮语义为准。"
+    "追问政策就检索政策，不要改回上一轮的收入问题，也不要把公开问题改写成公司制度。"
 )
+_RETRIEVAL_TOOLS = frozenset({TOOL_QUERY_POLICY, TOOL_SEARCH_OFFICIAL})
 
 # 本请求的 llm / tools，避免依赖 LangGraph 是否把 config 传进节点
 graph_runtime: ContextVar[dict[str, Any]] = ContextVar("text_agent_runtime")
@@ -128,16 +130,22 @@ def _text_slot(value: object) -> str | None:
     return token
 
 
-def _call_from_resolution(name: str, payload: dict) -> dict | None:
+def _call_from_resolution(payload: dict, allowed: set[str]) -> dict | None:
     """把模型的 JSON 判断转成一次工具调用，不改写字段内容。"""
+    name = _text_slot(payload.get("tool")) or ""
+    if name not in allowed:
+        if _text_slot(payload.get("query")) and TOOL_SEARCH_OFFICIAL in allowed:
+            name = TOOL_SEARCH_OFFICIAL
+        elif _text_slot(payload.get("question")) and TOOL_QUERY_POLICY in allowed:
+            name = TOOL_QUERY_POLICY
+        else:
+            return None
     if name == TOOL_QUERY_POLICY:
         question = _text_slot(payload.get("question")) or _text_slot(payload.get("query"))
         if not question:
             return None
         return {"id": str(uuid4()), "name": name, "args": {"question": question}}
-    if name != TOOL_SEARCH_OFFICIAL:
-        return None
-    query = _text_slot(payload.get("query"))
+    query = _text_slot(payload.get("query")) or _text_slot(payload.get("question"))
     if not query:
         return None
     args: dict[str, str] = {"query": query}
@@ -148,17 +156,17 @@ def _call_from_resolution(name: str, payload: dict) -> dict | None:
     return {"id": str(uuid4()), "name": name, "args": args}
 
 
-async def _semantic_required_call(
+async def _semantic_retrieval_call(
     llm: ChatFinanceLLM,
     messages: list[BaseMessage],
     question: str,
-    name: str,
+    allowed: set[str],
 ) -> dict | None:
-    """模型漏调工具时，再请它根据对话语义给出参数。"""
+    """两个检索工具都没调时，再请模型按对话选择工具和参数。"""
     ai = await llm.ainvoke(
         [
             *messages,
-            HumanMessage(content=_RESOLVE_ARGS_TEXT.format(tool=name, question=question)),
+            HumanMessage(content=_RESOLVE_ARGS_TEXT.format(question=question)),
         ],
         tools=None,
     )
@@ -166,19 +174,27 @@ async def _semantic_required_call(
     payload = _parse_json_object(content)
     if payload is None:
         return None
-    return _call_from_resolution(name, payload)
+    return _call_from_resolution(payload, allowed)
 
 
-def _fallback_required_call(name: str, question: str) -> dict:
-    """语义结果无法解析时，仍用本轮原话检索，避免这一轮完全不查。"""
-    if name == TOOL_QUERY_POLICY:
-        args: dict[str, str] = {"question": question}
-    else:
-        args = {"query": question}
-    return {"id": str(uuid4()), "name": name, "args": args}
+def _fallback_retrieval_call(allowed: set[str], question: str) -> dict | None:
+    """语义结果无法解析时，用本轮原话做公开检索。"""
+    if TOOL_SEARCH_OFFICIAL in allowed:
+        return {
+            "id": str(uuid4()),
+            "name": TOOL_SEARCH_OFFICIAL,
+            "args": {"query": question},
+        }
+    if TOOL_QUERY_POLICY in allowed:
+        return {
+            "id": str(uuid4()),
+            "name": TOOL_QUERY_POLICY,
+            "args": {"question": question},
+        }
+    return None
 
 
-async def _ensure_required_call(
+async def _ensure_retrieval_call(
     llm: ChatFinanceLLM,
     intent: Intent,
     allowed: list[str],
@@ -186,18 +202,21 @@ async def _ensure_required_call(
     legal: list[dict],
     messages: list[BaseMessage],
 ) -> list[dict]:
-    """必调工具已由模型给出时，原样采用其参数。漏调时再做一次语义解析。"""
-    required = required_tool_for_intent(intent)
-    if not required or required not in allowed:
+    """模型已选检索工具时原样执行。都没选时再做一次语义判断。"""
+    allow = set(allowed)
+    if not needs_retrieval(intent) or not (allow & _RETRIEVAL_TOOLS):
         return legal
-    if any(call.get("name") == required for call in legal):
+    if any(call.get("name") in _RETRIEVAL_TOOLS for call in legal):
         return legal
-    resolved = await _semantic_required_call(llm, messages, question, required)
+    resolved = await _semantic_retrieval_call(llm, messages, question, allow)
     if resolved is not None:
-        record("semantic_tool_args", tool=required, intent=intent.value)
+        record("semantic_tool_args", tool=str(resolved.get("name")), intent=intent.value)
         return [resolved, *legal]
-    record("force_tool", tool=required, intent=intent.value)
-    return [_fallback_required_call(required, question), *legal]
+    fallback = _fallback_retrieval_call(allow, question)
+    if fallback is None:
+        return legal
+    record("force_tool", tool=str(fallback.get("name")), intent=intent.value)
+    return [fallback, *legal]
 
 
 async def agent_node(state: AgentState) -> dict:
@@ -232,7 +251,7 @@ async def agent_node(state: AgentState) -> dict:
         logger.info("max tool rounds reached, ignore further calls")
         legal = []
     elif round_n < MAX_TOOL_ROUNDS and not already:
-        legal = await _ensure_required_call(
+        legal = await _ensure_retrieval_call(
             llm, _intent(state), allowed, display_msg, legal, messages
         )
 

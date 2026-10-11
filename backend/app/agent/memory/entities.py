@@ -18,6 +18,7 @@ PENDING_TASK = "pending_task"
 UPLOADED_INVOICES = "uploaded_invoices"
 UPLOADED_CONTRACTS = "uploaded_contracts"
 QUERIED_POLICIES = "queried_policies"
+DIALOGUE_TOPIC = "dialogue_topic"
 
 
 async def upsert_entity(
@@ -59,6 +60,43 @@ async def _append_id(
     if item_id not in ids:
         ids.append(item_id)
     await upsert_entity(db, session_id, entity_type, {"ids": ids[-50:]})
+
+
+def dialogue_topic_from_trace(trace: dict[str, Any] | None) -> dict[str, str] | None:
+    """从本轮工具痕迹抽出下一轮要继承的话题。公开检索优先于知识库。"""
+    if not isinstance(trace, dict):
+        return None
+    search = trace.get("search")
+    if isinstance(search, dict) and (search.get("question") or search.get("query")):
+        return {
+            "domain": "public",
+            "region": str(search.get("region") or ""),
+            "period": str(search.get("period") or ""),
+            "topic": str(search.get("topic") or ""),
+            "query": str(search.get("question") or search.get("query") or ""),
+        }
+    policy = trace.get("policy")
+    if isinstance(policy, dict) and policy.get("query"):
+        return {
+            "domain": "company",
+            "region": "",
+            "period": "",
+            "topic": "",
+            "query": str(policy.get("query") or ""),
+        }
+    return None
+
+
+async def remember_dialogue_topic(
+    db: AsyncSession, session_id: UUID, value: dict[str, Any]
+) -> None:
+    """覆盖写入上一轮检索话题，供下一轮理解指代。"""
+    if not value:
+        return
+    try:
+        await upsert_entity(db, session_id, DIALOGUE_TOPIC, value)
+    except Exception:
+        logger.exception("remember_dialogue_topic failed session=%s", session_id)
 
 
 async def set_last_intent(db: AsyncSession, session_id: UUID, intent: str) -> None:

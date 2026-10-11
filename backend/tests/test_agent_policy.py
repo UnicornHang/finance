@@ -4,7 +4,7 @@ from app.agent.policy import (
     TOOL_QUERY_POLICY,
     TOOL_SEARCH_OFFICIAL,
     effective_intent,
-    required_tool_for_intent,
+    needs_retrieval,
     status_event_for_tools,
     tools_for_intent,
 )
@@ -19,11 +19,14 @@ def test_policy_and_public_tax_share_both_tools():
     assert TOOL_SEARCH_OFFICIAL == "search_official_data"
 
 
-def test_required_tool_is_search_for_public_tax_and_kb_for_policy():
-    """公开财税必检索，制度必查库；闲聊没有必调工具。"""
-    assert required_tool_for_intent(Intent.PUBLIC_TAX) == TOOL_SEARCH_OFFICIAL
-    assert required_tool_for_intent(Intent.POLICY_QUERY) == TOOL_QUERY_POLICY
-    assert required_tool_for_intent(Intent.CHITCHAT) is None
+def test_retrieval_intents_do_not_lock_a_single_tool():
+    """公开财税和制度都要检索，但不指定唯一工具。"""
+    assert needs_retrieval(Intent.PUBLIC_TAX)
+    assert needs_retrieval(Intent.POLICY_QUERY)
+    assert not needs_retrieval(Intent.CHITCHAT)
+    both = [TOOL_QUERY_POLICY, TOOL_SEARCH_OFFICIAL]
+    assert tools_for_intent(Intent.PUBLIC_TAX) == both
+    assert tools_for_intent(Intent.POLICY_QUERY) == both
 
 
 def test_portal_and_chitchat_have_no_tools():

@@ -9,7 +9,7 @@ TOOL_SEARCH_OFFICIAL = "search_official_data"
 # 知识库注入门槛，与 ChatService 制度管道一致
 POLICY_RAG_MIN_SCORE = 0.35
 
-# 同一轮最多执行工具的次数。必调工具由代码补上，不靠模型自觉。
+# 同一轮最多执行工具的次数。漏调时再请模型做一次语义判断。
 MAX_TOOL_ROUNDS = 2
 
 # 制度与公开财税均可查知识库与官方数据，由模型选用
@@ -44,11 +44,12 @@ def effective_intent(
     return classified
 
 
-# 这些意图没有检索结果就不能作答；模型漏调时由代码用本轮原话补调。
-_REQUIRED_TOOL: dict[Intent, str] = {
-    Intent.PUBLIC_TAX: TOOL_SEARCH_OFFICIAL,
-    Intent.POLICY_QUERY: TOOL_QUERY_POLICY,
-}
+_RETRIEVAL_INTENTS = frozenset({Intent.PUBLIC_TAX, Intent.POLICY_QUERY})
+
+
+def needs_retrieval(intent: Intent) -> bool:
+    """公开财税与企业制度都要先检索再回答，但不指定唯一工具。"""
+    return intent in _RETRIEVAL_INTENTS
 
 
 def tools_for_intent(intent: Intent) -> list[str]:
@@ -57,11 +58,6 @@ def tools_for_intent(intent: Intent) -> list[str]:
     if names is None:
         return []
     return list(names)
-
-
-def required_tool_for_intent(intent: Intent) -> str | None:
-    """回答前必须执行的工具。公开财税必联网检索，企业制度必查知识库。"""
-    return _REQUIRED_TOOL.get(intent)
 
 
 def status_event_for_tools(allowed: list[str]) -> dict | None:

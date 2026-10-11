@@ -12,7 +12,11 @@ from app.agent.graph import get_text_graph, graph_runtime
 from app.agent.llm_adapter import ChatFinanceLLM, history_to_messages
 from app.agent.memory import set_last_intent
 from app.agent.memory.assemble import assemble_context
-from app.agent.memory.entities import remember_policy_title
+from app.agent.memory.entities import (
+    dialogue_topic_from_trace,
+    remember_dialogue_topic,
+    remember_policy_title,
+)
 from app.agent.observe import record
 from app.agent.policy import (
     TOOL_SEARCH_OFFICIAL,
@@ -119,6 +123,9 @@ class AgentOrchestrator:
             scene=scene,
             tenant_id=str(user.tenant_id),
         )
+        topic_value = dialogue_topic_from_trace(trace)
+        if topic_value is not None:
+            await remember_dialogue_topic(db, session_id, topic_value)
         search_trace = persistable_tool_calls(trace)
         search_block = None
         if isinstance(search_trace, dict):
@@ -211,10 +218,11 @@ class AgentOrchestrator:
                     (
                         f"{current_date_instruction()}\n\n"
                         f"{display_msg}\n\n"
-                        "请调用工具，不要跳过直接回答。"
-                        "参数按对话语义填写：指代和省略还原成具体对象；"
-                        "用户换了话题时以本轮为准，不要机械复制上一轮检索词。"
-                        "公司制度用 query_policy；若还涉及公开数据再调用 search_official_data。"
+                        "请根据整段对话和会话记忆里的上一轮话题选择工具，不要跳过直接回答。"
+                        "公开的收入、财政、税收、政策用 search_official_data。"
+                        "query 只写一句问话，保留对话中的年份和地区，不要并列堆砌主题，不要改年份。"
+                        "追问政策时，query 和回答都针对政策，不要再查或再答上一轮的收入。"
+                        "只有用户明确在问本公司制度、差旅报销、内部补贴时才用 query_policy。"
                         "若知识库暂无规定，明确告知，禁止用外网冒充公司制度。"
                     ),
                     "policy_query",
@@ -225,10 +233,13 @@ class AgentOrchestrator:
                     (
                         f"{current_date_instruction()}\n\n"
                         f"{display_msg}\n\n"
-                        "请调用 search_official_data，不要跳过直接回答。"
-                        "参数按对话语义填写：指代和省略还原成可检索的具体对象；"
-                        "用户换了地区或改问全国时以本轮为准，不要机械复制上一轮。"
-                        "需要对照本公司口径时再调用 query_policy。"
+                        "请根据整段对话和会话记忆里的上一轮话题选择工具，不要跳过直接回答。"
+                        "公开的收入、财政、税收、政策用 search_official_data。"
+                        "query 只写一句问话，保留对话中的年份和地区，不要并列堆砌主题，不要改年份，"
+                        "并填写 region/period/topic。"
+                        "追问政策时，query 和回答都针对政策，不要再查或再答上一轮的收入。"
+                        "只有用户明确在问本公司制度时才用 query_policy。"
+                        "用户换了地区或改问全国时以本轮为准。"
                         "不要在未调用工具时直接给出税率、文号或财政数字。"
                     ),
                     "chitchat",
@@ -334,7 +345,8 @@ class AgentOrchestrator:
                             "请用「我联网查了公开网页，并优先采信权威官方来源」自然过渡，"
                             "再按核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
                             "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
-                            "按对话语义理解用户所指的对象。"
+                            "只回答本轮问题，不要把上一轮没查到的收入再答一遍。"
+                            "部门决算、部门预算是单个单位的账，不能当作全区、全省或全市总收入。"
                             "检索资料明显是别的地区时，说明没查到该对象的资料，不要改答成资料里的其他地方。"
                             "本轮数字、文号和链接只能来自本次检索资料，"
                             "禁止把对话历史里的财政数字挪用来回答本轮问题。"
@@ -367,7 +379,8 @@ class AgentOrchestrator:
                         "请用「我联网查了公开网页，并优先采信权威官方来源」自然过渡，再按"
                         "核心摘要 → 目标与变化 / 范围与时间 / 具体任务 / 影响与建议 作答；"
                         "关键文号、条款、网站名和链接加粗；结尾开放追问，并附温馨提示免责声明。"
-                        "按对话语义理解用户所指的对象。"
+                        "只回答本轮问题，不要把上一轮没查到的收入再答一遍。"
+                        "部门决算、部门预算是单个单位的账，不能当作全区、全省或全市总收入。"
                         "检索资料明显是别的地区时，说明没查到该对象的资料，不要改答成资料里的其他地方。"
                         "本轮数字、文号和链接只能来自本次检索资料，"
                         "禁止把对话历史里的财政数字挪用来回答本轮问题。"
@@ -398,13 +411,14 @@ class AgentOrchestrator:
                             "请明确告知暂无可靠检索结果，禁止编造税率、文号、财政数字或公司规定。"
                             "禁止使用「我联网查了公开网页」的口吻，"
                             "禁止把对话历史里的数字、文号复述为本轮结论。"
-                            "不要臆测「数据尚未发布」——除非检索资料里明确写了发布时间或未公布说明；"
+                            "不要臆测「数据尚未发布」或「该年度尚未结束」；"
                             "可给出财政部、中国政府网等可自行查阅的入口。"
                         )
                     user_content = (
                         f"{display_msg}\n\n"
                         "本轮没有检索到可用资料。请直接说明暂无可靠结果，"
-                        "不要声称已经联网，也不要复述上文中的财政数字或文号。"
+                        "不要声称已经联网，不要推断年份尚未结束或数据尚未发布，"
+                        "也不要复述上文中的财政数字或文号。"
                     )
                     scene = "chitchat"
             case (

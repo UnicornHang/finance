@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 from app.agent.context import SessionContext, attach_memory
+from app.agent.memory.entities import dialogue_topic_from_trace
 from app.agent.heuristics import looks_like_followup
 from app.agent.policy import effective_intent
 from app.agent.router import Intent
@@ -21,9 +22,36 @@ def test_memory_block_contains_summary_and_pending():
     assert "invoice_pending" in block
     assert "inv-1" in block
     assert "差旅报销制度" in block
+    assert "dialogue_topic: （无）" in block
     merged = attach_memory("你是 MoFan。", ctx)
     assert merged.startswith("你是 MoFan。")
     assert "[会话摘要]" in merged
+
+
+def test_dialogue_topic_prefers_public_search_over_company_kb():
+    """公开检索话题优先记下，供下一轮理解指代。"""
+    topic = dialogue_topic_from_trace(
+        {
+            "search": {
+                "question": "2025年湖南省全年收入",
+                "query": "2025年湖南省全年收入",
+                "region": "湖南省",
+                "period": "2025年",
+                "topic": "居民收入",
+            },
+            "policy": {"query": "公司福利政策"},
+        }
+    )
+    assert topic is not None
+    assert topic["domain"] == "public"
+    assert topic["region"] == "湖南省"
+    assert topic["query"] == "2025年湖南省全年收入"
+    ctx = SessionContext.empty(uuid4(), uuid4(), uuid4())
+    ctx.entities = {"dialogue_topic": topic}
+    line = ctx.dialogue_topic_line()
+    assert "公开数据" in line
+    assert "湖南省" in line
+    assert "2025年湖南省全年收入" in ctx.memory_block()
 
 
 def test_followup_inherits_policy_not_invoice():
