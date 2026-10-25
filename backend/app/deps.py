@@ -54,6 +54,13 @@ async def get_current_user(
     if user.status != "active":
         raise UnauthorizedError("账号已停用，请联系管理员")
 
+    # JWT 内 tenant_id 必须与库中账号一致，防止篡改 claim 跨租户
+    claim_tenant = payload.get("tenant_id")
+    if not claim_tenant:
+        raise UnauthorizedError("令牌缺少租户信息")
+    if str(user.tenant_id) != str(claim_tenant):
+        raise UnauthorizedError("令牌租户与账号不匹配")
+
     return user
 
 

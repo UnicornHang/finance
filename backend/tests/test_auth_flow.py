@@ -76,6 +76,41 @@ def test_access_token_extra_claims():
     assert payload["dept"] == "财务部"
 
 
+@pytest.mark.asyncio
+async def test_get_current_user_rejects_tenant_mismatch(monkeypatch):
+    """JWT tenant_id 与库中用户不一致时拒绝。"""
+    from app.deps import get_current_user
+
+    uid = uuid4()
+    real_tenant = uuid4()
+    other_tenant = uuid4()
+    user = User(
+        id=uid,
+        tenant_id=real_tenant,
+        account="u1",
+        name="U",
+        role="employee",
+        status="active",
+        password_hash="x",
+    )
+    token = create_access_token(
+        subject=str(uid),
+        tenant_id=str(other_tenant),
+        role="employee",
+    )
+
+    async def _fake_get_by_id(_db, user_id):
+        assert user_id == uid
+        return user
+
+    monkeypatch.setattr(
+        "app.deps.auth_service.get_by_id",
+        _fake_get_by_id,
+    )
+    with pytest.raises(UnauthorizedError, match="租户"):
+        await get_current_user(token=token, db=MagicMock())
+
+
 # ================ 登录锁定 ================
 
 def _lockout_user(**overrides) -> User:

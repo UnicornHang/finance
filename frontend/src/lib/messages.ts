@@ -21,25 +21,53 @@ export function readAttachments(message: Message): MessageAttachment[] {
   )
 }
 
-/** 从 assistant.tool_calls 取出公开检索 sources（兼容仅 search / 双工具嵌套）。 */
+/** 校验单条 source 结构。 */
+function isWebSource(s: unknown): s is WebSource {
+  return (
+    !!s &&
+    typeof s === 'object' &&
+    typeof (s as WebSource).index === 'number' &&
+    typeof (s as WebSource).url === 'string'
+  )
+}
+
+/** 从 assistant.tool_calls 取出制度 + 公开检索 sources（兼容嵌套）。 */
 export function readSearchSources(message: Message): WebSource[] {
   const tc = message.tool_calls
   if (!tc || typeof tc !== 'object') return []
-  const nested = tc.search
-  const block =
-    nested && typeof nested === 'object'
-      ? (nested as Record<string, unknown>)
-      : tc.tool === 'search_official_data'
-        ? tc
-        : null
-  if (!block || !Array.isArray(block.sources)) return []
-  return block.sources.filter(
-    (s): s is WebSource =>
-      !!s &&
-      typeof s === 'object' &&
-      typeof (s as WebSource).index === 'number' &&
-      typeof (s as WebSource).url === 'string',
-  )
+
+  const out: WebSource[] = []
+  const seen = new Set<string>()
+
+  const pushAll = (raw: unknown) => {
+    if (!Array.isArray(raw)) return
+    for (const s of raw) {
+      if (!isWebSource(s)) continue
+      const key = `${s.source_kind || ''}:${s.index}:${s.url}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(s)
+    }
+  }
+
+  // 制度：顶层 query_policy 或嵌套 policy
+  if (tc.tool === 'query_policy') {
+    pushAll(tc.sources)
+  }
+  const nestedPolicy = tc.policy
+  if (nestedPolicy && typeof nestedPolicy === 'object') {
+    pushAll((nestedPolicy as Record<string, unknown>).sources)
+  }
+
+  // 公开检索：顶层或嵌套 search
+  const nestedSearch = tc.search
+  if (nestedSearch && typeof nestedSearch === 'object') {
+    pushAll((nestedSearch as Record<string, unknown>).sources)
+  } else if (tc.tool === 'search_official_data') {
+    pushAll(tc.sources)
+  }
+
+  return out
 }
 
 /** 把附件字段补齐，历史接口和乐观消息用同一结构。 */

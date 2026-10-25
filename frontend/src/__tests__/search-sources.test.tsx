@@ -34,6 +34,30 @@ describe('readSearchSources', () => {
       }),
     ).toEqual([])
   })
+
+  it('reads policy sources from query_policy tool_calls', () => {
+    const sources = readSearchSources({
+      id: '1',
+      role: 'assistant',
+      content: 'x',
+      created_at: '',
+      tool_calls: {
+        tool: 'query_policy',
+        sources: [
+          {
+            index: 1,
+            title: '差旅制度',
+            url: 'kb://doc/abc',
+            source_kind: 'policy',
+            doc_id: 'abc',
+          },
+        ],
+      },
+    })
+    expect(sources).toHaveLength(1)
+    expect(sources[0].source_kind).toBe('policy')
+    expect(sources[0].title).toBe('差旅制度')
+  })
 })
 
 describe('Markdown cite chips', () => {

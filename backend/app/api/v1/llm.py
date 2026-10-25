@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.exceptions import BusinessError, ForbiddenError
 from app.core.security import decrypt_field
+from app.core.rate_limit import enforce_rate_limit
 from app.deps import get_current_user
 from app.models import User
 from app.services.llm_config_service import llm_config_service
@@ -173,7 +174,7 @@ async def delete_config(
 @router.post("/configs/{scene}/test")
 async def test_saved_config(
     scene: str,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(enforce_rate_limit)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """用已保存的配置测试连通性。"""
@@ -193,7 +194,7 @@ async def test_saved_config(
 @router.post("/test")
 async def test_payload(
     payload: LlmConfigTest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(enforce_rate_limit)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """用入参配置测试连通性（保存前试调）。

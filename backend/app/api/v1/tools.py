@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.exceptions import BusinessError, ForbiddenError
 from app.core.security import decrypt_field
+from app.core.rate_limit import enforce_rate_limit
 from app.deps import get_current_user
 from app.models import User
 from app.services.tool_catalog import (
@@ -102,7 +103,7 @@ async def upsert_config(
 @router.post("/configs/{tool_name}/test")
 async def test_saved_config(
     tool_name: str,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(enforce_rate_limit)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """用已保存配置测检索连通性。"""
@@ -117,7 +118,7 @@ async def test_saved_config(
 @router.post("/test")
 async def test_payload(
     payload: ToolConfigTest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(enforce_rate_limit)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """保存前用表单值试调；Key 为空则用已存或 env。"""

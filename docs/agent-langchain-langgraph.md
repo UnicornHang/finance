@@ -32,7 +32,7 @@ TD 原文使用 LangChain `AgentExecutor`。本方案改为：
 2. 只读工具仅两个：`query_policy`、`search_official_data`；`policy_query` / `public_tax` 均可调用二者。
 3. A 的硬门禁保留：公司制度不搜外网冒充规定；公开财税以权威站为主并可叠加知识库；官方门户不调工具、不假装已查验；归档必须用户在侧栏确认。
 4. 图失败或厂商不支持 function calling 时，回退现有 `_stream_text_intent`（A 管道）。
-5. 首轮未调工具时软提醒一轮，**不**强制补调。
+5. 检索意图漏调时：语义 JSON 补调；失败则按意图强制补调（制度→知识库，公开→外网）。闲聊不强制。
 
 ### 2.2 非目标
 
@@ -64,13 +64,17 @@ TD 原文使用 LangChain `AgentExecutor`。本方案改为：
 
 ```
 START
-  → classify          # 复用 classify_intent（A）
+  → classify          # 调用方注入 intent（A）；图内从 gate 起
   → gate              # 写入 allowed_tools；门户/无附件单据可短路
   → agent             # bind_tools(allowed) 后调用模型
   → route
-       ├ 有合法 tool_calls 且 round < 2 → tools → agent
+       ├ 有合法 tool_calls → tools → finalize → END
        └ 否则 → finalize → END
 ```
+
+> **现行实现**（2026-10）：`tools → finalize` 单向，**无** `tools → agent` 多轮回环。
+> 检索意图漏调时：先语义 JSON 补调，失败则按意图 `force_tool`
+> （`policy_query` → `query_policy`；`public_tax` → `search_official_data`）。
 
 ### 4.1 State
 
@@ -86,14 +90,15 @@ B1 **不启用** Graph persist / checkpointer。
 
 | Intent | allowed_tools | 行为 |
 |---|---|---|
-| `policy_query` | `query_policy`, `search_official_data` | 默认偏知识库；可叠加官方；低分/空库不得用外网冒充公司制度 |
-| `public_tax` | `query_policy`, `search_official_data` | 默认偏官方；可叠加知识库对照公司执行 |
+| `policy_query` | `query_policy`, `search_official_data` | 默认可双工具；漏调强制补 `query_policy`；低分/空库不得用外网冒充公司制度 |
+| `public_tax` | `query_policy`, `search_official_data` | 默认可双工具；漏调强制补 `search_official_data` |
 | `official_portal` | `[]` | 只生成官方入口引导 |
-| `chitchat` | `[]` | B1 闲聊不开放工具，避免乱搜 |
+| `chitchat` | `query_policy`, `search_official_data` | 允许调工具但不强制；问候不必检索 |
 | `invoice_upload` | `[]` | 无附件：引导上传；有附件不进本图 |
 | `contract_upload` | `[]` | 同上 |
 
-工具节点二次校验：不在 `allowed_tools` 中的调用丢弃并打日志。首轮无合法 call 时软提醒一轮，不强制补调。
+工具节点二次校验：不在 `allowed_tools` 中的调用丢弃并打日志。
+`policy_query` / `public_tax` 漏调时语义补调 → 失败则按意图强制补调（见上表）。
 
 ---
 
@@ -116,13 +121,14 @@ B1 **不启用** Graph persist / checkpointer。
 
 | 图侧事件 | SSE |
 |---|---|
-| 进入双源检索 | `{type: "status", message: "正在检索企业制度与权威网站…"}` |
+| 进入双源检索 | `{type: "status", message: "正在检索企业制度并联网搜索…"}` |
 | 进入 `query_policy` | `{type: "status", message: "正在检索企业制度…"}` |
+| 检索命中来源 | `{type: "sources", hit_count, sources}`（制度 `source_kind=policy` + 公开网页） |
 | 模型文本流 | `{type: "text", content}` |
 | 异常 | `{type: "error", message}` |
 | 正常结束 | `{type: "done"}` |
 
-工具原始 JSON 不得作为 `text` 推给用户。`sidepanel` 仅由附件管道发出。助手消息可继续写入 `tool_calls` 检索 trace（与现网 `search_official_policy` 结构对齐）。
+工具原始 JSON 不得作为 `text` 推给用户。`sidepanel` 仅由附件管道发出。助手消息写入 `tool_calls` 检索 trace（含 `sources`）。
 
 ---
 

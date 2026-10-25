@@ -19,6 +19,7 @@ from app.agent.memory.entities import (
 )
 from app.agent.observe import record
 from app.agent.policy import (
+    TOOL_QUERY_POLICY,
     TOOL_SEARCH_OFFICIAL,
     needs_retrieval,
     status_event_for_tools,
@@ -130,21 +131,43 @@ class AgentOrchestrator:
         if topic_value is not None:
             await remember_dialogue_topic(db, session_id, topic_value)
         search_trace = persistable_tool_calls(trace)
-        search_block = None
+        # 合并制度 / 公开检索来源，供 SSE 与前端展示（kind 区分）
+        merged_sources: list[Any] = []
         if isinstance(search_trace, dict):
+            policy_block = (
+                search_trace
+                if search_trace.get("tool") == TOOL_QUERY_POLICY
+                else search_trace.get("policy")
+            )
+            if isinstance(policy_block, dict):
+                policy_sources = policy_block.get("sources") or []
+                if isinstance(policy_sources, list):
+                    merged_sources.extend(
+                        s for s in policy_sources if isinstance(s, dict)
+                    )
             search_block = search_trace.get("search") or (
                 search_trace
                 if search_trace.get("tool") == TOOL_SEARCH_OFFICIAL
                 else None
             )
-        if isinstance(search_block, dict):
-            raw_sources = search_block.get("sources") or []
-            if isinstance(raw_sources, list) and raw_sources:
-                yield {
-                    "type": "sources",
-                    "hit_count": int(search_block.get("hit_count") or len(raw_sources)),
-                    "sources": raw_sources,
-                }
+            if isinstance(search_block, dict):
+                raw_sources = search_block.get("sources") or []
+                if isinstance(raw_sources, list):
+                    # 公开检索 index 接在制度条之后，避免与【制度n】冲突感不强但前端列表更清晰
+                    offset = len(merged_sources)
+                    for s in raw_sources:
+                        if not isinstance(s, dict):
+                            continue
+                        item = dict(s)
+                        if offset and isinstance(item.get("index"), int):
+                            item["index"] = int(item["index"]) + offset
+                        merged_sources.append(item)
+        if merged_sources:
+            yield {
+                "type": "sources",
+                "hit_count": len(merged_sources),
+                "sources": merged_sources,
+            }
 
         # 助手消息只由封装落一条；出错或中断后不再发 done
         persist = StreamPersistResult()

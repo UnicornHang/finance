@@ -21,6 +21,47 @@ from app.services.rag_tokenize import to_search_tokens
 
 logger = logging.getLogger(__name__)
 
+# 提交后旧向量清理失败时入队，供重试 / 对账（doc_id → chunk_id 列表）
+_STALE_VECTOR_QUEUE: list[tuple[str, list[str]]] = []
+
+
+def pending_stale_vector_cleanups() -> list[tuple[str, list[str]]]:
+    """只读：当前待清理的幽灵向量队列快照。"""
+    return list(_STALE_VECTOR_QUEUE)
+
+
+async def retry_stale_vector_cleanups() -> int:
+    """重试队列中的旧向量删除；返回成功清理的文档数。"""
+    if not _STALE_VECTOR_QUEUE or not milvus_kb_store.enabled:
+        return 0
+    remaining: list[tuple[str, list[str]]] = []
+    ok = 0
+    for doc_id, chunk_ids in list(_STALE_VECTOR_QUEUE):
+        try:
+            await asyncio.to_thread(
+                milvus_kb_store.delete_by_chunk_ids,
+                [UUID(x) for x in chunk_ids],
+            )
+            ok += 1
+            logger.info(
+                "kb stale vector retry ok id=%s count=%s", doc_id, len(chunk_ids)
+            )
+        except Exception:
+            logger.exception("kb stale vector retry failed id=%s", doc_id)
+            remaining.append((doc_id, chunk_ids))
+    _STALE_VECTOR_QUEUE[:] = remaining
+    return ok
+
+
+async def purge_doc_vectors(doc_id: UUID) -> None:
+    """按文档强制清除 Milvus 中该 doc 的全部向量（运维对账用）。"""
+    if not milvus_kb_store.enabled:
+        return
+    await asyncio.to_thread(milvus_kb_store.delete_by_doc_id, doc_id)
+    # 队列里同 doc 的条目一并去掉
+    did = str(doc_id)
+    _STALE_VECTOR_QUEUE[:] = [x for x in _STALE_VECTOR_QUEUE if x[0] != did]
+
 
 async def index_kb_document(
     db: AsyncSession,
@@ -285,9 +326,11 @@ async def _cleanup_old_vectors(
     doc_id: UUID,
     old_ids: list[UUID],
 ) -> None:
-    """提交 PG 后精确清旧向量；失败不破坏已经可用的新向量。"""
+    """提交 PG 后精确清旧向量；失败不破坏已经可用的新向量，并入死信队列。"""
     if not milvus_kb_store.enabled or not old_ids:
         return
+    # 先冲刷历史失败项，避免幽灵向量堆积
+    await retry_stale_vector_cleanups()
     for attempt in range(2):
         try:
             await asyncio.to_thread(
@@ -301,8 +344,17 @@ async def _cleanup_old_vectors(
                 attempt + 1,
                 doc_id,
             )
+        except Exception:
+            logger.exception(
+                "kb stale vector cleanup attempt=%s failed id=%s",
+                attempt + 1,
+                doc_id,
+            )
+    entry = (str(doc_id), [str(x) for x in old_ids])
+    _STALE_VECTOR_QUEUE.append(entry)
     logger.error(
-        "kb stale vectors remain id=%s count=%s",
+        "kb stale vectors remain id=%s count=%s queued=%s",
         doc_id,
         len(old_ids),
+        len(_STALE_VECTOR_QUEUE),
     )

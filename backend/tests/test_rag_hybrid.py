@@ -1,5 +1,9 @@
 """混合检索融合与 Rerank 解析。"""
 
+import math
+
+import pytest
+
 from app.services.rag_hybrid import (
     channel_source,
     display_score,
@@ -54,11 +58,20 @@ def test_normalize_rerank_passthrough_unit_interval():
     assert normalize_rerank_scores([0.2, 0.8]) == [0.2, 0.8]
 
 
-def test_normalize_rerank_minmax_logits():
-    """超出 [0,1] 时按本批 min-max。"""
+def test_normalize_rerank_logits_use_sigmoid():
+    """超出 [0,1] 时用 sigmoid，禁止 min-max 抬高低相关批次。"""
     out = normalize_rerank_scores([-2.0, 2.0])
-    assert out[0] == 0.0
-    assert out[1] == 1.0
+    assert out[0] == pytest.approx(1.0 / (1.0 + math.exp(2.0)))
+    assert out[1] == pytest.approx(1.0 / (1.0 + math.exp(-2.0)))
+    # 一批全弱负分：sigmoid 后仍低于常见 0.35 门槛
+    weak = normalize_rerank_scores([-3.0, -2.5, -2.0])
+    assert all(s < 0.35 for s in weak)
+
+
+def test_normalize_rerank_equal_logits_not_all_ones():
+    """同分 logits 不得全部变成 1.0（旧 min-max 退化行为）。"""
+    out = normalize_rerank_scores([-1.0, -1.0])
+    assert all(s < 0.5 for s in out)
 
 
 def test_parse_dashscope_rerank_envelope():

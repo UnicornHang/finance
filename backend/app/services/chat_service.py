@@ -32,6 +32,7 @@ from app.services.invoice_document import (
     _prepare_document,
 )
 from app.services.llm_config_service import llm_config_service
+from app.services.llm_service import user_facing_llm_error
 from app.services.stream_persist import StreamPersistResult, stream_llm_and_persist
 from app.services.rag_service import rag_service
 from app.services.official_policy_service import (
@@ -516,10 +517,12 @@ class ChatService:
             ):
                 started = True
                 yield event
-        except Exception:
+        except Exception as exc:
             logger.exception("LangGraph 文本编排失败")
             if started:
-                yield {"type": "error", "message": "编排中断，请重试。"}
+                # 状态事件已发出后，模型 403/超时不能再回退 A 管道，把真实原因告诉用户
+                message = user_facing_llm_error(exc) or "编排中断，请重试。"
+                yield {"type": "error", "message": message}
                 yield {"type": "done"}
                 return
             async for event in self._stream_text_intent(

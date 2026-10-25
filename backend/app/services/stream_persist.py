@@ -12,7 +12,7 @@ from uuid import UUID
 import anyio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.llm_service import llm_service
+from app.services.llm_service import llm_service, user_facing_llm_error
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,11 @@ async def stream_llm_and_persist(
         logger.exception("LLM stream failed")
         if content.strip():
             await _run_shielded(_save_interrupted)
-        yield {"type": "error", "message": f"{error_prefix}：{exc}"}
+        detail = user_facing_llm_error(exc)
+        yield {
+            "type": "error",
+            "message": detail or f"{error_prefix}：{exc}",
+        }
         return
 
     if content.strip():

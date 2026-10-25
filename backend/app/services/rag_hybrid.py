@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 from uuid import UUID
 
@@ -74,15 +75,17 @@ def display_score(
 
 
 def normalize_rerank_scores(scores: list[float]) -> list[float]:
-    """已在 [0,1] 则原样；否则对本批做 min-max，避免 logits 打穿门槛。"""
+    """门槛用的相关分：已在 [0,1] 原样；logits 用 sigmoid，禁止 batch min-max。
+
+    min-max 会把一批弱相关抬到接近 1，与绝对门槛 POLICY_RAG_MIN_SCORE 冲突。
+    """
     if not scores:
         return []
     lo, hi = min(scores), max(scores)
     if lo >= 0.0 and hi <= 1.0:
         return [float(s) for s in scores]
-    if hi - lo < 1e-9:
-        return [1.0 for _ in scores]
-    return [(float(s) - lo) / (hi - lo) for s in scores]
+    # logits → 概率尺度，保留绝对强弱，弱批次不会被拉满
+    return [1.0 / (1.0 + math.exp(-float(s))) for s in scores]
 
 
 async def load_chunks(

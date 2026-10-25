@@ -177,19 +177,38 @@ async def _semantic_retrieval_call(
     return _call_from_resolution(payload, allowed)
 
 
-def _fallback_retrieval_call(allowed: set[str], question: str) -> dict | None:
-    """语义结果无法解析时，用本轮原话做公开检索。"""
-    if TOOL_SEARCH_OFFICIAL in allowed:
+def _fallback_retrieval_call(
+    intent: Intent, allowed: set[str], question: str
+) -> dict | None:
+    """语义结果无法解析时，按意图选默认工具，用本轮原话检索。
+
+    制度意图优先知识库，公开财税优先外网；目标工具不在白名单时才退到另一个。
+    """
+    prefer_policy = intent == Intent.POLICY_QUERY
+    prefer_official = intent == Intent.PUBLIC_TAX
+
+    ordered: list[str] = []
+    if prefer_policy:
+        ordered = [TOOL_QUERY_POLICY, TOOL_SEARCH_OFFICIAL]
+    elif prefer_official:
+        ordered = [TOOL_SEARCH_OFFICIAL, TOOL_QUERY_POLICY]
+    else:
+        # 其它需检索意图：保持公开优先的历史兜底顺序
+        ordered = [TOOL_SEARCH_OFFICIAL, TOOL_QUERY_POLICY]
+
+    for name in ordered:
+        if name not in allowed:
+            continue
+        if name == TOOL_QUERY_POLICY:
+            return {
+                "id": str(uuid4()),
+                "name": TOOL_QUERY_POLICY,
+                "args": {"question": question},
+            }
         return {
             "id": str(uuid4()),
             "name": TOOL_SEARCH_OFFICIAL,
             "args": {"query": question},
-        }
-    if TOOL_QUERY_POLICY in allowed:
-        return {
-            "id": str(uuid4()),
-            "name": TOOL_QUERY_POLICY,
-            "args": {"question": question},
         }
     return None
 
@@ -212,7 +231,7 @@ async def _ensure_retrieval_call(
     if resolved is not None:
         record("semantic_tool_args", tool=str(resolved.get("name")), intent=intent.value)
         return [resolved, *legal]
-    fallback = _fallback_retrieval_call(allow, question)
+    fallback = _fallback_retrieval_call(intent, allow, question)
     if fallback is None:
         return legal
     record("force_tool", tool=str(fallback.get("name")), intent=intent.value)

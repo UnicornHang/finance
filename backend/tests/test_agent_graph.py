@@ -75,7 +75,7 @@ def _search_tool(mock: AsyncMock, result: str) -> StructuredTool:
 
 @pytest.mark.asyncio
 async def test_graph_forces_policy_tool_when_model_skips():
-    """未调工具且语义结果无法解析时，用本轮原话做公开检索。"""
+    """制度意图漏调且语义无法解析时，强制知识库，不串外网。"""
     query_mock = AsyncMock()
     search_mock = AsyncMock()
     bound = [
@@ -99,11 +99,39 @@ async def test_graph_forces_policy_tool_when_model_skips():
     finally:
         graph_runtime.reset(token)
     assert llm.calls == 2
-    assert "总局公告" in (final.get("tool_result") or "")
-    search_mock.assert_awaited_once_with(
-        question, region=None, period=None, topic=None
-    )
+    assert "《差旅》住宿 500" in (final.get("tool_result") or "")
+    query_mock.assert_awaited_once_with(question)
+    search_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_graph_chitchat_does_not_force_tool():
+    """闲聊允许调工具，但不强制补调。"""
+    query_mock = AsyncMock()
+    search_mock = AsyncMock()
+    bound = [
+        _query_tool(query_mock, "库内"),
+        _search_tool(search_mock, "外网"),
+    ]
+    llm = _FakeLLM(AIMessage(content="你好呀", tool_calls=[]))
+    token = graph_runtime.set({"llm": llm, "bound_tools": bound})
+    try:
+        final = await get_text_graph().ainvoke(
+            {
+                "intent": Intent.CHITCHAT.value,
+                "display_msg": "你好",
+                "messages": [HumanMessage(content="你好")],
+                "tool_round": 0,
+                "pending_calls": [],
+                "tool_result": "",
+            }
+        )
+    finally:
+        graph_runtime.reset(token)
+    assert llm.calls == 1
+    assert (final.get("tool_result") or "") == ""
     query_mock.assert_not_awaited()
+    search_mock.assert_not_awaited()
 
 
 @pytest.mark.asyncio

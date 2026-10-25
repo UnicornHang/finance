@@ -361,15 +361,19 @@ export interface DashboardOverview {
   }
 }
 
-/** 公开检索 / SSE sources 事件中的单条引用。 */
+/** 公开检索 / 制度检索 / SSE sources 事件中的单条引用。 */
 export interface WebSource {
   index: number
   title: string
   url: string
   snippet?: string
-  source_kind?: 'official' | 'supplemental' | 'web' | string
+  source_kind?: 'official' | 'supplemental' | 'web' | 'policy' | string
   favicon_host?: string
   published_at?: string
+  /** 企业制度命中时的知识库文档 / 切片标识 */
+  doc_id?: string
+  chunk_id?: string
+  section_path?: string
 }
 
 /** 异步导出资源类型 */

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.database import get_db
 from app.core.exceptions import BusinessError, ForbiddenError
+from app.core.rate_limit import enforce_rate_limit
 from app.deps import get_current_user
 from app.models import User
 from app.services.audit_service import write_audit_log
@@ -47,7 +48,7 @@ def _parse_s3_url(s3_url: str) -> tuple[str, str]:
 @router.post("/upload")
 async def upload_file(
     file: Annotated[UploadFile, File(description="任意文件（图片/PDF/Word 等）")],
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(enforce_rate_limit)],
     db: Annotated[AsyncSession, Depends(get_db)],
     session_id: Annotated[str, Form(description="当前会话 ID，附件先挂会话，发送后再挂消息")],
 ) -> dict[str, Any]:

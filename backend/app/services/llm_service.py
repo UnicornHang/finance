@@ -562,4 +562,35 @@ class LLMService:
         return f"（演示模式）收到：「{user_msg}」。请管理员配置 LLM 启用完整能力。"
 
 
+def user_facing_llm_error(exc: BaseException) -> str | None:
+    """把供应商错误收成一句用户能看懂的话。非模型错误返回 None。"""
+    chunks = [type(exc).__name__, str(exc)]
+    cause = exc.__cause__
+    if cause is not None:
+        chunks.append(type(cause).__name__)
+        chunks.append(str(cause))
+    blob = "\n".join(chunks)
+    lower = blob.lower()
+    if (
+        "free quota exhausted" in lower
+        or "freetieronly" in lower
+        or "allocationquota.freetieronly" in lower
+    ):
+        return "模型免费额度已用尽，请在控制台充值或关闭「仅使用免费额度」后重试。"
+    if "invalid api key" in lower or "incorrect api key" in lower:
+        return "模型 API Key 无效或已过期，请在 LLM 设置中更新。"
+    if "ratelimit" in lower or "rate limit" in lower:
+        return "模型请求过于频繁，请稍后再试。"
+    if "timeout" in lower or "timed out" in lower:
+        return "模型响应超时，请重试。"
+    if "apierror" in lower or "openaiexception" in lower or "permissiondenied" in lower:
+        brief = str(exc).strip().split("\n", 1)[0]
+        if " - " in brief:
+            brief = brief.split(" - ", 1)[-1].strip()
+        if len(brief) > 160:
+            brief = brief[:160] + "…"
+        return f"模型调用失败：{brief}"
+    return None
+
+
 llm_service = LLMService()

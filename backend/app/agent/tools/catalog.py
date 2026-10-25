@@ -21,15 +21,46 @@ from app.services.web_search_service import WebSearchRuntime
 logger = logging.getLogger(__name__)
 
 
+def policy_sources_from_hits(hits: list[dict]) -> list[dict[str, Any]]:
+    """将制度命中序列化为可落库 / SSE 的 sources（index 从 1，kind=policy）。"""
+    out: list[dict[str, Any]] = []
+    for i, h in enumerate(hits[:5], start=1):
+        title = str(h.get("title") or "未命名文档")
+        doc_id = str(h.get("doc_id") or "")
+        chunk_id = str(h.get("chunk_id") or "")
+        section = str(h.get("section_path") or "").strip()
+        body = (h.get("content") or "").strip()
+        snippet = body[:300] if body else section
+        # 前端可识别的伪 URL；真正打开走知识库管理，不走外链
+        url = f"kb://doc/{doc_id}" if doc_id else f"kb://chunk/{chunk_id or i}"
+        out.append(
+            {
+                "index": i,
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+                "source_kind": "policy",
+                "doc_id": doc_id,
+                "chunk_id": chunk_id,
+                "section_path": section,
+                "favicon_host": "",
+            }
+        )
+    return out
+
+
 def policy_retrieve_trace(question: str, hits: list[dict]) -> dict[str, Any]:
     """制度检索落库痕迹，供数据概览「本月检索」统计。"""
     best = float(hits[0]["score"]) if hits else 0.0
+    usable = bool(hits) and best >= POLICY_RAG_MIN_SCORE
+    sources = policy_sources_from_hits(hits) if usable else []
     return {
         "tool": TOOL_QUERY_POLICY,
         "query": (question or "")[:200],
         "hit_count": len(hits),
         "best_score": round(best, 3),
-        "usable": bool(hits) and best >= POLICY_RAG_MIN_SCORE,
+        "usable": usable,
+        "sources": sources,
     }
 
 
@@ -72,10 +103,18 @@ def build_text_tools(
             doc_type = h.get("doc_type") or ""
             score = h.get("score")
             score_s = f"{float(score):.3f}" if score is not None else "-"
+            doc_id = h.get("doc_id") or ""
+            chunk_id = h.get("chunk_id") or ""
+            section = (h.get("section_path") or "").strip()
+            meta = f"类型:{doc_type}，相关度:{score_s}"
+            if section:
+                meta += f"，章节:{section}"
+            if doc_id:
+                meta += f"，doc_id:{doc_id}"
+            if chunk_id:
+                meta += f"，chunk_id:{chunk_id}"
             body = (h.get("content") or "").strip()
-            parts.append(
-                f"【制度{i}】 《{title}》（类型:{doc_type}，相关度:{score_s}）\n{body}"
-            )
+            parts.append(f"【制度{i}】 《{title}》（{meta}）\n{body}")
         return "\n\n".join(parts)
 
     async def search_official_data(

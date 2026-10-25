@@ -149,6 +149,10 @@ class Settings(BaseSettings):
     rate_limit_per_tenant: str = "10000/hour"
     rate_limit_per_ip: str = "1000/minute"
 
+    # ---- /metrics 保护：生产默认开启；开发可用 METRICS_PROTECTED=false 关闭 ----
+    metrics_protected: bool = True
+    metrics_token: str = ""
+
     # ---- CORS ----
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 

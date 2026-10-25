@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.exceptions import BusinessError
+from app.core.rate_limit import enforce_rate_limit
 from app.deps import get_current_user
 from app.models import User
 from app.services.chat_service import chat_service
@@ -41,7 +42,7 @@ class ChatStreamRequest(BaseModel):
 @router.post("/stream")
 async def chat_stream(
     body: ChatStreamRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(enforce_rate_limit),
     db: AsyncSession = Depends(get_db),
 ):
     """SSE 流式 Agent 回复（JSON 请求体）。

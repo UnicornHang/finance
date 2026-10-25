@@ -39,7 +39,7 @@ B2 **不是**上多 Agent，也不是把侧栏确认改成 LangGraph `interrupt`
 |---|---|
 | `archive_invoice` / `archive_contract` 作为模型可调 Tool | 模型会在用户未点确认时落库 |
 | 用 LangGraph Checkpointer 跨进程打断、等侧栏按钮 resume | 确认已是独立 HTTP；把 SSE 线程和侧栏绑死会双写状态 |
-| 闲聊默认开放两个只读工具 | 等于取消分类器，制度/外网会串 |
+| 闲聊**强制**补调检索 | 闲聊允许调用两工具但不强制；强制补调仅 `policy_query` / `public_tax`（见改进方案） |
 | 历史消息全量向量 RAG（PRD 第四层） | 工作量大、与会话摘要重叠；放到 B3 |
 | Supervisor 多 Agent、发票/合同各一个运行中的 Agent 进程 | 过重；子图节点即可 |
 | 替换视觉识别 / 合同抽正文实现 | 只搬编排，不改识别质量 |

@@ -102,15 +102,35 @@ export function useChat() {
                 updateMessage(sessionId, assistantMsg.id, { content: event.message })
               }
               break
-            case 'sources':
-              updateMessage(sessionId, assistantMsg.id, {
-                tool_calls: {
+            case 'sources': {
+              // 制度 + 公开可能混在同一条 SSE；按 kind 拆开写入，便于历史回放
+              const policySources = event.sources.filter(
+                (s) => s.source_kind === 'policy' || s.url?.startsWith('kb://'),
+              )
+              const webSources = event.sources.filter(
+                (s) => !(s.source_kind === 'policy' || s.url?.startsWith('kb://')),
+              )
+              const tool_calls: Record<string, unknown> = {
+                hit_count: event.hit_count,
+              }
+              if (policySources.length && webSources.length) {
+                tool_calls.tool = 'query_policy'
+                tool_calls.sources = policySources
+                tool_calls.search = {
                   tool: 'search_official_data',
-                  hit_count: event.hit_count,
-                  sources: event.sources,
-                },
-              })
+                  hit_count: webSources.length,
+                  sources: webSources,
+                }
+              } else if (policySources.length) {
+                tool_calls.tool = 'query_policy'
+                tool_calls.sources = policySources
+              } else {
+                tool_calls.tool = 'search_official_data'
+                tool_calls.sources = webSources.length ? webSources : event.sources
+              }
+              updateMessage(sessionId, assistantMsg.id, { tool_calls })
               break
+            }
             case 'sidepanel':
               openSidePanel(event.payload.type, event.payload.data)
               break
